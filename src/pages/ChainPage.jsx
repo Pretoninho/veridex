@@ -6,6 +6,10 @@ function fmtTs(ts) {
   return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'2-digit' }).toUpperCase()
 }
 
+function daysUntil(ts) {
+  return Math.max(1, Math.round((ts - Date.now()) / 86400000))
+}
+
 function calcDIRate(ivPct, days) {
   if (!ivPct || !days) return null
   const T = days / 365
@@ -18,8 +22,6 @@ function calcMinRate(ivPct, days) {
   return rate ? rate * 0.8 : null
 }
 
-const DURATIONS = [1, 3, 7, 14, 30]
-
 export default function ChainPage() {
   const [asset, setAsset] = useState('BTC')
   const [instruments, setInstruments] = useState([])
@@ -31,7 +33,7 @@ export default function ChainPage() {
   const [error, setError] = useState(null)
   const [stats, setStats] = useState(null)
   const [activeTab, setActiveTab] = useState('chain')
-  const [diDays, setDiDays] = useState(7)
+  const [diExpiry, setDiExpiry] = useState(null)
   const [atmIV, setAtmIV] = useState(null)
 
   const loadExpiries = async (a) => {
@@ -42,7 +44,11 @@ export default function ChainPage() {
       setInstruments(inst)
       const exps = getAllExpiries(inst)
       setExpiries(exps)
-      if (exps.length) { setSelExpiry(exps[0]); await loadChain(a, exps[0], inst, sp) }
+      if (exps.length) {
+        setSelExpiry(exps[0])
+        setDiExpiry(exps[0])
+        await loadChain(a, exps[0], inst, sp)
+      }
     } catch(e) { setError(e.message) }
     setLoading(false)
   }
@@ -93,7 +99,9 @@ export default function ChainPage() {
   const fmt  = n => n != null ? n.toFixed(2) : '—'
   const fmtK = n => n != null ? (n >= 1000 ? (n/1000).toFixed(1)+'K' : n.toFixed(0)) : '—'
 
-  // Taux DI suggérés par strike
+  // Données DI pour l'échéance sélectionnée
+  const diDays = diExpiry ? daysUntil(diExpiry) : null
+
   const diRows = rows.map(r => {
     const iv = r.call?.mark_iv ?? r.put?.mark_iv ?? null
     const marketRate = calcDIRate(iv, diDays)
@@ -104,8 +112,9 @@ export default function ChainPage() {
     return { strike: r.strike, iv, marketRate, minRate, distPct, isBuyLow, isSellHigh }
   })
 
-  const marketRateATM = calcDIRate(atmIV, diDays)
-  const minRateATM    = calcMinRate(atmIV, diDays)
+  const atmRow     = diRows.find(r => stats?.atmStrike === r.strike)
+  const marketRateATM = atmRow?.marketRate
+  const minRateATM    = atmRow?.minRate
 
   return (
     <div className="page-wrap">
@@ -228,25 +237,26 @@ export default function ChainPage() {
       {activeTab === 'di' && (
         <div className="fade-in">
 
-          {/* Sélecteur durée */}
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16, flexWrap:'wrap' }}>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>Durée :</span>
-            {DURATIONS.map(d => (
-              <button key={d} onClick={() => setDiDays(d)} style={{
-                padding:'5px 12px', borderRadius:20,
-                border: diDays===d ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: diDays===d ? 'rgba(0,212,255,.1)' : 'transparent',
-                color: diDays===d ? 'var(--accent)' : 'var(--text-muted)',
-                fontFamily:'var(--mono)', fontSize:11, cursor:'pointer', transition:'all .15s'
-              }}>{d}j</button>
-            ))}
+          {/* Sélecteur échéance */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:8, letterSpacing:'1px', textTransform:'uppercase' }}>Échéance</div>
+            <div className="expiry-chips">
+              {expiries.slice(0,12).map(ts => (
+                <button key={ts}
+                  className={`expiry-chip${diExpiry===ts?' active':''}`}
+                  onClick={() => setDiExpiry(ts)}>
+                  {fmtTs(ts)}
+                  <span style={{ display:'block', fontSize:9, opacity:.7 }}>{daysUntil(ts)}j</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Carte ATM résumé */}
-          {atmIV && (
+          {diExpiry && atmIV && (
             <div className="card" style={{ marginBottom:12, borderColor:'rgba(255,215,0,.3)', background:'rgba(255,215,0,.03)' }}>
               <div className="card-header" style={{ color:'var(--atm)' }}>
-                ⚡ Taux de référence ATM — {diDays} jours
+                ⚡ Référence ATM — {fmtTs(diExpiry)} · {diDays}j
               </div>
               <div style={{ padding:'14px 16px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
                 <div>
@@ -256,25 +266,21 @@ export default function ChainPage() {
                 <div>
                   <div className="stat-label">Taux marché</div>
                   <div className="stat-value green">{marketRateATM?.toFixed(2)}% /an</div>
-                  <div className="stat-sub">prime théorique</div>
+                  <div className="stat-sub">{(marketRateATM/100*(diDays/365)*100)?.toFixed(3)}% / {diDays}j</div>
                 </div>
                 <div>
-                  <div className="stat-label">Minimum Nexo</div>
+                  <div className="stat-label">Min. Nexo</div>
                   <div className="stat-value orange">{minRateATM?.toFixed(2)}% /an</div>
-                  <div className="stat-sub">seuil 80%</div>
+                  <div className="stat-sub">{(minRateATM/100*(diDays/365)*100)?.toFixed(3)}% / {diDays}j</div>
                 </div>
-              </div>
-              <div style={{ padding:'0 16px 12px', fontSize:11, color:'var(--text-muted)', lineHeight:1.7 }}>
-                Sur {diDays} jours : prime marché ≈ <strong style={{ color:'var(--call)' }}>{(marketRateATM/100*(diDays/365)*100)?.toFixed(3)}%</strong> · 
-                Minimum à exiger : <strong style={{ color:'var(--accent2)' }}>{(minRateATM/100*(diDays/365)*100)?.toFixed(3)}%</strong>
               </div>
             </div>
           )}
 
           {/* Légende */}
           <div style={{ display:'flex', gap:16, marginBottom:10, fontSize:10, color:'var(--text-muted)', flexWrap:'wrap' }}>
-            <span><span style={{ color:'var(--call)' }}>■</span> Buy Low (sous spot)</span>
-            <span><span style={{ color:'var(--accent2)' }}>■</span> Sell High (au-dessus)</span>
+            <span><span style={{ color:'var(--call)' }}>■</span> Buy Low</span>
+            <span><span style={{ color:'var(--accent2)' }}>■</span> Sell High</span>
             <span><span style={{ color:'var(--atm)' }}>■</span> ATM</span>
           </div>
 
@@ -295,26 +301,26 @@ export default function ChainPage() {
                   <div key={r.strike} style={{
                     padding:'11px 14px',
                     borderBottom:'1px solid rgba(30,58,95,.4)',
-                    borderLeft: `2px solid ${isATM ? 'var(--atm)' : r.isBuyLow ? 'var(--call)' : r.isSellHigh ? 'var(--accent2)' : 'transparent'}`,
+                    borderLeft:`2px solid ${isATM?'var(--atm)':r.isBuyLow?'var(--call)':r.isSellHigh?'var(--accent2)':'transparent'}`,
                     background: isATM ? 'rgba(255,215,0,.03)' : undefined,
                   }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14, color: isATM?'var(--atm)':'var(--text)' }}>
+                        <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14, color:isATM?'var(--atm)':'var(--text)' }}>
                           ${r.strike.toLocaleString()}
                         </span>
                         {type && (
                           <span style={{
                             fontSize:9, fontWeight:700, padding:'1px 7px', borderRadius:20,
                             background: isATM?'rgba(255,215,0,.15)':r.isBuyLow?'rgba(0,229,160,.12)':'rgba(255,107,53,.12)',
-                            color: accent, border:`1px solid ${accent}40`
+                            color:accent, border:`1px solid ${accent}40`
                           }}>{type}</span>
                         )}
                       </div>
                       <span style={{ fontSize:10, color:'var(--text-muted)' }}>
                         IV: <span style={{ color:'var(--accent)' }}>{r.iv?.toFixed(1) ?? '—'}%</span>
                         {r.distPct != null && (
-                          <span style={{ marginLeft:8, color: Math.abs(r.distPct)<3?'var(--put)':Math.abs(r.distPct)<8?'var(--accent2)':'var(--text-muted)' }}>
+                          <span style={{ marginLeft:8, color:Math.abs(r.distPct)<3?'var(--put)':Math.abs(r.distPct)<8?'var(--accent2)':'var(--text-muted)' }}>
                             {r.distPct>0?'+':''}{r.distPct.toFixed(1)}%
                           </span>
                         )}
@@ -334,7 +340,7 @@ export default function ChainPage() {
                           <div style={{ color:'var(--text-muted)', fontSize:9 }}>{periodMin?.toFixed(3)}% / {diDays}j</div>
                         </div>
                         <div>
-                          <div style={{ color:'var(--text-muted)', fontSize:9, marginBottom:2 }}>QUALITÉ</div>
+                          <div style={{ color:'var(--text-muted)', fontSize:9, marginBottom:2 }}>QUALITÉ IV</div>
                           <div style={{ fontSize:10 }}>
                             {r.iv > 80 ? <span style={{ color:'var(--call)', fontWeight:700 }}>🔥 Élevée</span>
                             : r.iv > 50 ? <span style={{ color:'var(--atm)', fontWeight:700 }}>✓ Bonne</span>
