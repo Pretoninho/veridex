@@ -3,7 +3,6 @@ import ChainPage from './pages/ChainPage.jsx'
 import TrackerPage from './pages/TrackerPage.jsx'
 import DualPage from './pages/DualPage.jsx'
 import TermPage from './pages/TermPage.jsx'
-import PerfPage from './pages/PerfPage.jsx'
 import './App.css'
 
 const TABS = [
@@ -29,13 +28,6 @@ const TABS = [
       <line x1="2" y1="20" x2="22" y2="20"/>
     </svg>
   )},
-  { id: 'perf', label: 'Perf', icon: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <line x1="18" y1="20" x2="18" y2="10"/>
-      <line x1="12" y1="20" x2="12" y2="4"/>
-      <line x1="6" y1="20" x2="6" y2="14"/>
-    </svg>
-  )},
 ]
 
 export default function App() {
@@ -48,7 +40,6 @@ export default function App() {
         {active === 'tracker' && <TrackerPage />}
         {active === 'dual'    && <DualPage />}
         {active === 'term'    && <TermPage />}
-        {active === 'perf'    && <PerfPage />}
       </div>
       <nav className="bottom-nav">
         {TABS.map(t => (
