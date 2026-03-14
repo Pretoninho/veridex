@@ -84,25 +84,13 @@ export async function getDVOL(asset) {
 export async function getFundingRate(asset) {
   const instrument = `${asset}-PERPETUAL`
   try {
-    // Ticker perpetuel — contient funding_8h et interest_value
-    const ticker = await apiFetch(`${API}/get_ticker?instrument_name=${instrument}`)
-    const t = ticker.result
-    // funding_8h = taux sur 8h, on annualise × 3 × 365
-    const funding8h = t.funding_8h ?? null
-    const currentAnn = funding8h != null ? funding8h * 100 * 3 * 365 : null
-    // stats historique via get_book_summary
-    return {
-      current: currentAnn,
-      predicted: t.interest_value ?? null,
-      avgAnn7d: currentAnn, // approximation
-      bullish: currentAnn > 0
-    }
-  } catch(e) {
-    console.warn('Funding error:', e.message)
-    return null
-  }
+    const d = await apiFetch(`${API}/get_book_summary_by_instrument?instrument_name=${instrument}`)
+    const r = d.result?.[0]
+    if (!r) return null
+    const currentAnn = r.current_funding != null ? r.current_funding * 100 * 3 * 365 : null
+    return { current: currentAnn, avgAnn7d: currentAnn, bullish: currentAnn != null ? currentAnn > 0 : null }
+  } catch(e) { return null }
 }
-
 // Open Interest total options
 export async function getOpenInterest(asset) {
   const d = await apiFetch(`${API}/get_book_summary_by_currency?currency=${asset}&kind=option`)
