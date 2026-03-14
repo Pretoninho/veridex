@@ -9,6 +9,10 @@ function defaultExpiry() {
   return d.toISOString().slice(0, 10)
 }
 
+function emptyForm() {
+  return { asset: 'BTC', type: 'sell-high', strike: '', expiry: defaultExpiry(), rate: '', days: '7', amount: '' }
+}
+
 export default function DualPage() {
   const [offers, setOffers] = useState(() => {
     try { return JSON.parse(localStorage.getItem('di_offers') || '[]') } catch { return [] }
@@ -17,7 +21,8 @@ export default function DualPage() {
   const [spots, setSpots] = useState({})
   const [dcaBTC, setDcaBTC] = useState(() => localStorage.getItem('di_dca_BTC') || '')
   const [dcaETH, setDcaETH] = useState(() => localStorage.getItem('di_dca_ETH') || '')
-  const [form, setForm] = useState({ asset: 'BTC', type: 'sell-high', strike: '', expiry: defaultExpiry(), rate: '', days: '7', amount: '' })
+  const [form, setForm] = useState(emptyForm())
+  const [editId, setEditId] = useState(null) // ID du contrat en cours d'édition
   const [loading, setLoading] = useState(false)
   const [spotLoading, setSpotLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -27,13 +32,11 @@ export default function DualPage() {
   useEffect(() => { localStorage.setItem('di_dca_BTC', dcaBTC) }, [dcaBTC])
   useEffect(() => { localStorage.setItem('di_dca_ETH', dcaETH) }, [dcaETH])
 
-  // DCA selon l'actif
   const getDCA = (asset) => {
     if (asset === 'BTC') return parseFloat(dcaBTC) || null
     if (asset === 'ETH') return parseFloat(dcaETH) || null
     return null
   }
-
   const dcaForForm = getDCA(form.asset)
 
   useEffect(() => {
@@ -74,20 +77,49 @@ export default function DualPage() {
     setSpotLoading(false)
   }
 
-  const addOffer = () => {
+  const startEdit = (offer) => {
+    setEditId(offer.id)
+    setForm({
+      asset:  offer.asset,
+      type:   offer.type,
+      strike: String(offer.strike),
+      expiry: offer.expiry,
+      rate:   String(offer.rate),
+      days:   String(offer.days),
+      amount: String(offer.amount),
+    })
+    setActiveTab('add')
+    setError(null)
+    window.scrollTo(0, 0)
+  }
+
+  const cancelEdit = () => {
+    setEditId(null)
+    setForm(emptyForm())
+    setError(null)
+  }
+
+  const saveOffer = () => {
     const { asset, type, strike, expiry, rate, days, amount } = form
     if (!strike || !expiry || !rate || !days) { setError('Remplissez tous les champs obligatoires'); return }
     const iv = ivCache[asset]?.iv ?? null
-    const offer = {
-      id: Date.now(), asset, type,
+    const updated = {
+      id: editId || Date.now(),
+      asset, type,
       strike: parseFloat(strike), expiry,
       rate: parseFloat(rate), days: parseInt(days),
       amount: parseFloat(amount) || 0,
       deribitIV: iv,
     }
-    setOffers(prev => [offer, ...prev])
-    setForm(f => ({ ...f, strike: '', rate: '', amount: '' }))
+    if (editId) {
+      setOffers(prev => prev.map(o => o.id === editId ? updated : o))
+      setEditId(null)
+    } else {
+      setOffers(prev => [updated, ...prev])
+    }
+    setForm(emptyForm())
     setError(null)
+    setActiveTab('positions')
   }
 
   const deleteOffer = id => setOffers(prev => prev.filter(o => o.id !== id))
@@ -109,14 +141,12 @@ export default function DualPage() {
         <div style={{ padding:'12px 16px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
           <div className="di-field">
             <label className="di-label" style={{ color:'#f7931a' }}>₿ BTC</label>
-            <input className="di-input" type="number" placeholder="Ex: 73200"
-              value={dcaBTC} onChange={e => setDcaBTC(e.target.value)} />
+            <input className="di-input" type="number" placeholder="Ex: 73200" value={dcaBTC} onChange={e => setDcaBTC(e.target.value)} />
             {dcaBTC && <span style={{ fontSize:10, color:'var(--atm)', marginTop:3 }}>{fmtUSD(parseFloat(dcaBTC))}</span>}
           </div>
           <div className="di-field">
             <label className="di-label" style={{ color:'#627eea' }}>Ξ ETH</label>
-            <input className="di-input" type="number" placeholder="Ex: 2800"
-              value={dcaETH} onChange={e => setDcaETH(e.target.value)} />
+            <input className="di-input" type="number" placeholder="Ex: 2800" value={dcaETH} onChange={e => setDcaETH(e.target.value)} />
             {dcaETH && <span style={{ fontSize:10, color:'var(--atm)', marginTop:3 }}>{fmtUSD(parseFloat(dcaETH))}</span>}
           </div>
         </div>
@@ -124,9 +154,12 @@ export default function DualPage() {
 
       {/* Tabs */}
       <div style={{ display:'flex', marginBottom:14, borderBottom:'1px solid var(--border)' }}>
-        {[['add','+ Ajouter'],['positions','Contrats'],['analysis','P&L']].map(([id, label]) => (
+        {[['add', editId ? '✏️ Modifier' : '+ Ajouter'],['positions','Contrats'],['analysis','P&L']].map(([id, label]) => (
           <button key={id}
-            style={{ flex:1, padding:'8px 4px', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--sans)', fontSize:12, fontWeight:700, color: activeTab===id?'var(--accent)':'var(--text-muted)', borderBottom: activeTab===id?'2px solid var(--accent)':'2px solid transparent', transition:'all .2s' }}
+            style={{ flex:1, padding:'8px 4px', background:'none', border:'none', cursor:'pointer', fontFamily:'var(--sans)', fontSize:12, fontWeight:700,
+              color: activeTab===id ? (editId && id==='add' ? 'var(--atm)' : 'var(--accent)') : 'var(--text-muted)',
+              borderBottom: activeTab===id ? `2px solid ${editId && id==='add' ? 'var(--atm)' : 'var(--accent)'}` : '2px solid transparent',
+              transition:'all .2s' }}
             onClick={() => { setActiveTab(id); if (id==='analysis') refreshSpots() }}>
             {label}
           </button>
@@ -135,10 +168,17 @@ export default function DualPage() {
 
       {error && <div className="error-box">⚠ {error}</div>}
 
-      {/* ── ADD ── */}
+      {/* ── ADD / EDIT ── */}
       {activeTab === 'add' && (
         <div className="card fade-in">
-          <div className="card-header">Nouveau contrat</div>
+          <div className="card-header">
+            <span>{editId ? 'Modifier le contrat' : 'Nouveau contrat'}</span>
+            {editId && (
+              <button className="icon-btn" style={{ fontSize:10, padding:'3px 10px', color:'var(--text-muted)', borderColor:'var(--border)' }} onClick={cancelEdit}>
+                Annuler
+              </button>
+            )}
+          </div>
           <div style={{ padding:'16px', display:'flex', flexDirection:'column', gap:12 }}>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               <div className="di-field">
@@ -181,7 +221,6 @@ export default function DualPage() {
               <input className="di-input" type="date" value={form.expiry} onChange={e => setForm(f => ({ ...f, expiry: e.target.value }))} />
             </div>
 
-            {/* IV preview + scoring */}
             {ivCache[form.asset] && (
               <div style={{ background:'var(--surface2)', borderRadius:8, padding:'10px 12px', fontSize:11, color:'var(--text-dim)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span>IV ATM {form.asset}: <strong style={{ color:'var(--accent)' }}>{ivCache[form.asset].iv.toFixed(2)}%</strong></span>
@@ -193,7 +232,6 @@ export default function DualPage() {
               </div>
             )}
 
-            {/* Vérification DCA */}
             {dcaForForm && form.strike && form.type === 'sell-high' && (
               <div style={{ background: parseFloat(form.strike) > dcaForForm ? 'rgba(0,229,160,.08)' : 'rgba(255,77,109,.08)', borderRadius:8, padding:'8px 12px', fontSize:11 }}>
                 {parseFloat(form.strike) > dcaForForm
@@ -209,7 +247,9 @@ export default function DualPage() {
               </div>
             )}
 
-            <button className="di-add-btn" onClick={addOffer}>Ajouter le contrat</button>
+            <button className="di-add-btn" style={{ background: editId ? 'linear-gradient(135deg, var(--atm), #ff9500)' : undefined }} onClick={saveOffer}>
+              {editId ? 'Enregistrer les modifications' : 'Ajouter le contrat'}
+            </button>
           </div>
         </div>
       )}
@@ -228,7 +268,6 @@ export default function DualPage() {
                 <div className="stat-card"><div className="stat-label">IV moy.</div><div className="stat-value">{(() => { const ivs=offers.map(o=>o.deribitIV).filter(v=>v!=null); return ivs.length?(ivs.reduce((a,b)=>a+b,0)/ivs.length).toFixed(2)+'%':'—' })()}</div></div>
               </div>
 
-              {/* Grouper par actif */}
               {['BTC','ETH','USDC'].map(asset => {
                 const assetOffers = offers.filter(o => o.asset === asset)
                 if (!assetOffers.length) return null
@@ -243,12 +282,12 @@ export default function DualPage() {
                       <span style={{ fontSize:10, color:'var(--text-muted)' }}>· {assetOffers.length} contrat{assetOffers.length>1?'s':''}</span>
                     </div>
                     {assetOffers.map(o => {
-                      const prime = calcPremium(o.rate, o.days, o.amount)
+                      const prime  = calcPremium(o.rate, o.days, o.amount)
                       const mktPct = marketPremiumPct(o.deribitIV, o.days)
-                      const ratio = diScore(o.rate, o.deribitIV, o.days)
+                      const ratio  = diScore(o.rate, o.deribitIV, o.days)
                       const { label, cls } = scoreLabel(ratio)
                       const nexoPct = o.rate/100*(o.days/365)*100
-                      const margin = mktPct ? Math.max(0,(mktPct-nexoPct)/mktPct*100) : null
+                      const margin  = mktPct ? Math.max(0,(mktPct-nexoPct)/mktPct*100) : null
                       return (
                         <div key={o.id} className="card fade-in" style={{ marginBottom:8 }}>
                           <div className="card-header">
@@ -256,8 +295,14 @@ export default function DualPage() {
                               <span className={`di-badge ${o.type}`}>{o.type==='buy-low'?'Buy Low':'Sell High'}</span>
                               <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14 }}>{fmtStrike(o.strike)}</span>
                             </div>
-                            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                               <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {countdown(o.expiry)}</span>
+                              {/* Bouton éditer */}
+                              <button onClick={() => startEdit(o)} style={{ background:'none', border:'1px solid var(--border)', color:'var(--text-muted)', cursor:'pointer', fontSize:11, padding:'2px 8px', borderRadius:6, transition:'all .2s' }}
+                                onMouseEnter={e => e.target.style.color='var(--atm)'}
+                                onMouseLeave={e => e.target.style.color='var(--text-muted)'}>
+                                ✏️
+                              </button>
                               <button className="di-del" onClick={() => deleteOffer(o.id)}>✕</button>
                             </div>
                           </div>
@@ -305,112 +350,108 @@ export default function DualPage() {
           {offers.length === 0 ? (
             <div className="empty-state"><div className="empty-icon">◇</div><h3>Aucun contrat</h3></div>
           ) : (
-            <>
-              {/* Grouper par actif dans P&L aussi */}
-              {['BTC','ETH','USDC'].map(asset => {
-                const assetOffers = offers.filter(o => o.asset === asset)
-                if (!assetOffers.length) return null
-                const dca = getDCA(asset)
-                return (
-                  <div key={asset}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, marginTop:4 }}>
-                      <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:13, color:asset==='BTC'?'#f7931a':asset==='ETH'?'#627eea':'var(--accent)' }}>
-                        {asset==='BTC'?'₿':asset==='ETH'?'Ξ':'$'} {asset}
-                      </span>
-                      {dca && <span style={{ fontSize:10, color:'var(--atm)' }}>DCA {fmtUSD(dca)}</span>}
-                    </div>
-                    {assetOffers.map(o => {
-                      const spot    = spots[o.asset] ?? null
-                      const pnlData = calcPnL(o, spot, dca)
-                      const cd      = countdown(o.expiry)
-                      const distPct = pnlData?.distPct
-                      const isNear  = distPct != null && Math.abs(distPct) < 3
-
-                      return (
-                        <div key={o.id} className="card fade-in" style={{ marginBottom:8, ...(isNear?{borderColor:'rgba(255,77,109,.4)'}:{}) }}>
-                          <div className="card-header">
-                            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                              <span className={`di-badge ${o.type}`}>{o.type==='buy-low'?'Buy Low':'Sell High'}</span>
-                              <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14 }}>{fmtStrike(o.strike)}</span>
-                              {isNear && <span style={{ fontSize:9, background:'rgba(255,77,109,.2)', color:'var(--put)', padding:'1px 5px', borderRadius:3, fontWeight:800 }}>! PROCHE</span>}
-                            </div>
-                            <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {cd}</span>
-                          </div>
-
-                          <div style={{ padding:'12px 16px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                            <div>
-                              <div className="stat-label">Distance strike</div>
-                              {distPct != null
-                                ? <div style={{ fontWeight:700, color:Math.abs(distPct)<2?'var(--put)':Math.abs(distPct)<8?'var(--accent2)':'var(--call)' }}>
-                                    {distPct > 0 ? '▲' : '▼'} {Math.abs(distPct).toFixed(2)}%
-                                  </div>
-                                : <div style={{ color:'var(--text-muted)' }}>—</div>}
-                            </div>
-                            <div>
-                              <div className="stat-label">Statut</div>
-                              {pnlData?.willBeExercised != null
-                                ? <div style={{ fontSize:12, fontWeight:700, color:pnlData.willBeExercised?'var(--put)':'var(--call)' }}>
-                                    {pnlData.willBeExercised ? '⚡ Sera exercé' : '✓ Non exercé'}
-                                  </div>
-                                : <div style={{ color:'var(--text-muted)' }}>—</div>}
-                            </div>
-                            <div><div className="stat-label">Prime</div><div style={{ color:'var(--call)' }}>{pnlData?'+'+fmtUSD(pnlData.prime):'—'}</div></div>
-                            <div>
-                              <div className="stat-label">Réf. DCA</div>
-                              <div style={{ color:'var(--atm)', fontSize:12 }}>{dca ? fmtUSD(dca) : <span style={{ color:'var(--text-muted)' }}>Non défini</span>}</div>
-                            </div>
-                          </div>
-
-                          {/* PnL si exercé vs DCA */}
-                          {pnlData?.pnlIfExercised != null && (
-                            <div style={{ margin:'0 16px 12px', background:'var(--surface2)', borderRadius:8, padding:'12px' }}>
-                              <div className="stat-label" style={{ marginBottom:8 }}>
-                                PnL si exercé {dca ? `vs DCA ${fmtUSD(dca)}` : 'vs spot'}
-                              </div>
-                              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-                                <span style={{ color:pnlData.pnlIfExercised>=0?'var(--call)':'var(--put)', fontFamily:'var(--sans)', fontWeight:800, fontSize:16 }}>
-                                  {pnlData.pnlIfExercised>=0?'+':''}{fmtUSD(pnlData.pnlIfExercised)}
-                                </span>
-                                <span style={{ color:pnlData.pnlPctIfExercised>=0?'var(--call)':'var(--put)', fontSize:12 }}>
-                                  {pnlData.pnlPctIfExercised>=0?'+':''}{pnlData.pnlPctIfExercised?.toFixed(2)}%
-                                </span>
-                              </div>
-                              {o.type === 'sell-high' && dca && (
-                                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                  ({fmtUSD(o.strike)} − {fmtUSD(dca)}) × {pnlData.btcAmount?.toFixed(6)} {o.asset} + prime
-                                </div>
-                              )}
-                              {o.type === 'buy-low' && dca && (
-                                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                  ({fmtUSD(dca)} − {fmtUSD(o.strike)}) × {pnlData.btcIfExercised?.toFixed(6)} {o.asset} + prime
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Manque à gagner */}
-                          {pnlData?.scenarios?.length > 0 && (
-                            <div style={{ margin:'0 16px 12px' }}>
-                              <div className="stat-label" style={{ marginBottom:8 }}>
-                                {o.type === 'sell-high' ? 'Manque à gagner si BTC monte après expiry' : 'Manque à gagner si prix chute après expiry'}
-                              </div>
-                              <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
-                                {pnlData.scenarios.map(s => (
-                                  <div key={s.label} style={{ display:'flex', justifyContent:'space-between', fontSize:11, padding:'6px 10px', background:'rgba(255,255,255,.03)', borderRadius:6 }}>
-                                    <span style={{ color:'var(--text-muted)' }}>{s.label} ({fmtUSD(s.price)})</span>
-                                    <span style={{ color:'var(--accent2)', fontWeight:700 }}>−{fmtUSD(s.manque)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+            ['BTC','ETH','USDC'].map(asset => {
+              const assetOffers = offers.filter(o => o.asset === asset)
+              if (!assetOffers.length) return null
+              const dca = getDCA(asset)
+              return (
+                <div key={asset}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, marginTop:4 }}>
+                    <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:13, color:asset==='BTC'?'#f7931a':asset==='ETH'?'#627eea':'var(--accent)' }}>
+                      {asset==='BTC'?'₿':asset==='ETH'?'Ξ':'$'} {asset}
+                    </span>
+                    {dca && <span style={{ fontSize:10, color:'var(--atm)' }}>DCA {fmtUSD(dca)}</span>}
                   </div>
-                )
-              })}
-            </>
+                  {assetOffers.map(o => {
+                    const spot    = spots[o.asset] ?? null
+                    const pnlData = calcPnL(o, spot, dca)
+                    const cd      = countdown(o.expiry)
+                    const distPct = pnlData?.distPct
+                    const isNear  = distPct != null && Math.abs(distPct) < 3
+                    return (
+                      <div key={o.id} className="card fade-in" style={{ marginBottom:8, ...(isNear?{borderColor:'rgba(255,77,109,.4)'}:{}) }}>
+                        <div className="card-header">
+                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <span className={`di-badge ${o.type}`}>{o.type==='buy-low'?'Buy Low':'Sell High'}</span>
+                            <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14 }}>{fmtStrike(o.strike)}</span>
+                            {isNear && <span style={{ fontSize:9, background:'rgba(255,77,109,.2)', color:'var(--put)', padding:'1px 5px', borderRadius:3, fontWeight:800 }}>! PROCHE</span>}
+                          </div>
+                          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                            <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {cd}</span>
+                            <button onClick={() => startEdit(o)} style={{ background:'none', border:'1px solid var(--border)', color:'var(--text-muted)', cursor:'pointer', fontSize:11, padding:'2px 8px', borderRadius:6 }}>✏️</button>
+                          </div>
+                        </div>
+                        <div style={{ padding:'12px 16px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                          <div>
+                            <div className="stat-label">Distance strike</div>
+                            {distPct != null
+                              ? <div style={{ fontWeight:700, color:Math.abs(distPct)<2?'var(--put)':Math.abs(distPct)<8?'var(--accent2)':'var(--call)' }}>
+                                  {distPct > 0 ? '▲' : '▼'} {Math.abs(distPct).toFixed(2)}%
+                                </div>
+                              : <div style={{ color:'var(--text-muted)' }}>—</div>}
+                          </div>
+                          <div>
+                            <div className="stat-label">Statut</div>
+                            {pnlData?.willBeExercised != null
+                              ? <div style={{ fontSize:12, fontWeight:700, color:pnlData.willBeExercised?'var(--put)':'var(--call)' }}>
+                                  {pnlData.willBeExercised ? '⚡ Sera exercé' : '✓ Non exercé'}
+                                </div>
+                              : <div style={{ color:'var(--text-muted)' }}>—</div>}
+                          </div>
+                          <div><div className="stat-label">Prime</div><div style={{ color:'var(--call)' }}>{pnlData?'+'+fmtUSD(pnlData.prime):'—'}</div></div>
+                          <div>
+                            <div className="stat-label">Réf. DCA</div>
+                            <div style={{ color:'var(--atm)', fontSize:12 }}>{dca ? fmtUSD(dca) : <span style={{ color:'var(--text-muted)' }}>Non défini</span>}</div>
+                          </div>
+                        </div>
+
+                        {pnlData?.pnlIfExercised != null && (
+                          <div style={{ margin:'0 16px 12px', background:'var(--surface2)', borderRadius:8, padding:'12px' }}>
+                            <div className="stat-label" style={{ marginBottom:8 }}>
+                              PnL si exercé {dca ? `vs DCA ${fmtUSD(dca)}` : 'vs spot'}
+                            </div>
+                            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                              <span style={{ color:pnlData.pnlIfExercised>=0?'var(--call)':'var(--put)', fontFamily:'var(--sans)', fontWeight:800, fontSize:16 }}>
+                                {pnlData.pnlIfExercised>=0?'+':''}{fmtUSD(pnlData.pnlIfExercised)}
+                              </span>
+                              <span style={{ color:pnlData.pnlPctIfExercised>=0?'var(--call)':'var(--put)', fontSize:12 }}>
+                                {pnlData.pnlPctIfExercised>=0?'+':''}{pnlData.pnlPctIfExercised?.toFixed(2)}%
+                              </span>
+                            </div>
+                            {o.type === 'sell-high' && dca && (
+                              <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                                ({fmtUSD(o.strike)} − {fmtUSD(dca)}) × {pnlData.btcAmount?.toFixed(6)} {o.asset} + prime
+                              </div>
+                            )}
+                            {o.type === 'buy-low' && dca && (
+                              <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                                ({fmtUSD(dca)} − {fmtUSD(o.strike)}) × {pnlData.btcIfExercised?.toFixed(6)} {o.asset} + prime
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {pnlData?.scenarios?.length > 0 && (
+                          <div style={{ margin:'0 16px 12px' }}>
+                            <div className="stat-label" style={{ marginBottom:8 }}>
+                              {o.type === 'sell-high' ? 'Manque à gagner si prix monte après expiry' : 'Manque à gagner si prix chute après expiry'}
+                            </div>
+                            <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                              {pnlData.scenarios.map(s => (
+                                <div key={s.label} style={{ display:'flex', justifyContent:'space-between', fontSize:11, padding:'6px 10px', background:'rgba(255,255,255,.03)', borderRadius:6 }}>
+                                  <span style={{ color:'var(--text-muted)' }}>{s.label} ({fmtUSD(s.price)})</span>
+                                  <span style={{ color:'var(--accent2)', fontWeight:700 }}>−{fmtUSD(s.manque)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })
           )}
         </div>
       )}
