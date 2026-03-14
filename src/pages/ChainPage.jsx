@@ -10,14 +10,25 @@ function daysUntil(ts) {
   return Math.max(0.01, (ts - Date.now()) / 86400000)
 }
 
-// Taux DI via mark_price Deribit — prix réel de l'option
-function calcDIRateFromMarkPrice(markPrice, spot, strike, days) {
-  if (!markPrice || !spot || !strike || !days) return null
-  // mark_price est en BTC (fraction du sous-jacent)
-  const premiumUSD = markPrice * spot
-  const premiumPct = premiumUSD / strike * 100
-  return premiumPct * (365 / days)
+// Score un taux Nexo vs la volatilité du moment
+// Plus l'IV est élevée, plus le taux est justifié
+function scoreNexoRate(nexoRate, iv, days) {
+  if (!nexoRate || !iv || !days) return null
+  // Taux "juste" estimé via BS ATM simplifié
+  const T = days / 365
+  const fairRate = iv / 100 * Math.sqrt(T) * 0.4 * 100 * (365 / days)
+  const ratio = nexoRate / fairRate
+  return { ratio, fairRate }
 }
+
+function getRating(ratio) {
+  if (ratio == null) return null
+  if (ratio >= 0.85) return { label: '🔥 Excellent', color: 'var(--call)', detail: 'Taux très proche du marché' }
+  if (ratio >= 0.65) return { label: '✓ Bon', color: 'var(--atm)', detail: 'Taux correct' }
+  if (ratio >= 0.45) return { label: '~ Passable', color: 'var(--accent2)', detail: 'Nexo garde une marge importante' }
+  return { label: '↓ Faible', color: 'var(--put)', detail: 'Nexo sous-paie significativement' }
+}
+
 export default function ChainPage() {
   const [asset, setAsset] = useState('BTC')
   const [instruments, setInstruments] = useState([])
@@ -34,6 +45,8 @@ export default function ChainPage() {
   const [diView, setDiView] = useState('strike')
   const [multiData, setMultiData] = useState([])
   const [multiLoading, setMultiLoading] = useState(false)
+  // Taux Nexo saisis par strike
+  const [nexoRates, setNexoRates] = useState({}) // { strike: rate }
 
   const loadExpiries = async (a) => {
     setLoading(true); setError(null)
@@ -84,6 +97,7 @@ export default function ChainPage() {
       atmStrike: atmRow?.strike,
       contracts: allRows.length,
     })
+    setNexoRates({}) // reset taux à chaque changement d'échéance
   }
 
   const loadMulti = async () => {
@@ -105,10 +119,9 @@ export default function ChainPage() {
         const iv = cb?.mark_iv != null && pb?.mark_iv != null
           ? (cb.mark_iv + pb.mark_iv) / 2
           : cb?.mark_iv ?? pb?.mark_iv ?? null
-        // BS ATM put pour Buy Low
-        const marketRate = calcDIRateFromMarkPrice(null, spot, atmS, days)
-        const minRate    = marketRate ? marketRate * 0.8 : null
-        results.push({ ts, days, atmStrike: atmS, iv, marketRate, minRate })
+        const T = days / 365
+        const fairRate = iv ? iv / 100 * Math.sqrt(T) * 0.4 * 100 * (365 / days) : null
+        results.push({ ts, days, atmStrike: atmS, iv, fairRate })
       } catch(_) {}
     }
     setMultiData(results)
@@ -129,44 +142,18 @@ export default function ChainPage() {
 
   const diDays = diExpiry ? daysUntil(diExpiry) : null
 
-  // Calcul DI par strike avec BS exact
   const diRows = rows.map(r => {
-    const ivCall = r.call?.mark_iv ?? null
-    const ivPut  = r.put?.mark_iv  ?? null
+    const iv      = r.put?.mark_iv ?? r.call?.mark_iv ?? null
     const distPct = spot ? (r.strike - spot) / spot * 100 : null
     const isBuyLow   = distPct != null && distPct < 0
     const isSellHigh = distPct != null && distPct > 0
-
-    // Buy Low → put OTM → on utilise l'IV du put
-    const ivBL = ivPut ?? ivCall
-    const marketRateBL = isBuyLow && diDays
-      ? calcDIRateFromMarkPrice(r.put?.mark_price, spot, r.strike, diDays, r.put?.mark_iv, "put")
-      : null
-
-    // Sell High → call OTM → on utilise l'IV du call
-    const ivSH = ivCall ?? ivPut
-    const marketRateSH = isSellHigh && diDays
-      ? calcDIRateFromMarkPrice(r.call?.mark_price, spot, r.strike, diDays, r.call?.mark_iv, "call")
-      : null
-
-    // ATM : on calcule les deux
-    const ivAtm = (ivCall != null && ivPut != null) ? (ivCall + ivPut) / 2 : (ivCall ?? ivPut)
-    const marketRateATM = !isBuyLow && !isSellHigh && diDays
-      ? calcDIRateFromMarkPrice(r.put?.mark_price ?? r.call?.mark_price, spot, r.strike, diDays, r.put?.mark_iv ?? r.call?.mark_iv, "put")
-      : null
-
-    const marketRate = marketRateBL ?? marketRateSH ?? marketRateATM
-    const minRate    = marketRate ? marketRate * 0.8 : null
-    const iv         = isBuyLow ? ivBL : isSellHigh ? ivSH : ivAtm
-
-    return { strike: r.strike, iv, marketRate, minRate, distPct, isBuyLow, isSellHigh }
+    const nexoRate = nexoRates[r.strike] ?? null
+    const scored   = nexoRate && iv && diDays ? scoreNexoRate(nexoRate, iv, diDays) : null
+    const rating   = scored ? getRating(scored.ratio) : null
+    return { strike: r.strike, iv, distPct, isBuyLow, isSellHigh, nexoRate, scored, rating }
   })
 
-  const atmRowDI      = diRows.find(r => stats?.atmStrike === r.strike)
-  const marketRateATM = atmRowDI?.marketRate
-  const minRateATM    = atmRowDI?.minRate
-
-  // Smile
+  const atmRowDI = diRows.find(r => stats?.atmStrike === r.strike)
   const smileRows = rows
     .map(r => ({ strike: r.strike, iv: r.call?.mark_iv ?? r.put?.mark_iv ?? null, distPct: spot ? (r.strike-spot)/spot*100 : null }))
     .filter(r => r.iv != null)
@@ -197,7 +184,7 @@ export default function ChainPage() {
       </div>
 
       <div style={{ display:'flex', marginBottom:14, borderBottom:'1px solid var(--border)' }}>
-        {[['chain','Chaîne'],['di','Taux DI']].map(([id,label]) => (
+        {[['chain','Chaîne'],['di','Évaluer DI']].map(([id,label]) => (
           <button key={id} onClick={() => setActiveTab(id)} style={{
             padding:'8px 18px', background:'none', border:'none', cursor:'pointer',
             fontFamily:'var(--sans)', fontSize:12, fontWeight:700,
@@ -229,18 +216,12 @@ export default function ChainPage() {
               </button>
             ))}
           </div>
-
           {loading && rows.length === 0 && (
             <div className="card"><div style={{ padding:20, textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>Chargement…</div></div>
           )}
-
-          {/* Smile */}
           {smileRows.length > 0 && (
             <div className="card" style={{ marginBottom:12 }}>
-              <div className="card-header">
-                <span>Smile de volatilité</span>
-                <span style={{ fontSize:10, color:'var(--text-muted)' }}>IV par strike</span>
-              </div>
+              <div className="card-header"><span>Smile de volatilité</span><span style={{ fontSize:10, color:'var(--text-muted)' }}>IV par strike</span></div>
               <div style={{ padding:'12px 14px' }}>
                 {smileRows.map(r => {
                   const isATM  = stats?.atmStrike === r.strike
@@ -261,15 +242,9 @@ export default function ChainPage() {
                     </div>
                   )
                 })}
-                <div style={{ marginTop:8, fontSize:10, color:'var(--text-muted)', display:'flex', gap:16 }}>
-                  <span><span style={{ color:'var(--call)' }}>■</span> Put OTM (Buy Low)</span>
-                  <span><span style={{ color:'var(--atm)' }}>■</span> ATM</span>
-                  <span><span style={{ color:'var(--accent2)' }}>■</span> Call OTM (Sell High)</span>
-                </div>
               </div>
             </div>
           )}
-
           {rows.length > 0 && (
             <div className="card">
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', padding:'6px 14px', borderBottom:'1px solid var(--border)', fontSize:10 }}>
@@ -303,204 +278,183 @@ export default function ChainPage() {
               })}
             </div>
           )}
-
           {!loading && rows.length === 0 && !error && (
             <div className="empty-state"><div className="empty-icon">◇</div><h3>Prêt à charger</h3><p>Appuyez sur actualiser</p></div>
           )}
         </>
       )}
 
-      {/* ── TAUX DI ── */}
+      {/* ── ÉVALUER DI ── */}
       {activeTab === 'di' && (
         <div className="fade-in">
-          <div style={{ display:'flex', marginBottom:14, gap:8 }}>
-            {[['strike','Par strike'],['multi','Toutes échéances']].map(([id,label]) => (
-              <button key={id} onClick={() => { setDiView(id); if(id==='multi' && !multiData.length) loadMulti() }} style={{
-                flex:1, padding:'7px', borderRadius:8, cursor:'pointer',
-                border: diView===id ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: diView===id ? 'rgba(0,212,255,.08)' : 'transparent',
-                color: diView===id ? 'var(--accent)' : 'var(--text-muted)',
-                fontFamily:'var(--sans)', fontSize:11, fontWeight:700, transition:'all .2s'
-              }}>{label}</button>
-            ))}
+
+          {/* Sélecteur échéance */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:8, letterSpacing:'1px', textTransform:'uppercase' }}>Échéance Nexo</div>
+            <div className="expiry-chips">
+              {expiries.map(ts => (
+                <button key={ts} className={`expiry-chip${diExpiry===ts?' active':''}`} onClick={() => { setDiExpiry(ts); setNexoRates({}) }}>
+                  {fmtTs(ts)}
+                  <span style={{ display:'block', fontSize:9, opacity:.7 }}>{daysUntil(ts).toFixed(1)}j</span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* VUE PAR STRIKE */}
-          {diView === 'strike' && (
-            <>
-              <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:8, letterSpacing:'1px', textTransform:'uppercase' }}>Échéance</div>
-                <div className="expiry-chips">
-                  {expiries.map(ts => (
-                    <button key={ts} className={`expiry-chip${diExpiry===ts?' active':''}`} onClick={() => setDiExpiry(ts)}>
-                      {fmtTs(ts)}
-                      <span style={{ display:'block', fontSize:9, opacity:.7 }}>{daysUntil(ts).toFixed(1)}j</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Note méthodologie */}
-              <div style={{ background:'rgba(0,212,255,.05)', border:'1px solid rgba(0,212,255,.15)', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:10, color:'var(--text-muted)', lineHeight:1.7 }}>
-                💡 <strong style={{ color:'var(--accent)' }}>Black-Scholes exact</strong> — IV du strike exact · Put pour Buy Low · Call pour Sell High · Taux Nexo min. = 80% du marché BS
-              </div>
-
-              {diExpiry && atmIV && (
-                <div className="card" style={{ marginBottom:12, borderColor:'rgba(255,215,0,.3)', background:'rgba(255,215,0,.03)' }}>
-                  <div className="card-header" style={{ color:'var(--atm)' }}>⚡ ATM — {fmtTs(diExpiry)} · {daysUntil(diExpiry).toFixed(1)}j</div>
-                  <div style={{ padding:'14px 16px', display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
-                    <div><div className="stat-label">IV ATM</div><div className="stat-value gold">{atmIV.toFixed(1)}%</div></div>
-                    <div>
-                      <div className="stat-label">Taux marché BS</div>
-                      <div className="stat-value green">{marketRateATM?.toFixed(2) ?? '—'}%</div>
-                      <div className="stat-sub">/an</div>
-                    </div>
-                    <div>
-                      <div className="stat-label">Min. Nexo</div>
-                      <div className="stat-value orange">{minRateATM?.toFixed(2) ?? '—'}%</div>
-                      <div className="stat-sub">/an</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display:'flex', gap:16, marginBottom:10, fontSize:10, color:'var(--text-muted)', flexWrap:'wrap' }}>
-                <span><span style={{ color:'var(--call)' }}>■</span> Buy Low (put OTM)</span>
-                <span><span style={{ color:'var(--accent2)' }}>■</span> Sell High (call OTM)</span>
-                <span><span style={{ color:'var(--atm)' }}>■</span> ATM</span>
-              </div>
-
-              {diRows.length > 0 && (
-                <div className="card">
-                  {diRows.map(r => {
-                    const isATM  = stats?.atmStrike === r.strike
-                    const accent = isATM ? 'var(--atm)' : r.isBuyLow ? 'var(--call)' : r.isSellHigh ? 'var(--accent2)' : 'var(--text-muted)'
-                    const type   = isATM ? 'ATM' : r.isBuyLow ? 'Buy Low' : r.isSellHigh ? 'Sell High' : ''
-                    const periodMkt = r.marketRate && diDays ? (r.marketRate/100*(diDays/365)*100) : null
-                    const periodMin = r.minRate    && diDays ? (r.minRate/100*(diDays/365)*100)    : null
-                    return (
-                      <div key={r.strike} style={{
-                        padding:'11px 14px', borderBottom:'1px solid rgba(30,58,95,.4)',
-                        borderLeft:`2px solid ${isATM?'var(--atm)':r.isBuyLow?'var(--call)':r.isSellHigh?'var(--accent2)':'transparent'}`,
-                        background: isATM ? 'rgba(255,215,0,.03)' : undefined,
-                      }}>
-                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                            <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14, color:isATM?'var(--atm)':'var(--text)' }}>
-                              ${r.strike.toLocaleString()}
-                            </span>
-                            {type && (
-                              <span style={{ fontSize:9, fontWeight:700, padding:'1px 7px', borderRadius:20,
-                                background:isATM?'rgba(255,215,0,.15)':r.isBuyLow?'rgba(0,229,160,.12)':'rgba(255,107,53,.12)',
-                                color:accent, border:`1px solid ${accent}40` }}>{type}</span>
-                            )}
-                          </div>
-                          <span style={{ fontSize:10, color:'var(--text-muted)' }}>
-                            IV: <span style={{ color:'var(--accent)' }}>{r.iv?.toFixed(1) ?? '—'}%</span>
-                            {r.distPct != null && (
-                              <span style={{ marginLeft:8, color:Math.abs(r.distPct)<3?'var(--put)':Math.abs(r.distPct)<8?'var(--accent2)':'var(--text-muted)' }}>
-                                {r.distPct>0?'+':''}{r.distPct.toFixed(1)}%
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                        {r.marketRate ? (
-                          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, fontSize:11 }}>
-                            <div>
-                              <div style={{ color:'var(--text-muted)', fontSize:9, marginBottom:2 }}>MARCHÉ BS</div>
-                              <div style={{ color:'var(--call)', fontWeight:700 }}>{r.marketRate.toFixed(2)}% /an</div>
-                              <div style={{ color:'var(--text-muted)', fontSize:9 }}>{periodMkt?.toFixed(3)}% / {diDays?.toFixed(1)}j</div>
-                            </div>
-                            <div>
-                              <div style={{ color:'var(--text-muted)', fontSize:9, marginBottom:2 }}>MIN. NEXO</div>
-                              <div style={{ color:'var(--accent2)', fontWeight:700 }}>{r.minRate?.toFixed(2)}% /an</div>
-                              <div style={{ color:'var(--text-muted)', fontSize:9 }}>{periodMin?.toFixed(3)}% / {diDays?.toFixed(1)}j</div>
-                            </div>
-                            <div>
-                              <div style={{ color:'var(--text-muted)', fontSize:9, marginBottom:2 }}>QUALITÉ IV</div>
-                              <div style={{ fontSize:10 }}>
-                                {r.iv > 80 ? <span style={{ color:'var(--call)', fontWeight:700 }}>🔥 Élevée</span>
-                                : r.iv > 50 ? <span style={{ color:'var(--atm)', fontWeight:700 }}>✓ Bonne</span>
-                                : r.iv > 30 ? <span style={{ color:'var(--accent2)' }}>~ Normale</span>
-                                : <span style={{ color:'var(--put)' }}>↓ Faible</span>}
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize:11, color:'var(--text-muted)' }}>IV indisponible pour ce strike</div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* VUE MULTI-ÉCHÉANCES */}
-          {diView === 'multi' && (
-            <div className="fade-in">
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
-                <span style={{ fontSize:11, color:'var(--text-muted)' }}>IV ATM + taux BS par échéance</span>
-                <button className={`icon-btn${multiLoading?' loading':''}`} onClick={loadMulti}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
-                  </svg>
-                  Charger
-                </button>
-              </div>
-              {multiLoading && <div className="card"><div style={{ padding:20, textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>Chargement…</div></div>}
-              {multiData.length > 0 && (
-                <div className="card">
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 40px 70px 70px 70px', gap:6, padding:'8px 14px', borderBottom:'1px solid var(--border)', fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'.5px' }}>
-                    <span>Échéance</span>
-                    <span style={{ textAlign:'center' }}>Jours</span>
-                    <span style={{ textAlign:'right' }}>IV ATM</span>
-                    <span style={{ textAlign:'right' }}>Marché</span>
-                    <span style={{ textAlign:'right' }}>Min Nexo</span>
-                  </div>
-                  {multiData.map(r => {
-                    const ivColor = r.iv > 80 ? 'var(--call)' : r.iv > 50 ? 'var(--atm)' : r.iv > 30 ? 'var(--accent2)' : 'var(--put)'
-                    const maxMultiIV = Math.max(...multiData.map(x => x.iv ?? 0))
-                    const isPeak = r.iv === maxMultiIV
-                    return (
-                      <div key={r.ts} style={{
-                        display:'grid', gridTemplateColumns:'1fr 40px 70px 70px 70px', gap:6,
-                        padding:'10px 14px', borderBottom:'1px solid rgba(30,58,95,.3)',
-                        background: isPeak ? 'rgba(255,215,0,.04)' : undefined,
-                        borderLeft: isPeak ? '2px solid var(--atm)' : '2px solid transparent',
-                      }}>
-                        <div>
-                          <div style={{ fontFamily:'var(--sans)', fontWeight:isPeak?800:600, fontSize:12, color:isPeak?'var(--atm)':'var(--text)' }}>
-                            {fmtTs(r.ts)}{isPeak&&<span style={{ fontSize:9, marginLeft:4 }}>🔥</span>}
-                          </div>
-                          <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:1 }}>ATM {r.atmStrike?.toLocaleString()}</div>
-                        </div>
-                        <div style={{ textAlign:'center', fontSize:11, color:'var(--text-muted)', alignSelf:'center' }}>{r.days.toFixed(1)}</div>
-                        <div style={{ textAlign:'right', alignSelf:'center' }}>
-                          <div style={{ fontSize:12, fontWeight:700, color:ivColor }}>{r.iv?.toFixed(1) ?? '—'}%</div>
-                        </div>
-                        <div style={{ textAlign:'right', alignSelf:'center' }}>
-                          <div style={{ fontSize:11, color:'var(--call)', fontWeight:700 }}>{r.marketRate?.toFixed(2) ?? '—'}%</div>
-                          <div style={{ fontSize:9, color:'var(--text-muted)' }}>/an</div>
-                        </div>
-                        <div style={{ textAlign:'right', alignSelf:'center' }}>
-                          <div style={{ fontSize:11, color:'var(--accent2)', fontWeight:700 }}>{r.minRate?.toFixed(2) ?? '—'}%</div>
-                          <div style={{ fontSize:9, color:'var(--text-muted)' }}>/an</div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                  <div style={{ padding:'10px 14px', fontSize:10, color:'var(--text-muted)', lineHeight:1.7 }}>
-                    🔥 = IV la plus élevée · Marché = taux BS exact · Min Nexo = seuil à 80%
-                  </div>
-                </div>
-              )}
-              {!multiLoading && multiData.length === 0 && (
-                <div className="empty-state"><div className="empty-icon">◇</div><h3>Appuyez sur Charger</h3></div>
-              )}
+          {/* Info IV ATM */}
+          {diExpiry && atmIV && (
+            <div style={{ background:'rgba(255,215,0,.06)', border:'1px solid rgba(255,215,0,.2)', borderRadius:8, padding:'10px 14px', marginBottom:14, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:11, color:'var(--text-dim)' }}>IV ATM actuelle : <strong style={{ color:'var(--atm)' }}>{atmIV.toFixed(1)}%</strong></span>
+              <span style={{ fontSize:10, color:'var(--text-muted)' }}>{daysUntil(diExpiry).toFixed(1)} jours</span>
             </div>
           )}
+
+          {/* Instructions */}
+          <div style={{ background:'rgba(0,212,255,.05)', border:'1px solid rgba(0,212,255,.1)', borderRadius:8, padding:'10px 14px', marginBottom:14, fontSize:11, color:'var(--text-muted)', lineHeight:1.7 }}>
+            💡 Saisis le taux APR proposé par Nexo pour chaque strike qui t'intéresse — l'app te donne un avis instantané.
+          </div>
+
+          {/* Liste des strikes avec saisie */}
+          {diRows.length > 0 && (
+            <div className="card">
+              {diRows.map(r => {
+                const isATM  = stats?.atmStrike === r.strike
+                const accent = isATM ? 'var(--atm)' : r.isBuyLow ? 'var(--call)' : r.isSellHigh ? 'var(--accent2)' : 'var(--text-muted)'
+                const type   = isATM ? 'ATM' : r.isBuyLow ? 'Buy Low' : r.isSellHigh ? 'Sell High' : ''
+                return (
+                  <div key={r.strike} style={{
+                    padding:'12px 14px', borderBottom:'1px solid rgba(30,58,95,.4)',
+                    borderLeft:`2px solid ${isATM?'var(--atm)':r.isBuyLow?'var(--call)':r.isSellHigh?'var(--accent2)':'transparent'}`,
+                    background: isATM ? 'rgba(255,215,0,.02)' : undefined,
+                  }}>
+                    {/* Strike + type + IV */}
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14, color:isATM?'var(--atm)':'var(--text)' }}>
+                          ${r.strike.toLocaleString()}
+                        </span>
+                        {type && (
+                          <span style={{ fontSize:9, fontWeight:700, padding:'1px 7px', borderRadius:20,
+                            background:isATM?'rgba(255,215,0,.15)':r.isBuyLow?'rgba(0,229,160,.12)':'rgba(255,107,53,.12)',
+                            color:accent, border:`1px solid ${accent}40` }}>{type}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'right' }}>
+                        <div>IV: <span style={{ color:'var(--accent)' }}>{r.iv?.toFixed(1) ?? '—'}%</span></div>
+                        {r.distPct != null && (
+                          <div style={{ color:Math.abs(r.distPct)<3?'var(--put)':Math.abs(r.distPct)<8?'var(--accent2)':'var(--text-muted)' }}>
+                            {r.distPct>0?'+':''}{r.distPct.toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Saisie taux Nexo */}
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <div style={{ flex:1, position:'relative' }}>
+                        <input
+                          type="number" step="0.01" min="0" placeholder="APR Nexo %"
+                          value={nexoRates[r.strike] ?? ''}
+                          onChange={e => setNexoRates(prev => ({ ...prev, [r.strike]: parseFloat(e.target.value) || null }))}
+                          style={{ width:'100%', background:'var(--surface2)', border:`1px solid ${r.nexoRate ? accent+'60' : 'var(--border)'}`, color:'var(--text)', padding:'8px 36px 8px 12px', borderRadius:8, fontFamily:'var(--mono)', fontSize:12, outline:'none', transition:'border-color .2s' }}
+                        />
+                        <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', fontSize:10, color:'var(--text-muted)', pointerEvents:'none' }}>%</span>
+                      </div>
+
+                      {/* Avis instantané */}
+                      {r.rating && (
+                        <div style={{ flexShrink:0, textAlign:'right' }}>
+                          <div style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:12, color:r.rating.color }}>
+                            {r.rating.label}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Détail scoring */}
+                    {r.scored && r.rating && (
+                      <div style={{ marginTop:8, background:'var(--surface2)', borderRadius:6, padding:'8px 10px' }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, marginBottom:4 }}>
+                          <span style={{ color:'var(--text-muted)' }}>Taux Nexo</span>
+                          <span style={{ color:accent, fontWeight:700 }}>{r.nexoRate.toFixed(2)}% /an</span>
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, marginBottom:6 }}>
+                          <span style={{ color:'var(--text-muted)' }}>Référence théorique</span>
+                          <span style={{ color:'var(--text-dim)' }}>{r.scored.fairRate.toFixed(2)}% /an</span>
+                        </div>
+                        {/* Barre ratio */}
+                        <div style={{ height:5, background:'rgba(255,255,255,.06)', borderRadius:3, overflow:'hidden', marginBottom:4 }}>
+                          <div style={{ height:'100%', width:`${Math.min(r.scored.ratio,1)*100}%`, background:r.rating.color, borderRadius:3, transition:'width .4s' }} />
+                        </div>
+                        <div style={{ display:'flex', justifyContent:'space-between', fontSize:9, color:'var(--text-muted)' }}>
+                          <span>{r.rating.detail}</span>
+                          <span>{(r.scored.ratio*100).toFixed(0)}% du marché théorique</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {diRows.length === 0 && (
+            <div className="empty-state"><div className="empty-icon">◇</div><h3>Charger la chaîne d'abord</h3><p>Va dans l'onglet Chaîne et actualise</p></div>
+          )}
+
+          {/* Vue multi-échéances */}
+          <div style={{ marginTop:16 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+              <span style={{ fontSize:11, color:'var(--text-muted)', fontFamily:'var(--sans)', fontWeight:700 }}>Référence théorique ATM par échéance</span>
+              <button className={`icon-btn${multiLoading?' loading':''}`} onClick={loadMulti}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                </svg>
+                Charger
+              </button>
+            </div>
+            {multiData.length > 0 && (
+              <div className="card">
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 40px 60px 80px', gap:6, padding:'8px 14px', borderBottom:'1px solid var(--border)', fontSize:9, color:'var(--text-muted)', textTransform:'uppercase' }}>
+                  <span>Échéance</span>
+                  <span style={{ textAlign:'center' }}>Jours</span>
+                  <span style={{ textAlign:'right' }}>IV ATM</span>
+                  <span style={{ textAlign:'right' }}>Réf. théo.</span>
+                </div>
+                {multiData.map(r => {
+                  const ivColor = r.iv > 80 ? 'var(--call)' : r.iv > 50 ? 'var(--atm)' : r.iv > 30 ? 'var(--accent2)' : 'var(--put)'
+                  const maxIV2  = Math.max(...multiData.map(x => x.iv ?? 0))
+                  const isPeak  = r.iv === maxIV2
+                  return (
+                    <div key={r.ts} style={{
+                      display:'grid', gridTemplateColumns:'1fr 40px 60px 80px', gap:6,
+                      padding:'10px 14px', borderBottom:'1px solid rgba(30,58,95,.3)',
+                      background: isPeak ? 'rgba(255,215,0,.04)' : undefined,
+                      borderLeft: isPeak ? '2px solid var(--atm)' : '2px solid transparent',
+                    }}>
+                      <div>
+                        <div style={{ fontFamily:'var(--sans)', fontWeight:isPeak?800:600, fontSize:12, color:isPeak?'var(--atm)':'var(--text)' }}>
+                          {fmtTs(r.ts)}{isPeak&&<span style={{ fontSize:9, marginLeft:4 }}>🔥</span>}
+                        </div>
+                        <div style={{ fontSize:9, color:'var(--text-muted)' }}>ATM {r.atmStrike?.toLocaleString()}</div>
+                      </div>
+                      <div style={{ textAlign:'center', fontSize:11, color:'var(--text-muted)', alignSelf:'center' }}>{r.days.toFixed(1)}</div>
+                      <div style={{ textAlign:'right', alignSelf:'center' }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:ivColor }}>{r.iv?.toFixed(1) ?? '—'}%</div>
+                      </div>
+                      <div style={{ textAlign:'right', alignSelf:'center' }}>
+                        <div style={{ fontSize:11, color:'var(--accent2)', fontWeight:700 }}>{r.fairRate?.toFixed(1) ?? '—'}%</div>
+                        <div style={{ fontSize:9, color:'var(--text-muted)' }}>/an</div>
+                      </div>
+                    </div>
+                  )
+                })}
+                <div style={{ padding:'10px 14px', fontSize:10, color:'var(--text-muted)', lineHeight:1.7 }}>
+                  Réf. théo. = taux ATM estimé · compare avec ce que Nexo te propose
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
