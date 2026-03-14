@@ -2,6 +2,25 @@ import { blackScholes, calcDIRateBS } from './api.js'
 
 export { calcDIRateBS }
 
+// Calcul durée précise en jours (avec heures)
+export function calcDays(subscribeDate, settlementDate) {
+  if (!subscribeDate || !settlementDate) return null
+  const ms = new Date(settlementDate) - new Date(subscribeDate)
+  return ms / 86400000 // jours décimaux
+}
+
+// Prime en natif (ETH, BTC) et USD
+export function calcPremiumNative(rateAnnual, days, quantity) {
+  if (!rateAnnual || !days || !quantity) return null
+  return quantity * (rateAnnual / 100) * (days / 365)
+}
+
+export function calcPremiumUSD(rateAnnual, days, amountUSD) {
+  if (!rateAnnual || !days || !amountUSD) return null
+  return amountUSD * (rateAnnual / 100) * (days / 365)
+}
+
+// Ancien calcul gardé pour compatibilité
 export function calcPremium(rateAnnual, days, amount) {
   const periodRate = rateAnnual / 100 * (days / 365)
   return amount > 0 ? amount * periodRate : null
@@ -45,62 +64,30 @@ export function scoreLabel(ratio) {
 }
 
 export function calcPnL(offer, spotNow, dca) {
-  const prime = calcPremium(offer.rate, offer.days, offer.amount) ?? 0
+  const days  = offer.days
+  const prime = calcPremiumUSD(offer.rate, days, offer.amount) ?? 0
+  const primeNative = calcPremiumNative(offer.rate, days, offer.quantity) ?? 0
   if (!offer.amount) return null
 
   if (offer.type === 'sell-high') {
-    // Tu engages du BTC, tu veux vendre au strike
-    // Quantité BTC engagée = amount / strike (on stocke en USD)
-    const btcAmount = offer.amount / offer.strike
-
-    // PnL si exercé = (strike - DCA) × btcAmount + prime
-    // Si pas de DCA fourni, on utilise le spot actuel comme référence
+    const qty      = offer.quantity || offer.amount / offer.strike
     const refPrice = dca || spotNow
     const pnlIfExercised = refPrice
-      ? (offer.strike - refPrice) * btcAmount + prime
+      ? (offer.strike - refPrice) * qty + prime
       : null
     const pnlPctIfExercised = refPrice && offer.amount
-      ? ((offer.strike - refPrice) * btcAmount + prime) / (refPrice * btcAmount) * 100
+      ? ((offer.strike - refPrice) * qty + prime) / offer.amount * 100
       : null
-
-    // Statut actuel
     const willBeExercised = spotNow ? spotNow >= offer.strike : null
-
-    // Manque à gagner : si BTC monte au-dessus du strike à l'expiry,
-    // tu aurais pu vendre au prix marché plutôt qu'au strike
-    // On calcule pour différents scénarios de prix
     const scenarios = spotNow ? [
       { label: 'Strike +5%',  price: offer.strike * 1.05 },
       { label: 'Strike +10%', price: offer.strike * 1.10 },
       { label: 'Strike +20%', price: offer.strike * 1.20 },
-    ].map(s => ({
-      label: s.label,
-      price: s.price,
-      manque: (s.price - offer.strike) * btcAmount,
-    })) : []
-
-    // Distance strike vs spot
+    ].map(s => ({ label: s.label, price: s.price, manque: (s.price - offer.strike) * qty })) : []
     const distPct = spotNow ? (offer.strike - spotNow) / spotNow * 100 : null
-
-    return {
-      type: 'sell-high',
-      btcAmount,
-      prime,
-      pnlIfExercised,
-      pnlPctIfExercised,
-      willBeExercised,
-      distPct,
-      scenarios,
-      // Si non exercé : tu gardes ton BTC + prime
-      keepBTC: !willBeExercised,
-    }
-
+    return { type:'sell-high', qty, prime, primeNative, pnlIfExercised, pnlPctIfExercised, willBeExercised, distPct, scenarios }
   } else {
-    // Buy Low : tu engages des USDC, tu veux acheter du BTC au strike
     const btcIfExercised = offer.amount / offer.strike
-
-    // PnL si exercé = (DCA ou spot - strike) × btcIfExercised + prime
-    // Tu achètes sous le DCA = positif
     const refPrice = dca || spotNow
     const pnlIfExercised = refPrice
       ? (refPrice - offer.strike) * btcIfExercised + prime
@@ -108,38 +95,20 @@ export function calcPnL(offer, spotNow, dca) {
     const pnlPctIfExercised = offer.amount
       ? ((refPrice ? (refPrice - offer.strike) * btcIfExercised : 0) + prime) / offer.amount * 100
       : null
-
     const willBeExercised = spotNow ? spotNow <= offer.strike : null
     const distPct = spotNow ? (spotNow - offer.strike) / offer.strike * 100 : null
-
-    // Manque à gagner si BTC descend bien en dessous du strike
     const scenarios = spotNow ? [
       { label: 'Strike -5%',  price: offer.strike * 0.95 },
       { label: 'Strike -10%', price: offer.strike * 0.90 },
       { label: 'Strike -20%', price: offer.strike * 0.80 },
-    ].map(s => ({
-      label: s.label,
-      price: s.price,
-      manque: (offer.strike - s.price) * btcIfExercised,
-    })) : []
-
-    return {
-      type: 'buy-low',
-      btcIfExercised,
-      prime,
-      pnlIfExercised,
-      pnlPctIfExercised,
-      willBeExercised,
-      distPct,
-      scenarios,
-      keepUSDC: !willBeExercised,
-    }
+    ].map(s => ({ label: s.label, price: s.price, manque: (offer.strike - s.price) * btcIfExercised })) : []
+    return { type:'buy-low', btcIfExercised, prime, primeNative, pnlIfExercised, pnlPctIfExercised, willBeExercised, distPct, scenarios }
   }
 }
 
-export function countdown(expiryDate) {
-  const expiryMs = new Date(expiryDate).getTime() + 86400000
-  const msLeft   = expiryMs - Date.now()
+export function countdown(settlementDate) {
+  if (!settlementDate) return '—'
+  const msLeft = new Date(settlementDate) - Date.now()
   if (msLeft <= 0) return 'Échue'
   const dL = Math.floor(msLeft / 86400000)
   const hL = Math.floor((msLeft % 86400000) / 3600000)
@@ -157,7 +126,15 @@ export function fmtStrike(n) {
 }
 
 export function fmtExpiry(dateStr) {
-  const [y, m, d] = dateStr.split('-')
-  const months = ['JAN','FÉV','MAR','AVR','MAI','JUN','JUL','AOÛ','SEP','OCT','NOV','DÉC']
-  return `${d} ${months[+m - 1]} ${y.slice(2)}`
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'2-digit' }).toUpperCase()
+    + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) + ' UTC'
+}
+
+export function fmtDuration(days) {
+  if (!days) return '—'
+  const d = Math.floor(days)
+  const h = Math.round((days - d) * 24)
+  return h > 0 ? `${d}j ${h}h` : `${d}j`
 }

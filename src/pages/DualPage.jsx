@@ -1,16 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getATMIV, getSpot } from '../utils/api.js'
-import { calcPremium, marketPremiumPct, diScore, scoreLabel, calcPnL, countdown, fmtUSD, fmtStrike, fmtExpiry } from '../utils/di.js'
+import { calcPremiumNative, calcPremiumUSD, marketPremiumPct, diScore, scoreLabel, calcPnL, calcDays, countdown, fmtUSD, fmtStrike, fmtExpiry, fmtDuration } from '../utils/di.js'
 
 const SCORE_COLORS = { great: 'var(--call)', good: 'var(--atm)', fair: 'var(--accent2)', poor: 'var(--put)' }
 
-function defaultExpiry() {
-  const d = new Date(); d.setDate(d.getDate() + 7)
-  return d.toISOString().slice(0, 10)
+function defaultSubscribe() {
+  return new Date().toISOString().slice(0, 16)
 }
-
+function defaultSettlement() {
+  const d = new Date(); d.setDate(d.getDate() + 7)
+  return d.toISOString().slice(0, 16)
+}
 function emptyForm() {
-  return { asset: 'BTC', type: 'sell-high', strike: '', expiry: defaultExpiry(), rate: '', days: '7', quantity: '' }
+  return { asset: 'BTC', type: 'sell-high', strike: '', subscribeDate: defaultSubscribe(), settlementDate: defaultSettlement(), rate: '', quantity: '' }
 }
 
 export default function DualPage() {
@@ -39,21 +41,28 @@ export default function DualPage() {
   }
   const dcaForForm = getDCA(form.asset)
 
-  // Calcul du montant USD selon le type
-  // Sell High : quantité × DCA (ou spot si pas de DCA)
-  // Buy Low : quantité = montant USDC directement
-  const getAmountUSD = (form, dca, spotPrice) => {
-    const qty = parseFloat(form.quantity) || 0
+  // Durée précise en jours décimaux
+  const formDays = calcDays(form.subscribeDate, form.settlementDate)
+
+  // Montant USD
+  const getAmountUSD = (type, asset, quantity, dca, spotPrice) => {
+    const qty = parseFloat(quantity) || 0
     if (!qty) return null
-    if (form.type === 'sell-high') {
+    if (type === 'sell-high') {
       const ref = dca || spotPrice
       return ref ? qty * ref : null
-    } else {
-      return qty // USDC = valeur directe
     }
+    return qty // USDC direct
   }
+  const amountUSD = getAmountUSD(form.type, form.asset, form.quantity, dcaForForm, spots[form.asset])
 
-  const amountUSD = getAmountUSD(form, dcaForForm, spots[form.asset])
+  // Prime prévisualisée
+  const previewPrimeNative = formDays && form.rate && form.quantity
+    ? calcPremiumNative(parseFloat(form.rate), formDays, parseFloat(form.quantity))
+    : null
+  const previewPrimeUSD = formDays && form.rate && amountUSD
+    ? calcPremiumUSD(parseFloat(form.rate), formDays, amountUSD)
+    : null
 
   useEffect(() => {
     const assets = [...new Set(offers.map(o => o.asset))]
@@ -96,13 +105,13 @@ export default function DualPage() {
   const startEdit = (offer) => {
     setEditId(offer.id)
     setForm({
-      asset:    offer.asset,
-      type:     offer.type,
-      strike:   String(offer.strike),
-      expiry:   offer.expiry,
-      rate:     String(offer.rate),
-      days:     String(offer.days),
-      quantity: String(offer.quantity || offer.amount || ''),
+      asset:          offer.asset,
+      type:           offer.type,
+      strike:         String(offer.strike),
+      subscribeDate:  offer.subscribeDate || defaultSubscribe(),
+      settlementDate: offer.settlementDate || defaultSettlement(),
+      rate:           String(offer.rate),
+      quantity:       String(offer.quantity || ''),
     })
     setActiveTab('add')
     setError(null)
@@ -116,23 +125,27 @@ export default function DualPage() {
   }
 
   const saveOffer = () => {
-    const { asset, type, strike, expiry, rate, days, quantity } = form
-    if (!strike || !expiry || !rate || !days || !quantity) { setError('Remplissez tous les champs obligatoires'); return }
-    const dca      = getDCA(asset)
+    const { asset, type, strike, subscribeDate, settlementDate, rate, quantity } = form
+    if (!strike || !subscribeDate || !settlementDate || !rate || !quantity) {
+      setError('Remplissez tous les champs obligatoires'); return
+    }
+    const dca       = getDCA(asset)
     const spotPrice = spots[asset]
-    const usdAmount = getAmountUSD(form, dca, spotPrice)
-    const iv = ivCache[asset]?.iv ?? null
+    const days      = calcDays(subscribeDate, settlementDate)
+    const usdAmount = getAmountUSD(type, asset, quantity, dca, spotPrice)
+    const iv        = ivCache[asset]?.iv ?? null
 
     const updated = {
-      id:        editId || Date.now(),
+      id:             editId || Date.now(),
       asset, type,
-      strike:    parseFloat(strike),
-      expiry,
-      rate:      parseFloat(rate),
-      days:      parseInt(days),
-      quantity:  parseFloat(quantity), // quantité native (BTC/ETH ou USDC)
-      amount:    usdAmount || 0,       // valeur USD calculée
-      deribitIV: iv,
+      strike:         parseFloat(strike),
+      subscribeDate,
+      settlementDate,
+      days,
+      rate:           parseFloat(rate),
+      quantity:       parseFloat(quantity),
+      amount:         usdAmount || 0,
+      deribitIV:      iv,
     }
     if (editId) {
       setOffers(prev => prev.map(o => o.id === editId ? updated : o))
@@ -196,11 +209,10 @@ export default function DualPage() {
         <div className="card fade-in">
           <div className="card-header">
             <span>{editId ? 'Modifier le contrat' : 'Nouveau contrat'}</span>
-            {editId && (
-              <button className="icon-btn" style={{ fontSize:10, padding:'3px 10px', color:'var(--text-muted)', borderColor:'var(--border)' }} onClick={cancelEdit}>Annuler</button>
-            )}
+            {editId && <button className="icon-btn" style={{ fontSize:10, padding:'3px 10px' }} onClick={cancelEdit}>Annuler</button>}
           </div>
           <div style={{ padding:'16px', display:'flex', flexDirection:'column', gap:12 }}>
+
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               <div className="di-field">
                 <label className="di-label">Actif</label>
@@ -218,53 +230,74 @@ export default function DualPage() {
               </div>
             </div>
 
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div className="di-field">
-                <label className="di-label">Strike ($)</label>
-                <input className="di-input" type="number" placeholder="Ex: 85000" value={form.strike} onChange={e => setForm(f => ({ ...f, strike: e.target.value }))} />
-              </div>
-              <div className="di-field">
-                <label className="di-label">Durée (jours)</label>
-                <input className="di-input" type="number" min="1" placeholder="7" value={form.days} onChange={e => setForm(f => ({ ...f, days: e.target.value }))} />
-              </div>
+            {/* Dates avec heures */}
+            <div className="di-field">
+              <label className="di-label">Date de souscription</label>
+              <input className="di-input" type="datetime-local" value={form.subscribeDate}
+                onChange={e => setForm(f => ({ ...f, subscribeDate: e.target.value }))} />
+            </div>
+            <div className="di-field">
+              <label className="di-label">Date de règlement (Settlement)</label>
+              <input className="di-input" type="datetime-local" value={form.settlementDate}
+                onChange={e => setForm(f => ({ ...f, settlementDate: e.target.value }))} />
+              {formDays && (
+                <span style={{ fontSize:10, color:'var(--accent)', marginTop:3 }}>
+                  Durée précise : {fmtDuration(formDays)} ({formDays.toFixed(2)} jours)
+                </span>
+              )}
             </div>
 
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               <div className="di-field">
-                <label className="di-label">Taux APY (%)</label>
-                <input className="di-input" type="number" step="0.01" placeholder="Ex: 2.5" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} />
+                <label className="di-label">Strike ($)</label>
+                <input className="di-input" type="number" placeholder="Ex: 85000" value={form.strike}
+                  onChange={e => setForm(f => ({ ...f, strike: e.target.value }))} />
               </div>
               <div className="di-field">
-                {/* Label dynamique selon le type */}
-                <label className="di-label" style={{ color: form.type==='sell-high' ? (form.asset==='BTC'?'#f7931a':'#627eea') : 'var(--accent)' }}>
-                  {form.type === 'sell-high' ? `Quantité ${form.asset}` : 'Montant USDC'}
-                </label>
-                <input className="di-input" type="number"
-                  step={form.type === 'sell-high' ? '0.001' : '1'}
-                  placeholder={form.type === 'sell-high' ? (form.asset==='BTC'?'Ex: 0.01':'Ex: 0.5') : 'Ex: 1000'}
-                  value={form.quantity}
-                  onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} />
-                {/* Valeur USD calculée */}
-                {amountUSD && (
-                  <span style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>
-                    ≈ {fmtUSD(amountUSD)}
-                    {form.type === 'sell-high' && dcaForForm && <span style={{ color:'var(--atm)' }}> (DCA)</span>}
-                  </span>
-                )}
+                <label className="di-label">Taux APY (%)</label>
+                <input className="di-input" type="number" step="0.01" placeholder="Ex: 12.69" value={form.rate}
+                  onChange={e => setForm(f => ({ ...f, rate: e.target.value }))} />
               </div>
             </div>
 
             <div className="di-field">
-              <label className="di-label">Date d'expiry</label>
-              <input className="di-input" type="date" value={form.expiry} onChange={e => setForm(f => ({ ...f, expiry: e.target.value }))} />
+              <label className="di-label" style={{ color: form.type==='sell-high' ? (form.asset==='BTC'?'#f7931a':'#627eea') : 'var(--accent)' }}>
+                {form.type === 'sell-high' ? `Quantité ${form.asset}` : 'Montant USDC'}
+              </label>
+              <input className="di-input" type="number"
+                step={form.type === 'sell-high' ? '0.001' : '1'}
+                placeholder={form.type === 'sell-high' ? (form.asset==='BTC'?'Ex: 0.01':'Ex: 0.4') : 'Ex: 1000'}
+                value={form.quantity}
+                onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} />
+              {amountUSD && (
+                <span style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>
+                  ≈ {fmtUSD(amountUSD)} {form.type==='sell-high' && dcaForForm ? <span style={{ color:'var(--atm)' }}>(DCA)</span> : ''}
+                </span>
+              )}
             </div>
 
+            {/* Preview prime */}
+            {previewPrimeNative != null && previewPrimeUSD != null && (
+              <div style={{ background:'rgba(0,229,160,.06)', border:'1px solid rgba(0,229,160,.2)', borderRadius:8, padding:'10px 14px' }}>
+                <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:6, letterSpacing:'1px', textTransform:'uppercase' }}>Prime estimée</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ color:'var(--call)', fontFamily:'var(--sans)', fontWeight:800, fontSize:15 }}>
+                    +{previewPrimeNative.toFixed(form.type==='sell-high'?(form.asset==='BTC'?6:5):2)} {form.type==='sell-high'?form.asset:'USDC'}
+                  </span>
+                  <span style={{ color:'var(--call)', fontSize:12 }}>≈ {fmtUSD(previewPrimeUSD)}</span>
+                </div>
+                <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+                  {form.quantity} {form.type==='sell-high'?form.asset:'USDC'} × {form.rate}% × {formDays?.toFixed(2)}j / 365
+                </div>
+              </div>
+            )}
+
             {/* IV + scoring */}
-            {ivCache[form.asset] && (
+            {ivCache[form.asset] && formDays && (
               <div style={{ background:'var(--surface2)', borderRadius:8, padding:'10px 12px', fontSize:11, color:'var(--text-dim)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                 <span>IV ATM {form.asset}: <strong style={{ color:'var(--accent)' }}>{ivCache[form.asset].iv.toFixed(2)}%</strong></span>
-                {form.rate && form.days && (() => {
-                  const ratio = diScore(parseFloat(form.rate), ivCache[form.asset].iv, parseInt(form.days))
+                {form.rate && (() => {
+                  const ratio = diScore(parseFloat(form.rate), ivCache[form.asset].iv, formDays)
                   const { label, cls } = scoreLabel(ratio)
                   return ratio != null ? <span style={{ color:SCORE_COLORS[cls], fontWeight:700 }}>{label} ({(ratio*100).toFixed(0)}%)</span> : null
                 })()}
@@ -306,7 +339,7 @@ export default function DualPage() {
               <div className="stats-grid">
                 <div className="stat-card"><div className="stat-label">Contrats</div><div className="stat-value blue">{offers.length}</div></div>
                 <div className="stat-card"><div className="stat-label">APY moyen</div><div className="stat-value orange">{(offers.reduce((a,o)=>a+o.rate,0)/offers.length).toFixed(2)}%</div></div>
-                <div className="stat-card"><div className="stat-label">Prime totale</div><div className="stat-value green">{(() => { const t=offers.reduce((s,o)=>s+(calcPremium(o.rate,o.days,o.amount)||0),0); return t>0?'+'+fmtUSD(t):'—' })()}</div></div>
+                <div className="stat-card"><div className="stat-label">Prime totale</div><div className="stat-value green">{(() => { const t=offers.reduce((s,o)=>s+(calcPremiumUSD(o.rate,o.days,o.amount)||0),0); return t>0?'+'+fmtUSD(t):'—' })()}</div></div>
                 <div className="stat-card"><div className="stat-label">IV moy.</div><div className="stat-value">{(() => { const ivs=offers.map(o=>o.deribitIV).filter(v=>v!=null); return ivs.length?(ivs.reduce((a,b)=>a+b,0)/ivs.length).toFixed(2)+'%':'—' })()}</div></div>
               </div>
 
@@ -324,11 +357,13 @@ export default function DualPage() {
                       <span style={{ fontSize:10, color:'var(--text-muted)' }}>· {assetOffers.length} contrat{assetOffers.length>1?'s':''}</span>
                     </div>
                     {assetOffers.map(o => {
-                      const prime  = calcPremium(o.rate, o.days, o.amount)
-                      const mktPct = marketPremiumPct(o.deribitIV, o.days)
-                      const ratio  = diScore(o.rate, o.deribitIV, o.days)
+                      const days   = o.days || calcDays(o.subscribeDate, o.settlementDate)
+                      const prime  = calcPremiumUSD(o.rate, days, o.amount)
+                      const primeN = calcPremiumNative(o.rate, days, o.quantity)
+                      const mktPct = marketPremiumPct(o.deribitIV, days)
+                      const ratio  = diScore(o.rate, o.deribitIV, days)
                       const { label, cls } = scoreLabel(ratio)
-                      const nexoPct = o.rate/100*(o.days/365)*100
+                      const nexoPct = o.rate/100*(days/365)*100
                       const margin  = mktPct ? Math.max(0,(mktPct-nexoPct)/mktPct*100) : null
                       return (
                         <div key={o.id} className="card fade-in" style={{ marginBottom:8 }}>
@@ -338,7 +373,7 @@ export default function DualPage() {
                               <span style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:14 }}>{fmtStrike(o.strike)}</span>
                             </div>
                             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                              <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {countdown(o.expiry)}</span>
+                              <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {countdown(o.settlementDate)}</span>
                               <button onClick={() => startEdit(o)} style={{ background:'none', border:'1px solid var(--border)', color:'var(--text-muted)', cursor:'pointer', fontSize:11, padding:'2px 8px', borderRadius:6 }}>✏️</button>
                               <button className="di-del" onClick={() => deleteOffer(o.id)}>✕</button>
                             </div>
@@ -346,16 +381,29 @@ export default function DualPage() {
                           <div style={{ padding:'12px 16px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                             <div>
                               <div className="stat-label">Engagé</div>
-                              <div style={{ fontFamily:'var(--sans)', fontWeight:700, fontSize:13, color: o.asset==='BTC'?'#f7931a':o.asset==='ETH'?'#627eea':'var(--accent)' }}>
-                                {o.type === 'sell-high'
-                                  ? `${o.quantity} ${o.asset}`
-                                  : `${o.quantity?.toLocaleString()} USDC`}
+                              <div style={{ fontFamily:'var(--sans)', fontWeight:700, fontSize:13, color:asset==='BTC'?'#f7931a':asset==='ETH'?'#627eea':'var(--accent)' }}>
+                                {o.type==='sell-high' ? `${o.quantity} ${o.asset}` : `${o.quantity?.toLocaleString()} USDC`}
                               </div>
                               <div style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmtUSD(o.amount)}</div>
                             </div>
-                            <div><div className="stat-label">Expiry</div><div style={{ fontSize:12, color:'var(--accent)', fontWeight:700 }}>{fmtExpiry(o.expiry)}</div></div>
-                            <div><div className="stat-label">APY / Prime</div><div style={{ color:'var(--accent2)', fontWeight:700 }}>{o.rate.toFixed(2)}%</div><div style={{ fontSize:10, color:'var(--call)' }}>{prime?'+'+fmtUSD(prime):'—'}</div></div>
-                            <div><div className="stat-label">IV / Marché</div><div style={{ color:o.deribitIV?'var(--accent)':'var(--text-muted)' }}>{o.deribitIV?o.deribitIV.toFixed(2)+'%':'...'}</div><div style={{ fontSize:10, color:'var(--text-muted)' }}>Mkt: {mktPct?mktPct.toFixed(3)+'%':'—'}</div></div>
+                            <div>
+                              <div className="stat-label">Settlement</div>
+                              <div style={{ fontSize:11, color:'var(--accent)' }}>{fmtExpiry(o.settlementDate)}</div>
+                              <div style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtDuration(days)}</div>
+                            </div>
+                            <div>
+                              <div className="stat-label">APY</div>
+                              <div style={{ color:'var(--accent2)', fontWeight:700 }}>{o.rate.toFixed(2)}%</div>
+                            </div>
+                            <div>
+                              <div className="stat-label">Prime</div>
+                              <div style={{ color:'var(--call)', fontWeight:700 }}>
+                                {primeN ? `+${primeN.toFixed(o.type==='sell-high'?(o.asset==='BTC'?6:5):2)} ${o.type==='sell-high'?o.asset:'USDC'}` : '—'}
+                              </div>
+                              <div style={{ fontSize:10, color:'var(--call)' }}>{prime ? '≈ +'+fmtUSD(prime) : ''}</div>
+                            </div>
+                            <div><div className="stat-label">IV Deribit</div><div style={{ color:o.deribitIV?'var(--accent)':'var(--text-muted)' }}>{o.deribitIV?o.deribitIV.toFixed(2)+'%':'...'}</div></div>
+                            <div><div className="stat-label">Marché</div><div style={{ color:'var(--text-dim)', fontSize:11 }}>{mktPct?mktPct.toFixed(3)+'%':'—'}</div></div>
                             {ratio!=null && (
                               <div style={{ gridColumn:'span 2' }}>
                                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -408,9 +456,9 @@ export default function DualPage() {
                     {dca && <span style={{ fontSize:10, color:'var(--atm)' }}>DCA {fmtUSD(dca)}</span>}
                   </div>
                   {assetOffers.map(o => {
+                    const days    = o.days || calcDays(o.subscribeDate, o.settlementDate)
                     const spot    = spots[o.asset] ?? null
                     const pnlData = calcPnL(o, spot, dca)
-                    const cd      = countdown(o.expiry)
                     const distPct = pnlData?.distPct
                     const isNear  = distPct != null && Math.abs(distPct) < 3
                     return (
@@ -422,17 +470,16 @@ export default function DualPage() {
                             {isNear && <span style={{ fontSize:9, background:'rgba(255,77,109,.2)', color:'var(--put)', padding:'1px 5px', borderRadius:3, fontWeight:800 }}>! PROCHE</span>}
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                            <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {cd}</span>
+                            <span style={{ fontSize:10, color:'var(--text-muted)' }}>⏳ {countdown(o.settlementDate)}</span>
                             <button onClick={() => startEdit(o)} style={{ background:'none', border:'1px solid var(--border)', color:'var(--text-muted)', cursor:'pointer', fontSize:11, padding:'2px 8px', borderRadius:6 }}>✏️</button>
                           </div>
                         </div>
                         <div style={{ padding:'12px 16px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                           <div>
                             <div className="stat-label">Engagé</div>
-                            <div style={{ fontWeight:700, color: o.asset==='BTC'?'#f7931a':o.asset==='ETH'?'#627eea':'var(--accent)', fontSize:13 }}>
-                              {o.type === 'sell-high' ? `${o.quantity} ${o.asset}` : `${o.quantity?.toLocaleString()} USDC`}
+                            <div style={{ fontWeight:700, color:asset==='BTC'?'#f7931a':asset==='ETH'?'#627eea':'var(--accent)', fontSize:13 }}>
+                              {o.type==='sell-high'?`${o.quantity} ${o.asset}`:`${o.quantity?.toLocaleString()} USDC`}
                             </div>
-                            <div style={{ fontSize:10, color:'var(--text-muted)' }}>≈ {fmtUSD(o.amount)}</div>
                           </div>
                           <div>
                             <div className="stat-label">Distance strike</div>
@@ -444,7 +491,12 @@ export default function DualPage() {
                           </div>
                           <div>
                             <div className="stat-label">Prime</div>
-                            <div style={{ color:'var(--call)' }}>{pnlData?'+'+fmtUSD(pnlData.prime):'—'}</div>
+                            <div style={{ color:'var(--call)' }}>{pnlData ? '+'+fmtUSD(pnlData.prime) : '—'}</div>
+                            {pnlData?.primeNative && (
+                              <div style={{ fontSize:10, color:'var(--call)' }}>
+                                +{pnlData.primeNative.toFixed(o.type==='sell-high'?(o.asset==='BTC'?6:5):2)} {o.type==='sell-high'?o.asset:'USDC'}
+                              </div>
+                            )}
                           </div>
                           <div>
                             <div className="stat-label">Statut</div>
@@ -469,12 +521,12 @@ export default function DualPage() {
                                 {pnlData.pnlPctIfExercised>=0?'+':''}{pnlData.pnlPctIfExercised?.toFixed(2)}%
                               </span>
                             </div>
-                            {o.type === 'sell-high' && dca && (
+                            {o.type==='sell-high' && dca && (
                               <div style={{ fontSize:10, color:'var(--text-muted)' }}>
                                 ({fmtUSD(o.strike)} − {fmtUSD(dca)}) × {o.quantity} {o.asset} + prime
                               </div>
                             )}
-                            {o.type === 'buy-low' && dca && (
+                            {o.type==='buy-low' && dca && (
                               <div style={{ fontSize:10, color:'var(--text-muted)' }}>
                                 ({fmtUSD(dca)} − {fmtUSD(o.strike)}) × {pnlData.btcIfExercised?.toFixed(6)} {o.asset} + prime
                               </div>
@@ -485,7 +537,7 @@ export default function DualPage() {
                         {pnlData?.scenarios?.length > 0 && (
                           <div style={{ margin:'0 16px 12px' }}>
                             <div className="stat-label" style={{ marginBottom:8 }}>
-                              {o.type === 'sell-high' ? 'Manque à gagner si prix monte après expiry' : 'Manque à gagner si prix chute après expiry'}
+                              {o.type==='sell-high' ? 'Manque à gagner si prix monte après expiry' : 'Manque à gagner si prix chute après expiry'}
                             </div>
                             <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
                               {pnlData.scenarios.map(s => (
