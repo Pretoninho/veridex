@@ -52,19 +52,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="app-content">
-        <button onClick={forceUpdate} title="Mettre à jour l'app" style={{
-    position:'fixed', top:10, right:12, zIndex:999,
-    background:'rgba(0,212,255,.08)', border:'1px solid rgba(0,212,255,.2)',
-    borderRadius:20, padding:'4px 10px', cursor:'pointer',
-    display:'flex', alignItems:'center', gap:5, color:'var(--text-muted)', fontSize:10,
-    fontFamily:'var(--sans)', fontWeight:700
-  }}>
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-      <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
-    </svg>
-    MAJ
-  </button>
-  {active === 'signal'  && <SignalPage />}
+        {active === 'signal'  && <SignalPage />}
         {active === 'dual'    && <DualPage />}
         {active === 'chain'   && <ChainPage />}
         {active === 'tracker' && <TrackerPage />}
@@ -81,7 +69,18 @@ export default function App() {
             <span className="nav-label">{t.label}</span>
           </button>
         ))}
-      </nav>
+        <button onClick={forceUpdate} style={{
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      gap:2, padding:'6px 8px', background:'none', border:'none', cursor:'pointer',
+      color:'var(--text-muted)', fontSize:9, fontFamily:'var(--sans)', fontWeight:700,
+      opacity:0.7
+    }}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+      </svg>
+      MAJ
+    </button>
+  </nav>
     </div>
   )
 }
