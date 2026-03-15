@@ -5,6 +5,7 @@ import TrackerPage from './pages/TrackerPage.jsx'
 import DualPage from './pages/DualPage.jsx'
 import TermPage from './pages/TermPage.jsx'
 import SignalPage from './pages/SignalPage.jsx'
+import OptionsPage from './pages/OptionsPage.jsx'
 import './App.css'
 
 const DI_TABS = [
@@ -96,7 +97,7 @@ export default function App() {
 
   // OPTION ANALYZER (placeholder)
   if (view === 'options') {
-    return <OptionsPlaceholder onBack={() => setView('home')} />
+    return <OptionsPage onBack={() => setView('home')} />
   }
 
   // DI SUITE
