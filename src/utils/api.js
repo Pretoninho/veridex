@@ -87,7 +87,7 @@ export async function getFundingRate(asset) {
     const d = await apiFetch(`${API}/get_book_summary_by_instrument?instrument_name=${instrument}`)
     const r = d.result?.[0]
     if (!r) return null
-    const currentAnn = r.current_funding != null ? r.current_funding * 100 * 3 * 365 : null
+    const currentAnn = r.funding_8h != null ? r.funding_8h * 100 * 3 * 365 : (r.current_funding != null ? r.current_funding * 100 * 3 * 365 : null)
     return { current: currentAnn, avgAnn7d: currentAnn, bullish: currentAnn != null ? currentAnn > 0 : null }
   } catch(e) { return null }
 }
