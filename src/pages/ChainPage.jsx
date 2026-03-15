@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getSpot, getInstruments, getOrderBook, getAllExpiries, blackScholes } from '../utils/api.js'
+import { getSpot, getInstruments, getOrderBook, getAllExpiries, blackScholes, getBestDIOpportunities } from '../utils/api.js'
 
 function fmtTs(ts) {
   const d = new Date(ts)
@@ -45,6 +45,8 @@ export default function ChainPage() {
   const [diView, setDiView] = useState('strike')
   const [multiData, setMultiData] = useState([])
   const [multiLoading, setMultiLoading] = useState(false)
+  const [opps, setOpps] = useState([])
+  const [oppsLoading, setOppsLoading] = useState(false)
   // Taux Nexo saisis par strike
   const [nexoRates, setNexoRates] = useState({}) // { strike: rate }
 
@@ -184,7 +186,7 @@ export default function ChainPage() {
       </div>
 
       <div style={{ display:'flex', marginBottom:14, borderBottom:'1px solid var(--border)' }}>
-        {[['chain','Chaîne'],['di','Évaluer DI']].map(([id,label]) => (
+        {[['chain','Chaîne'],['di','Évaluer DI'],['opps','Top DI']].map(([id,label]) => (
           <button key={id} onClick={() => setActiveTab(id)} style={{
             padding:'8px 18px', background:'none', border:'none', cursor:'pointer',
             fontFamily:'var(--sans)', fontSize:12, fontWeight:700,
@@ -460,3 +462,5 @@ export default function ChainPage() {
     </div>
   )
 }
+// ── INJECTION OPPORTUNITÉS ──
+// Ajoute cet import en haut du fichier via patch

@@ -142,3 +142,69 @@ export function calcDIRateBS(iv, S, K, days, type) {
   const premiumPct = premium / (type === 'buy-low' ? K : S) * 100
   return premiumPct * (365 / days) // APY annualisé
 }
+
+// Meilleure opportunité DI par échéance
+export async function getBestDIOpportunities(asset) {
+  const [spot, instruments] = await Promise.all([
+    getSpot(asset),
+    getInstruments(asset)
+  ])
+  const expiries = getAllExpiries(instruments)
+  const results = []
+
+  for (const ts of expiries.slice(0, 6)) {
+    const days = Math.max(0.01, (ts - Date.now()) / 86400000)
+    const forExp = instruments.filter(i => i.expiration_timestamp === ts)
+    const strikes = [...new Set(forExp.map(i => i.strike))].sort((a,b) => a-b)
+
+    // On prend les 10 strikes autour du spot
+    const atmIdx = strikes.reduce((bi, s, i) => Math.abs(s-spot) < Math.abs(strikes[bi]-spot) ? i : bi, 0)
+    const nearby = strikes.slice(Math.max(0, atmIdx-5), atmIdx+6)
+
+    const opportunities = []
+    for (const strike of nearby) {
+      try {
+        const distPct = (strike - spot) / spot * 100
+        const isBuyLow = distPct < -0.5
+        const isSellHigh = distPct > 0.5
+        if (!isBuyLow && !isSellHigh) continue
+
+        const optType = isBuyLow ? 'put' : 'call'
+        const inst = forExp.find(x => x.option_type === optType && x.strike === strike)
+        if (!inst) continue
+
+        const book = await getOrderBook(inst.instrument_name).catch(() => null)
+        if (!book) continue
+
+        const iv = book.mark_iv ?? null
+        const markPrice = book.mark_price ?? null
+        if (!iv || !markPrice) continue
+
+        // Taux BS via mark_price
+        const premiumUSD = markPrice * spot
+        const aprMarket = (premiumUSD / strike * 100) * (365 / days)
+
+        // Score combiné
+        const ivScore    = Math.min(iv / 100, 1)         // IV normalisée 0-1
+        const aprScore   = Math.min(aprMarket / 150, 1)  // APR normalisé 0-1
+        const distScore  = Math.max(0, 1 - Math.abs(distPct) / 15) // distance 0-1
+
+        const score = Math.round((aprScore * 0.40 + ivScore * 0.35 + distScore * 0.25) * 100)
+
+        opportunities.push({
+          strike, distPct, iv, aprMarket, score,
+          type: isBuyLow ? 'buy-low' : 'sell-high',
+          delta: book.greeks?.delta ?? null,
+        })
+      } catch(_) {}
+    }
+
+    // Meilleure opportunité Buy Low et Sell High
+    const bestBL = opportunities.filter(o => o.type==='buy-low').sort((a,b) => b.score-a.score)[0] ?? null
+    const bestSH = opportunities.filter(o => o.type==='sell-high').sort((a,b) => b.score-a.score)[0] ?? null
+
+    results.push({ ts, days, spot, bestBL, bestSH })
+  }
+
+  return results
+}
