@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getSpot, getInstruments, getOrderBook, getAllExpiries, getDVOL, getRealizedVol } from '../utils/api.js'
 
 // ── MOTEUR D'ANALYSE ──
@@ -137,6 +137,10 @@ function getButterflyReco(smileData, spot) {
   }
 }
 
+const REFRESH_INTERVAL = 10 * 60 * 1000 // 10 minutes
+const LS_OPT_ALERT = 'options_alert_threshold'
+const LS_OPT_HISTORY = 'options_score_history'
+
 export default function OptionsPage({ onBack }) {
   const [asset, setAsset] = useState('BTC')
   const [loading, setLoading] = useState(false)
@@ -150,6 +154,16 @@ export default function OptionsPage({ onBack }) {
   const [dvol, setDvol] = useState(null)
   const [rv, setRv] = useState(null)
   const [lastUpdate, setLastUpdate] = useState(null)
+  const [countdown, setCountdown] = useState(REFRESH_INTERVAL / 1000)
+  const [alertThreshold, setAlertThreshold] = useState(() => parseInt(localStorage.getItem(LS_OPT_ALERT) || '65'))
+  const [showAlertConfig, setShowAlertConfig] = useState(false)
+  const [alertFired, setAlertFired] = useState(null) // {strategy, score}
+  const [scoreHistory, setScoreHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_OPT_HISTORY) || '[]') } catch { return [] }
+  })
+  const timerRef = useRef(null)
+  const countRef = useRef(null)
+  const assetRef = useRef(asset)
 
   const analyze = async (a) => {
     setLoading(true)
@@ -240,7 +254,51 @@ export default function OptionsPage({ onBack }) {
     setLoading(false)
   }
 
-  useEffect(() => { analyze(asset) }, [asset])
+  useEffect(() => { assetRef.current = asset }, [asset])
+
+  const startMonitoring = (a) => {
+    analyze(a || assetRef.current)
+    setCountdown(REFRESH_INTERVAL / 1000)
+    if (timerRef.current) clearInterval(timerRef.current)
+    if (countRef.current) clearInterval(countRef.current)
+    timerRef.current = setInterval(() => analyze(assetRef.current), REFRESH_INTERVAL)
+    countRef.current = setInterval(() => setCountdown(c => c <= 1 ? REFRESH_INTERVAL/1000 : c-1), 1000)
+  }
+
+  useEffect(() => {
+    startMonitoring(asset)
+    return () => { clearInterval(timerRef.current); clearInterval(countRef.current) }
+  }, [asset])
+
+  // Vérifier alertes après chaque analyse
+  useEffect(() => {
+    const threshold = parseInt(localStorage.getItem(LS_OPT_ALERT) || '65')
+    const strategies = [
+      { key:'s1', label:'Straddle/Strangle', score:scores.s1 },
+      { key:'s2', label:'Risk Reversal',     score:scores.s2 },
+      { key:'s3', label:'Calendar Spread',   score:scores.s3 },
+      { key:'s4', label:'Butterfly',         score:scores.s4 },
+      { key:'s5', label:'Directionnel',      score:scores.s5 },
+    ]
+    const best = strategies.filter(s => s.score != null).sort((a,b) => b.score-a.score)[0]
+    if (best && best.score >= threshold) {
+      setAlertFired({ strategy: best.label, score: best.score })
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Option Analyzer ' + asset + ' : ' + best.label, {
+          body: best.label + ' score ' + best.score + '/100 — opportunite detectee',
+          icon: '/icon-192.png'
+        })
+      }
+    }
+    // Historique
+    const now = new Date()
+    const best5 = Math.max(...strategies.map(s => s.score ?? 0))
+    setScoreHistory(prev => {
+      const next = [...prev, { ts: now.toISOString(), score: best5, asset }].slice(-48)
+      localStorage.setItem(LS_OPT_HISTORY, JSON.stringify(next))
+      return next
+    })
+  }, [scores])
 
   const maxIV = smileData.length ? Math.max(...smileData.map(r => r.iv ?? 0)) : 1
 
