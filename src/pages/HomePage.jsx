@@ -31,10 +31,10 @@ export default function HomePage({ onNavigate }) {
     : 'var(--put)'
 
   return (
-    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column', padding:'0 0 40px' }}>
+    <div style={{ display:'flex', flexDirection:'column', padding:'0 0 40px', overflowY:'auto' }}>
 
       {/* Header */}
-      <div style={{ padding:'32px 24px 0', display:'flex', alignItems:'center', gap:12 }}>
+      <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'center', gap:12 }}>
         <div style={{ width:36, height:36, borderRadius:10, background:'rgba(0,212,255,.15)', border:'1px solid rgba(0,212,255,.3)', display:'flex', alignItems:'center', justifyContent:'center' }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
@@ -49,11 +49,11 @@ export default function HomePage({ onNavigate }) {
       </div>
 
       {/* Hero */}
-      <div style={{ padding:'40px 24px 32px', flex:1 }}>
+      <div style={{ padding:'20px 24px 24px' }}>
 
         {/* Tagline */}
         <div style={{ marginBottom:32 }}>
-          <div style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:28, color:'var(--text)', lineHeight:1.2, marginBottom:10 }}>
+          <div style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:22, color:'var(--text)', lineHeight:1.2, marginBottom:10 }}>
             Maximise tes<br/>
             <span style={{ color:'var(--accent)' }}>primes de vol.</span>
           </div>
@@ -63,7 +63,7 @@ export default function HomePage({ onNavigate }) {
         </div>
 
         {/* Stats live */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:32 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:20 }}>
           <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, padding:'14px 16px' }}>
             <div style={{ fontSize:10, color:'var(--text-muted)', fontFamily:'var(--sans)', fontWeight:700, letterSpacing:'1px', textTransform:'uppercase', marginBottom:6 }}>BTC</div>
             <div style={{ fontFamily:'var(--sans)', fontWeight:800, fontSize:20, color:'var(--atm)' }}>
