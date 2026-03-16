@@ -6,6 +6,22 @@ function fmtTs(ts) {
   return new Date(ts).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'}).toUpperCase()
 }
 function daysUntil(ts) { return Math.max(0.01,(ts-Date.now())/86400000) }
+function settlesIn(ts) {
+  const ms = Math.max(0, ts - Date.now())
+  const hours = Math.max(1, Math.round(ms / 3600000))
+  const date = new Date(ts).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})
+  return { hours, date }
+}
+function calcDualInterestPct(row, side, spotNow, days) {
+  if (!spotNow || !days || days <= 0) return null
+  const book = side === 'buy-low' ? row.put : row.call
+  const markPrice = book?.mark_price
+  if (!Number.isFinite(markPrice) || markPrice <= 0) return null
+  const premiumUSD = markPrice * spotNow
+  const notional = side === 'buy-low' ? row.strike : spotNow
+  if (!Number.isFinite(notional) || notional <= 0) return null
+  return (premiumUSD / notional) * 100 * (365 / days)
+}
 function scoreNexoRate(nexoRate,iv,days) {
   if(!nexoRate||!iv||!days) return null
   const T=days/365
@@ -37,6 +53,7 @@ export default function ChainPage() {
   const [opps,setOpps]=useState([])
   const [oppsLoading,setOppsLoading]=useState(false)
   const [atmGreeks,setAtmGreeks]=useState(null)
+  const [chainSide,setChainSide]=useState('buy-low')
 
   const loadExpiries=async(a)=>{
     setLoading(true);setError(null)
@@ -133,6 +150,29 @@ export default function ChainPage() {
 
   const smileRows=rows.map(r=>({strike:r.strike,iv:r.call?.mark_iv??r.put?.mark_iv??null,distPct:spot?(r.strike-spot)/spot*100:null})).filter(r=>r.iv!=null)
   const maxIV=smileRows.length?Math.max(...smileRows.map(r=>r.iv)):1
+  const chainDays=selExpiry?daysUntil(selExpiry):null
+  const chainRows=rows
+    .map(r=>{
+      const distPct=spot?((r.strike-spot)/spot)*100:null
+      const interest=calcDualInterestPct(r,chainSide,spot,chainDays)
+      const sideBook=chainSide==='buy-low'?r.put:r.call
+      const settle=selExpiry?settlesIn(selExpiry):null
+      return {
+        strike:r.strike,
+        distPct,
+        interest,
+        settle,
+        iv:sideBook?.mark_iv??null,
+        oi:sideBook?.open_interest??null,
+      }
+    })
+    .filter(r=>{
+      if(!spot||r.interest==null||r.distPct==null) return false
+      if(chainSide==='buy-low') return r.distPct < -0.2 && r.distPct > -20
+      return r.distPct > 0.2 && r.distPct < 20
+    })
+    .sort((a,b)=>a.strike-b.strike)
+    .slice(0,14)
 
   return (
     <div className="page-wrap">
@@ -165,7 +205,7 @@ export default function ChainPage() {
 
       {error&&<div className="error-box">{error}</div>}
 
-      {stats&&(
+      {stats&&activeTab!=='chain'&&(
         <div className="stats-grid" style={{marginBottom:12}}>
           <div className="stat-card"><div className="stat-label">IV ATM</div><div className="stat-value gold">{stats.atmIV}%</div>{stats.atmStrike&&<div className="stat-sub">Strike {stats.atmStrike?.toLocaleString()}</div>}</div>
           <div className="stat-card"><div className="stat-label">Contrats</div><div className="stat-value blue">{stats.contracts}</div></div>
@@ -174,7 +214,7 @@ export default function ChainPage() {
         </div>
       )}
 
-      {activeTab==='chain'&&atmGreeks&&(
+      {activeTab==='di'&&atmGreeks&&(
         <div className="card" style={{marginBottom:12}}>
           <div className="card-header">
             <span>Grecs ATM (calcul client)</span>
@@ -206,57 +246,88 @@ export default function ChainPage() {
       {/* CHAINE */}
       {activeTab==='chain'&&(
         <>
-          <div className="expiry-chips">
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontFamily:'var(--sans)', fontSize:22, fontWeight:700, color:'var(--text)', marginBottom:4 }}>
+              Earn high <span style={{ color:'var(--accent)' }}>yield</span>
+            </div>
+            <div style={{ fontSize:12, color:'var(--text-muted)' }}>
+              {chainSide==='buy-low'
+                ? `Pick a target price and date to buy ${asset} while earning interest.`
+                : `Pick a target price and date to sell ${asset} while earning interest.`}
+            </div>
+          </div>
+
+          <div className="expiry-chips" style={{ marginBottom:8 }}>
             {expiries.map(ts=>(
               <button key={ts} className={`expiry-chip${selExpiry===ts?' active':''}`} onClick={()=>switchExpiry(ts)}>{fmtTs(ts)}</button>
             ))}
           </div>
+
+          <div style={{ display:'flex', marginBottom:10, borderBottom:'1px solid var(--border)' }}>
+            {[['buy-low','Buy low'],['sell-high','Sell high']].map(([id,label])=>(
+              <button key={id} onClick={()=>setChainSide(id)} style={{
+                padding:'8px 0', marginRight:16, background:'none', border:'none', cursor:'pointer',
+                fontFamily:'var(--sans)', fontSize:15, fontWeight:700,
+                color: chainSide===id?'var(--text)':'var(--text-muted)',
+                borderBottom: chainSide===id?'2px solid var(--accent)':'2px solid transparent',
+                marginBottom:-1,
+              }}>{label}</button>
+            ))}
+          </div>
+
           {loading&&rows.length===0&&<div className="card"><div style={{padding:20,textAlign:'center',color:'var(--text-muted)',fontSize:12}}>Chargement...</div></div>}
-          {smileRows.length>0&&(
-            <div className="card" style={{marginBottom:12}}>
-              <div className="card-header"><span>Smile de volatilite</span></div>
-              <div style={{padding:'12px 14px'}}>
-                {smileRows.map(r=>{
-                  const isATM=stats?.atmStrike===r.strike
-                  const color=isATM?'var(--atm)':r.distPct<0?'var(--call)':'var(--accent2)'
-                  return(
-                    <div key={r.strike} style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
-                      <span style={{width:72,fontSize:10,fontWeight:isATM?800:400,color:isATM?'var(--atm)':'var(--text-dim)',textAlign:'right',flexShrink:0}}>{r.strike>=1000?(r.strike/1000).toFixed(0)+'K':r.strike}</span>
-                      <div style={{flex:1,height:6,background:'rgba(255,255,255,.05)',borderRadius:3,overflow:'hidden'}}>
-                        <div style={{height:'100%',width:`${(r.iv/maxIV)*100}%`,background:color,borderRadius:3}}/>
-                      </div>
-                      <span style={{width:44,fontSize:10,color,textAlign:'right',flexShrink:0}}>{r.iv.toFixed(1)}%</span>
-                    </div>
-                  )
-                })}
-              </div>
+
+          <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:8, padding:'10px 12px', marginBottom:12 }}>
+            <div style={{ fontSize:11, color:'var(--text)' }}>
+              Current price is: <span style={{ color:'var(--accent)', fontWeight:700 }}>${spot?.toLocaleString('en-US',{maximumFractionDigits:2}) ?? '—'}</span>
             </div>
-          )}
-          {rows.length>0&&(
+          </div>
+
+          {chainRows.length>0&&(
             <div className="card">
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',padding:'6px 14px',borderBottom:'1px solid var(--border)',fontSize:10}}>
-                <span style={{color:'var(--call)',fontWeight:700}}>CALLS</span>
-                <span style={{color:'var(--atm)',fontWeight:700,textAlign:'center'}}>STRIKE</span>
-                <span style={{color:'var(--put)',fontWeight:700,textAlign:'right'}}>PUTS</span>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 76px 96px',padding:'8px 10px',borderBottom:'1px solid var(--border)',fontSize:11,color:'var(--text-muted)'}}>
+                <span style={{fontWeight:700,color:'var(--text)'}}>{chainSide==='buy-low'?'Buy low':'Sell high'}</span>
+                <span style={{fontWeight:700,color:'var(--text)'}}>Settles in</span>
+                <span style={{fontWeight:700,color:'var(--text)'}}>Interest</span>
+                <span></span>
               </div>
-              {rows.map(({strike,call,put})=>{
-                const isATM=stats?.atmStrike===strike
+              {chainRows.map((r)=>{
                 return(
-                  <div key={strike} style={{padding:'10px 14px',borderBottom:'1px solid rgba(30,58,95,.4)',background:isATM?'rgba(255,215,0,.04)':undefined,borderLeft:isATM?'2px solid var(--atm)':'2px solid transparent'}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                      <span style={{fontFamily:'var(--sans)',fontWeight:800,fontSize:14,color:isATM?'var(--atm)':'var(--text)'}}>${strike.toLocaleString()}{isATM&&<span style={{fontSize:9,marginLeft:5,opacity:.7}}>ATM</span>}</span>
-                      <div style={{display:'flex',gap:14,fontSize:11}}>
-                        <span style={{color:'var(--call)'}}>C: {fmt(call?.mark_iv)}%</span>
-                        <span style={{color:'var(--put)'}}>P: {fmt(put?.mark_iv)}%</span>
+                  <div key={r.strike} style={{padding:'8px 10px',borderBottom:'1px solid rgba(30,58,95,.35)'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 76px 96px',alignItems:'center',gap:6}}>
+                      <div>
+                        <div style={{fontFamily:'var(--sans)',fontWeight:700,fontSize:22,color:'var(--text)',lineHeight:1}}>${r.strike.toLocaleString()}</div>
+                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:3}}>{r.distPct>0?'+':''}{r.distPct?.toFixed(1)}% du spot</div>
                       </div>
-                    </div>
-                    <div style={{display:'flex',justifyContent:'space-between',fontSize:10,color:'var(--text-muted)'}}>
-                      <span>OI: <span style={{color:'var(--call)'}}>{fmtK(call?.open_interest)}</span> / <span style={{color:'var(--put)'}}>{fmtK(put?.open_interest)}</span></span>
-                      <span>delta: <span style={{color:'var(--call)'}}>{fmt(call?.greeks?.delta)}</span> / <span style={{color:'var(--put)'}}>{fmt(put?.greeks?.delta)}</span></span>
+                      <div>
+                        <div style={{fontSize:18,color:'var(--text)',lineHeight:1}}>{r.settle?.hours} hours</div>
+                        <div style={{display:'inline-block',marginTop:4,fontSize:9,color:'var(--text-muted)',background:'rgba(255,255,255,.06)',padding:'1px 6px',borderRadius:6}}>{r.settle?.date}</div>
+                      </div>
+                      <div>
+                        <span style={{display:'inline-block',fontSize:12,fontWeight:700,color:'var(--accent)',background:'rgba(0,212,255,.14)',border:'1px solid rgba(0,212,255,.28)',padding:'2px 8px',borderRadius:7}}>{r.interest.toFixed(2)}%</span>
+                        <div style={{fontSize:9,color:'var(--text-muted)',marginTop:3}}>IV {r.iv?.toFixed(1) ?? '—'}%</div>
+                      </div>
+                      <button
+                        onClick={()=>{ setActiveTab('di'); setDiExpiry(selExpiry) }}
+                        style={{
+                          background:'var(--accent)',color:'#001016',border:'none',borderRadius:8,
+                          fontFamily:'var(--sans)',fontWeight:700,fontSize:12,padding:'10px 12px',cursor:'pointer'
+                        }}
+                      >
+                        Subscribe
+                      </button>
                     </div>
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {!loading&&chainRows.length===0&&(
+            <div className="empty-state">
+              <div className="empty-icon">◇</div>
+              <h3>Aucune ligne disponible</h3>
+              <p>Essaie une autre échéance ou bascule vers {chainSide==='buy-low'?'Sell high':'Buy low'}</p>
             </div>
           )}
         </>
