@@ -365,6 +365,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
                         <div style={{fontSize:9,color:r.rl.action==='subscribe'?'var(--call)':'var(--text-muted)',marginTop:2,fontWeight:700}}>
                           RL {r.rl.action==='subscribe'?'GO':'WAIT'} {r.rl.confidence}%
                         </div>
+                        {!r.rl.highIvCondition&&(
+                          <div style={{fontSize:8,color:'var(--put)',marginTop:1}}>IV trop basse (&lt; {r.rl.ivFloor}%)</div>
+                        )}
                       </div>
                       <button
                         onClick={()=>{

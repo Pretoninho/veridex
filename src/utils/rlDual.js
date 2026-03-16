@@ -6,6 +6,10 @@ const ACTION_SUBSCRIBE = 'subscribe'
 
 const ALPHA = 0.22
 const MAX_LOG = 500
+const HIGH_IV_MIN = {
+  BTC: 55,
+  ETH: 60,
+}
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v))
@@ -108,17 +112,25 @@ export function encodeDualState(ctx) {
 }
 
 export function evaluateDualPolicy(ctx) {
+  const asset = (ctx?.asset || 'BTC').toUpperCase()
+  const iv = Number(ctx?.iv)
+  const ivFloor = HIGH_IV_MIN[asset] ?? 55
   const stateKey = encodeDualState(ctx)
   const table = loadTable()
   const state = table[stateKey] || defaultState()
   const qSkip = Number(state[ACTION_SKIP] || 0)
   const qSubscribe = Number(state[ACTION_SUBSCRIBE] || 0)
   const diff = qSubscribe - qSkip
-  const action = diff >= 0 ? ACTION_SUBSCRIBE : ACTION_SKIP
+  const highIvCondition = Number.isFinite(iv) && iv >= ivFloor
+  const action = highIvCondition && diff >= 0 ? ACTION_SUBSCRIBE : ACTION_SKIP
   return {
     stateKey,
     action,
     confidence: confidenceFromDiff(diff),
+    highIvCondition,
+    iv,
+    ivFloor,
+    reason: highIvCondition ? 'iv-high' : 'iv-too-low',
     qSkip,
     qSubscribe,
     samples: Number(state.nSubscribe || 0),
