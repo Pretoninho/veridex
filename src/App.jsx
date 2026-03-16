@@ -111,7 +111,7 @@ export default function App() {
 
         {diTab === 'signal'  && <SignalPage />}
         {diTab === 'dual'    && <DualPage />}
-        {diTab === 'chain'   && <ChainPage />}
+        {diTab === 'chain'   && <ChainPage onNavigate={setView} />}
         {diTab === 'tracker' && <TrackerPage />}
         {diTab === 'term'    && <TermPage />}
       </div>

@@ -31,7 +31,8 @@ export default function HomePage({ onNavigate }) {
     : 'var(--put)'
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', padding:'0 0 40px', overflowY:'auto' }}>
+    <div className="app-shell">
+      <div className="app-content" style={{ display:'flex', flexDirection:'column', padding:'0 0 40px', overflowY:'auto' }}>
 
       {/* Header */}
       <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'center', gap:12 }}>
@@ -193,6 +194,7 @@ export default function HomePage({ onNavigate }) {
           Données Deribit · Mis à jour en temps réel
         </div>
       </div>
+    </div>
     </div>
   )
 }

@@ -9,8 +9,10 @@ function daysUntil(ts) { return Math.max(0.01,(ts-Date.now())/86400000) }
 function settlesIn(ts) {
   const ms = Math.max(0, ts - Date.now())
   const hours = Math.max(1, Math.round(ms / 3600000))
+  const days = Math.max(1, Math.round(ms / 86400000))
   const date = new Date(ts).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})
-  return { hours, date }
+  const display = hours < 24 ? `${hours}h` : `${days}j`
+  return { display, hours, date }
 }
 function calcDualInterestPct(row, side, spotNow, days) {
   if (!spotNow || !days || days <= 0) return null
@@ -36,7 +38,7 @@ function getRating(ratio) {
   return {label:'Faible',color:'var(--put)',detail:'Sous-paie significativement'}
 }
 
-export default function ChainPage() {
+export default function ChainPage({ onNavigate }) {
   const [asset,setAsset]=useState('BTC')
   const [instruments,setInstruments]=useState([])
   const [expiries,setExpiries]=useState([])
@@ -300,7 +302,7 @@ export default function ChainPage() {
                         <div style={{fontSize:10,color:'var(--text-muted)',marginTop:3}}>{r.distPct>0?'+':''}{r.distPct?.toFixed(1)}% du spot</div>
                       </div>
                       <div>
-                        <div style={{fontSize:18,color:'var(--text)',lineHeight:1}}>{r.settle?.hours} hours</div>
+                        <div style={{fontSize:18,color:'var(--text)',lineHeight:1}}>{r.settle?.display}</div>
                         <div style={{display:'inline-block',marginTop:4,fontSize:9,color:'var(--text-muted)',background:'rgba(255,255,255,.06)',padding:'1px 6px',borderRadius:6}}>{r.settle?.date}</div>
                       </div>
                       <div>
@@ -308,7 +310,7 @@ export default function ChainPage() {
                         <div style={{fontSize:9,color:'var(--text-muted)',marginTop:3}}>IV {r.iv?.toFixed(1) ?? '—'}%</div>
                       </div>
                       <button
-                        onClick={()=>{ setActiveTab('di'); setDiExpiry(selExpiry) }}
+                        onClick={()=>{ if(onNavigate) onNavigate('paper'); else { setActiveTab('di'); setDiExpiry(selExpiry) } }}
                         style={{
                           background:'var(--accent)',color:'#001016',border:'none',borderRadius:8,
                           fontFamily:'var(--sans)',fontWeight:700,fontSize:12,padding:'10px 12px',cursor:'pointer'
