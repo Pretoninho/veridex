@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getSpot, getInstruments, getOrderBook, getAllExpiries, getBestDIOpportunities } from '../utils/api.js'
 import { calcOptionGreeks } from '../utils/greeks.js'
+import { evaluateDualPolicy, getDualRlMetrics } from '../utils/rlDual.js'
 
 function fmtTs(ts) {
   return new Date(ts).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'}).toUpperCase()
@@ -88,6 +89,7 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
   const [oppsLoading,setOppsLoading]=useState(false)
   const [atmGreeks,setAtmGreeks]=useState(null)
   const [chainSide,setChainSide]=useState('buy-low')
+  const [rlMetrics,setRlMetrics]=useState(()=>getDualRlMetrics())
 
   const loadExpiries=async(a)=>{
     setLoading(true);setError(null)
@@ -160,6 +162,7 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
   }
 
   useEffect(()=>{loadExpiries(asset)},[asset])
+  useEffect(()=>{ setRlMetrics(getDualRlMetrics()) },[asset, chainSide, selExpiry])
 
   const switchExpiry=async(ts)=>{
     setSelExpiry(ts);setLoading(true)
@@ -193,12 +196,21 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
       const interest=calcDualInterestPct(r,chainSide,spot,chainDays)
       const sideBook=chainSide==='buy-low'?r.put:r.call
       const settle=selExpiry?settlesIn(selExpiry):null
+      const rl = evaluateDualPolicy({
+        asset,
+        side: chainSide,
+        days: chainDays,
+        apr: interest,
+        distPct,
+        iv: sideBook?.mark_iv ?? null,
+      })
       return {
         strike:r.strike,
         strikeDistance,
         distPct,
         interest,
         settle,
+        rl,
         iv:sideBook?.mark_iv??null,
         oi:sideBook?.open_interest??null,
       }
@@ -322,6 +334,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
             <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
               Filtre Nexo: distance max ±{nexoDistance?.toLocaleString('en-US') ?? '—'} USD ({chainDays ? `${chainDays.toFixed(1)}j` : '—'})
             </div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+              RL dataset: {rlMetrics.experiences} experiences · {rlMetrics.states} etats
+            </div>
           </div>
 
           {chainRows.length>0&&(
@@ -347,6 +362,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
                       <div>
                         <span style={{display:'inline-block',fontSize:12,fontWeight:700,color:'var(--accent)',background:'rgba(0,212,255,.14)',border:'1px solid rgba(0,212,255,.28)',padding:'2px 8px',borderRadius:7}}>{r.interest.toFixed(2)}%</span>
                         <div style={{fontSize:9,color:'var(--text-muted)',marginTop:3}}>IV {r.iv?.toFixed(1) ?? '—'}%</div>
+                        <div style={{fontSize:9,color:r.rl.action==='subscribe'?'var(--call)':'var(--text-muted)',marginTop:2,fontWeight:700}}>
+                          RL {r.rl.action==='subscribe'?'GO':'WAIT'} {r.rl.confidence}%
+                        </div>
                       </div>
                       <button
                         onClick={()=>{
@@ -363,6 +381,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
                             iv: r.iv,
                             distanceUsd: r.strikeDistance,
                             distPct: r.distPct,
+                            rlStateKey: r.rl.stateKey,
+                            rlAction: r.rl.action,
+                            rlConfidence: r.rl.confidence,
                           }
                           if(onSubscribe) onSubscribe(payload)
                           else if(onNavigate) onNavigate('paper')

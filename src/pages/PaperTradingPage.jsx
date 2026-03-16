@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getSpot } from '../utils/api.js'
+import { evaluateDualPolicy, getDualRlMetrics, learnFromSettlement, resetDualRl } from '../utils/rlDual.js'
 
 const LS_DI_POSITIONS = 'paper_di_positions'
 const LS_DI_BALANCES = 'paper_di_balances'
@@ -105,6 +106,33 @@ function calcWalletEquity(balances, positions, spots) {
   const liquid = balances.USDC + btc + eth
   const locked = positions.reduce((acc, p) => acc + calcPositionMarkValue(p, spots), 0)
   return liquid + locked
+}
+
+function calcSettlementReward(position, settleSpot) {
+  if (!settleSpot || !position) {
+    return { exercised: false, netPnlUsd: 0, rewardPct: 0 }
+  }
+
+  if (position.side === 'sell-high') {
+    const entryRef = Math.max(1, position.entrySpot || settleSpot)
+    const entryCollateralUsd = position.collateralAsset * entryRef
+    const exercised = settleSpot >= position.strike
+    const finalValueUsd = exercised
+      ? (position.collateralAsset * position.strike) + (position.premiumAsset * settleSpot)
+      : (position.collateralAsset + position.premiumAsset) * settleSpot
+    const netPnlUsd = finalValueUsd - entryCollateralUsd
+    const rewardPct = entryCollateralUsd > 0 ? (netPnlUsd / entryCollateralUsd) * 100 : 0
+    return { exercised, netPnlUsd, rewardPct }
+  }
+
+  const entryCollateralUsd = position.collateralUsdc
+  const exercised = settleSpot <= position.strike
+  const finalValueUsd = exercised
+    ? ((position.collateralUsdc / position.strike) * settleSpot) + position.premiumUsdc
+    : position.collateralUsdc + position.premiumUsdc
+  const netPnlUsd = finalValueUsd - entryCollateralUsd
+  const rewardPct = entryCollateralUsd > 0 ? (netPnlUsd / entryCollateralUsd) * 100 : 0
+  return { exercised, netPnlUsd, rewardPct }
 }
 
 function PerformanceChart({ points }) {
@@ -239,6 +267,7 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
   })
 
   const [showTradeModal, setShowTradeModal] = useState(false)
+  const [rlMetrics, setRlMetrics] = useState(() => getDualRlMetrics())
   const [tradeForm, setTradeForm] = useState({
     asset: 'BTC',
     side: 'buy-low',
@@ -247,6 +276,9 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     apr: '',
     quantityAsset: MIN_LOT.BTC,
     days: '',
+    rlStateKey: null,
+    rlAction: null,
+    rlConfidence: null,
   })
 
   const loadSpots = async () => {
@@ -291,6 +323,9 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
       apr: prefillTrade.apr ? Number(prefillTrade.apr).toFixed(2) : '',
       quantityAsset: minLot,
       days: prefillTrade.days ? Number(prefillTrade.days).toFixed(2) : (prefillTrade.expiryTs ? calcDaysToExpiry(prefillTrade.expiryTs).toFixed(2) : ''),
+      rlStateKey: prefillTrade.rlStateKey ?? null,
+      rlAction: prefillTrade.rlAction ?? null,
+      rlConfidence: prefillTrade.rlConfidence ?? null,
     })
     setShowTradeModal(true)
   }, [prefillTrade])
@@ -351,8 +386,17 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
       side: prev.side || 'buy-low',
       quantityAsset: MIN_LOT[baseAsset] ?? 0.01,
       days: prev.days || '7',
+      rlStateKey: null,
+      rlAction: null,
+      rlConfidence: null,
     }))
     setShowTradeModal(true)
+  }
+
+  const resetRlDataset = () => {
+    if (!window.confirm('Reinitialiser le dataset RL local ?')) return
+    resetDualRl()
+    setRlMetrics(getDualRlMetrics())
   }
 
   const executeTrade = () => {
@@ -387,6 +431,19 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     }
 
     const now = Date.now()
+    const spotNow = spots[tradeForm.asset]
+    const distPct = spotNow ? ((strike - spotNow) / spotNow) * 100 : null
+    const rlEval = tradeForm.rlStateKey
+      ? { stateKey: tradeForm.rlStateKey, action: tradeForm.rlAction, confidence: tradeForm.rlConfidence }
+      : evaluateDualPolicy({
+        asset: tradeForm.asset,
+        side: preview.side,
+        days,
+        apr,
+        distPct,
+        iv: null,
+      })
+
     const position = {
       id: now,
       asset: tradeForm.asset,
@@ -403,6 +460,9 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
       periodRate: preview.periodRate,
       entrySpot: spots[tradeForm.asset],
       entryTs: now,
+      rlStateKey: rlEval?.stateKey ?? null,
+      rlAction: rlEval?.action ?? null,
+      rlConfidence: rlEval?.confidence ?? null,
     }
 
     setBalances((prev) => {
@@ -426,6 +486,7 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     const exercised = pos.side === 'sell-high'
       ? settleSpot >= pos.strike
       : settleSpot <= pos.strike
+    const reward = calcSettlementReward(pos, settleSpot)
 
     setBalances((prev) => {
       const next = { ...prev }
@@ -446,6 +507,24 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     })
 
     setPositions((prev) => prev.filter((p) => p.id !== id))
+
+    if (pos.rlStateKey) {
+      learnFromSettlement({
+        stateKey: pos.rlStateKey,
+        rewardPct: reward.rewardPct,
+        meta: {
+          side: pos.side,
+          asset: pos.asset,
+          exercised,
+          strike: pos.strike,
+          settleSpot,
+          apr: pos.apr,
+          days: pos.days,
+          netPnlUsd: reward.netPnlUsd,
+        },
+      })
+      setRlMetrics(getDualRlMetrics())
+    }
   }
 
   return (
@@ -481,6 +560,20 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
             <div className="stat-card">
               <div className="stat-label">P&L Simule</div>
               <div className="stat-value" style={{ color: pnl >= 0 ? 'var(--call)' : 'var(--put)' }}>{pnl >= 0 ? '+' : ''}{formatNum(pnl, 2)} USD</div>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 13, color: 'var(--text)' }}>RL Dataset</div>
+              <button onClick={resetRlDataset} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 10, padding: '3px 8px' }}>
+                Reset RL
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, fontSize: 10 }}>
+              <div style={{ color: 'var(--text-muted)' }}>Etats: <span style={{ color: 'var(--text)' }}>{rlMetrics.states}</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Experiences: <span style={{ color: 'var(--text)' }}>{rlMetrics.experiences}</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Reward moy: <span style={{ color: rlMetrics.avgReward >= 0 ? 'var(--call)' : 'var(--put)' }}>{formatNum(rlMetrics.avgReward, 2)}%</span></div>
             </div>
           </div>
 
@@ -533,6 +626,9 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                           APR {formatNum(pos.apr, 2)}% · {formatNum(pos.days, 2)}j · exp {formatDate(pos.expiryTs)}
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                          RL {pos.rlAction === 'subscribe' ? 'GO' : 'WAIT'} {pos.rlConfidence ?? 50}%
                         </div>
                       </div>
                       <button onClick={() => settlePosition(pos.id)} style={{ background: 'var(--accent)', color: '#001016', border: 'none', borderRadius: 7, padding: '6px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>
@@ -604,6 +700,17 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
                     onChange={(e) => setTradeForm((p) => ({ ...p, quantityAsset: e.target.value }))}
                     style={{ width: '100%', padding: 9, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
                   />
+                </div>
+
+                <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)' }}>
+                  RL state: {tradeForm.rlStateKey || evaluateDualPolicy({
+                    asset: tradeForm.asset,
+                    side: tradeForm.side,
+                    days: Number(tradeForm.days),
+                    apr: Number(tradeForm.apr),
+                    distPct: currentSpot && Number(tradeForm.strike) ? ((Number(tradeForm.strike) - currentSpot) / currentSpot) * 100 : null,
+                    iv: null,
+                  }).stateKey}
                 </div>
 
                 {tradeForm.expiryTs ? (
