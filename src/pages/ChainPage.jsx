@@ -102,6 +102,23 @@ function getNexoStrikeDistance(asset, days) {
   return (found || rules[rules.length - 1]).distance
 }
 
+function getStoredDca(asset) {
+  if (typeof localStorage === 'undefined') return null
+  const raw = localStorage.getItem(`di_dca_${asset}`)
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function isPlusValueStrike(side, strike, dca) {
+  if (!Number.isFinite(strike) || !Number.isFinite(dca) || dca <= 0) return null
+  return side === 'sell-high' ? strike >= dca : strike <= dca
+}
+
+function getDcaGapPct(strike, dca) {
+  if (!Number.isFinite(strike) || !Number.isFinite(dca) || dca <= 0) return null
+  return ((strike - dca) / dca) * 100
+}
+
 export default function ChainPage({ onNavigate, onSubscribe }) {
   const [asset,setAsset]=useState('BTC')
   const [instruments,setInstruments]=useState([])
@@ -226,30 +243,24 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
   const chainDays=selExpiry?daysUntil(selExpiry):null
   const isFridaySelection = selExpiry ? isUtcFriday(selExpiry) : false
   const nexoDistance = getNexoStrikeDistance(asset, chainDays)
-  const chainRows=rows
+  const dcaRef = getStoredDca(asset)
+  const baseChainRows = rows
     .map(r=>{
       const distPct=spot?((r.strike-spot)/spot)*100:null
       const strikeDistance = spot != null ? Math.abs(r.strike - spot) : null
       const interest=calcDualInterestPct(r,chainSide,spot,chainDays)
       const sideBook=chainSide==='buy-low'?r.put:r.call
       const settle=selExpiry?settlesIn(selExpiry):null
-      const rl = evaluateDualPolicy({
-        asset,
-        side: chainSide,
-        days: chainDays,
-        apr: interest,
-        distPct,
-        iv: sideBook?.mark_iv ?? null,
-      })
+      const delta = sideBook?.greeks?.delta ?? null
       return {
         strike:r.strike,
         strikeDistance,
         distPct,
         interest,
         settle,
-        rl,
         iv:sideBook?.mark_iv??null,
         oi:sideBook?.open_interest??null,
+        delta,
       }
     })
     .filter(r=>{
@@ -259,6 +270,37 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
       return r.distPct > 0.2
     })
     .sort((a,b)=>a.strike-b.strike)
+
+  const hasPlusValueCandidate = dcaRef == null
+    ? true
+    : baseChainRows.some((row) => isPlusValueStrike(chainSide, row.strike, dcaRef) === true)
+  const trappedTrend = dcaRef != null && !hasPlusValueCandidate
+  const chainRows=baseChainRows
+    .map((r)=>{
+      const plusValueLocked = isPlusValueStrike(chainSide, r.strike, dcaRef)
+      const dcaGapPct = getDcaGapPct(r.strike, dcaRef)
+      const rl = evaluateDualPolicy({
+        asset,
+        side: chainSide,
+        strike: r.strike,
+        dca: dcaRef,
+        dcaGapPct,
+        plusValueLocked,
+        trappedTrend,
+        delta: r.delta,
+        days: chainDays,
+        expiryTs: selExpiry,
+        apr: r.interest,
+        distPct: r.distPct,
+        iv: r.iv,
+      })
+      return {
+        ...r,
+        plusValueLocked,
+        dcaGapPct,
+        rl,
+      }
+    })
     .slice(0,14)
 
   return (
@@ -375,6 +417,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
               Cycle RL: vendredi hebdo, cible {RL_CYCLE_TARGET_DAYS}j ({isFridaySelection ? 'vendredi OK' : 'hors vendredi'})
             </div>
             <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+              DCA {asset}: {dcaRef ? `$${dcaRef.toLocaleString('en-US',{maximumFractionDigits:2})}` : 'non renseigne'}{dcaRef ? ` · protocole ${trappedTrend ? 'piege tendance actif' : 'plus-value disponible'}` : ''}
+            </div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
               RL dataset: {rlMetrics.experiences} experiences · {rlMetrics.states} etats
             </div>
           </div>
@@ -402,12 +447,19 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
                       <div>
                         <span style={{display:'inline-block',fontSize:12,fontWeight:700,color:'var(--accent)',background:'rgba(0,212,255,.14)',border:'1px solid rgba(0,212,255,.28)',padding:'2px 8px',borderRadius:7}}>{r.interest.toFixed(2)}%</span>
                         <div style={{fontSize:9,color:'var(--text-muted)',marginTop:3}}>IV {r.iv?.toFixed(1) ?? '—'}%</div>
+                        <div style={{fontSize:9,color:'var(--text-muted)',marginTop:2}}>Delta {r.delta != null ? Math.abs(r.delta).toFixed(2) : '—'}</div>
                         <div style={{fontSize:9,color:r.rl.action==='subscribe'?'var(--call)':'var(--text-muted)',marginTop:2,fontWeight:700}}>
                           RL {r.rl.action==='subscribe'?'GO':'WAIT'} {r.rl.confidence}%
                         </div>
                         {!r.rl.highIvCondition&&(
                           <div style={{fontSize:8,color:'var(--put)',marginTop:1}}>IV trop basse (&lt; {r.rl.ivFloor}%)</div>
                         )}
+                        <div style={{fontSize:8,color:r.rl.plusValueLocked ? 'var(--call)' : r.rl.trappedProtocolActive ? 'var(--accent)' : 'var(--put)',marginTop:1}}>
+                          {r.rl.plusValueLocked ? 'Plus-value si exerce' : r.rl.trappedProtocolActive ? `Piege: viser DCA (${r.dcaGapPct != null ? `${Math.abs(r.dcaGapPct).toFixed(1)}%` : '—'})` : 'Sous DCA si exerce'}
+                        </div>
+                        <div style={{fontSize:8,color:r.rl.deltaFloorOk ? 'var(--call)' : 'var(--put)',marginTop:1}}>
+                          Delta {r.rl.delta != null ? r.rl.delta.toFixed(2) : '—'} {r.rl.deltaFloorOk ? '>= 0.20' : '< 0.20'}
+                        </div>
                       </div>
                       <button
                         onClick={()=>{
@@ -415,6 +467,11 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
                             asset,
                             side: chainSide,
                             strike: r.strike,
+                            dca: dcaRef,
+                            delta: r.delta,
+                            plusValueLocked: r.plusValueLocked,
+                            trappedTrend,
+                            dcaGapPct: r.dcaGapPct,
                             expiryTs: selExpiry,
                             expiryLabel: r.settle?.date,
                             settleIn: r.settle?.display,

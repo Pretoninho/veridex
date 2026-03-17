@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getATMIV, getSpot } from '../utils/api.js'
-import { evaluateDualPolicy, getDualRlMetrics, getDualRlSnapshot, learnFromSettlement, resetDualRl } from '../utils/rlDual.js'
+import { calcOptionGreeks } from '../utils/greeks.js'
+import {
+  evaluateDualPolicy,
+  getDualRlMetrics,
+  getDualRlSnapshot,
+  learnFromSettlement,
+  resetDualRl,
+  getDualRewardConfig,
+  updateDualRewardConfig,
+  resetDualRewardConfig,
+} from '../utils/rlDual.js'
 
 const LS_DI_POSITIONS = 'paper_di_positions'
 const LS_DI_BALANCES = 'paper_di_balances'
@@ -8,6 +18,26 @@ const LS_DI_HISTORY = 'paper_di_history'
 
 const MIN_LOT = { BTC: 0.01, ETH: 0.2 }
 const INITIAL_BALANCES = { USDC: 100000, BTC: 0.4, ETH: 6 }
+
+function getStoredDca(asset) {
+  if (typeof localStorage === 'undefined') return null
+  const raw = localStorage.getItem(`di_dca_${asset}`)
+  const value = Number(raw)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+function computeDualDelta({ side, spot, strike, days, iv }) {
+  if (!Number.isFinite(spot) || !Number.isFinite(strike) || !Number.isFinite(days) || !Number.isFinite(iv) || days <= 0 || iv <= 0) return null
+  const greeks = calcOptionGreeks({
+    type: side === 'sell-high' ? 'call' : 'put',
+    S: spot,
+    K: strike,
+    T: days / 365,
+    sigma: iv / 100,
+    r: 0,
+  })
+  return greeks?.delta ?? null
+}
 
 function formatNum(n, max = 2) {
   if (!Number.isFinite(n)) return '—'
@@ -280,6 +310,7 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
   const [showTradeModal, setShowTradeModal] = useState(false)
   const [rlMetrics, setRlMetrics] = useState(() => getDualRlMetrics())
   const [rlSnapshot, setRlSnapshot] = useState(() => getDualRlSnapshot())
+  const [rewardConfig, setRewardConfig] = useState(() => getDualRewardConfig())
   const [tradeForm, setTradeForm] = useState({
     asset: 'BTC',
     side: 'buy-low',
@@ -292,6 +323,7 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     rlStateKey: null,
     rlAction: null,
     rlConfidence: null,
+    trappedTrend: false,
   })
 
   const loadSpots = async () => {
@@ -358,6 +390,7 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
       rlStateKey: prefillTrade.rlStateKey ?? null,
       rlAction: prefillTrade.rlAction ?? null,
       rlConfidence: prefillTrade.rlConfidence ?? null,
+      trappedTrend: prefillTrade.trappedTrend ?? false,
     })
     setShowTradeModal(true)
   }, [prefillTrade])
@@ -376,24 +409,39 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     if (Number.isFinite(explicitIv) && explicitIv > 0) return explicitIv
     return marketIvByAsset[tradeForm.asset]?.iv ?? null
   }, [marketIvByAsset, tradeForm.asset, tradeForm.iv])
+  const tradeDca = useMemo(() => getStoredDca(tradeForm.asset), [tradeForm.asset, balances])
 
   const liveRlEval = useMemo(() => {
     const strike = Number(tradeForm.strike)
     const apr = Number(tradeForm.apr)
     const days = Number(tradeForm.days) || calcDaysToExpiry(Number(tradeForm.expiryTs))
+    const delta = computeDualDelta({ side: tradeForm.side, spot: tradeSpot, strike, days, iv: tradeIv })
     const distPct = tradeSpot && Number.isFinite(strike) && strike > 0
       ? ((strike - tradeSpot) / tradeSpot) * 100
+      : null
+    const plusValueLocked = Number.isFinite(strike) && Number.isFinite(tradeDca)
+      ? (tradeForm.side === 'sell-high' ? strike >= tradeDca : strike <= tradeDca)
+      : null
+    const dcaGapPct = Number.isFinite(strike) && Number.isFinite(tradeDca) && tradeDca > 0
+      ? ((strike - tradeDca) / tradeDca) * 100
       : null
 
     return evaluateDualPolicy({
       asset: tradeForm.asset,
       side: tradeForm.side,
+      strike,
+      dca: tradeDca,
+      delta,
+      plusValueLocked,
+      dcaGapPct,
+      trappedTrend: Boolean(tradeForm.trappedTrend),
       days,
+      expiryTs: Number(tradeForm.expiryTs),
       apr,
       distPct,
       iv: tradeIv,
     })
-  }, [tradeForm, tradeIv, tradeSpot])
+  }, [tradeDca, tradeForm, tradeIv, tradeSpot])
 
   const lockedSummary = useMemo(() => {
     return positions.reduce((acc, pos) => {
@@ -449,6 +497,7 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
       rlStateKey: null,
       rlAction: null,
       rlConfidence: null,
+      trappedTrend: false,
     }))
     setShowTradeModal(true)
   }
@@ -457,6 +506,18 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     if (!window.confirm('Reinitialiser le dataset RL local ?')) return
     resetDualRl()
     setRlMetrics(getDualRlMetrics())
+    setRlSnapshot(getDualRlSnapshot())
+  }
+
+  const saveRewardConfig = () => {
+    const next = updateDualRewardConfig(rewardConfig)
+    setRewardConfig(next)
+    setRlSnapshot(getDualRlSnapshot())
+  }
+
+  const resetRewardConfig = () => {
+    const next = resetDualRewardConfig()
+    setRewardConfig(next)
     setRlSnapshot(getDualRlSnapshot())
   }
 
@@ -497,10 +558,25 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
     const resolvedIv = Number.isFinite(Number(tradeForm.iv)) && Number(tradeForm.iv) > 0
       ? Number(tradeForm.iv)
       : (marketIvByAsset[tradeForm.asset]?.iv ?? null)
+    const dca = getStoredDca(tradeForm.asset)
+    const delta = computeDualDelta({ side: preview.side, spot: spotNow, strike, days, iv: resolvedIv })
+    const plusValueLocked = Number.isFinite(strike) && Number.isFinite(dca)
+      ? (preview.side === 'sell-high' ? strike >= dca : strike <= dca)
+      : null
+    const dcaGapPct = Number.isFinite(strike) && Number.isFinite(dca) && dca > 0
+      ? ((strike - dca) / dca) * 100
+      : null
     const rlEval = evaluateDualPolicy({
       asset: tradeForm.asset,
       side: preview.side,
+      strike,
+      dca,
+      delta,
+      plusValueLocked,
+      dcaGapPct,
+      trappedTrend: Boolean(tradeForm.trappedTrend),
       days,
+      expiryTs: Number(tradeForm.expiryTs) || (now + preview.days * 86400000),
       apr,
       distPct,
       iv: resolvedIv,
@@ -523,6 +599,11 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
       entrySpot: spots[tradeForm.asset],
       entryTs: now,
       entryIv: resolvedIv,
+      dca,
+      delta,
+      plusValueLocked,
+      trappedTrend: Boolean(tradeForm.trappedTrend),
+      dcaGapPct,
       rlStateKey: rlEval?.stateKey ?? null,
       rlAction: rlEval?.action ?? null,
       rlConfidence: rlEval?.confidence ?? null,
@@ -583,6 +664,13 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
           settleSpot,
           apr: pos.apr,
           days: pos.days,
+          entryTs: pos.entryTs,
+          expiryTs: pos.expiryTs,
+          dca: pos.dca,
+          delta: pos.delta,
+          plusValueLocked: pos.plusValueLocked,
+          trappedTrend: pos.trappedTrend,
+          dcaGapPct: pos.dcaGapPct,
           netPnlUsd: reward.netPnlUsd,
         },
       })
@@ -637,13 +725,59 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, fontSize: 10 }}>
               <div style={{ color: 'var(--text-muted)' }}>Etats: <span style={{ color: 'var(--text)' }}>{rlMetrics.states}</span></div>
               <div style={{ color: 'var(--text-muted)' }}>Experiences: <span style={{ color: 'var(--text)' }}>{rlMetrics.experiences}</span></div>
-              <div style={{ color: 'var(--text-muted)' }}>Reward moy: <span style={{ color: rlMetrics.avgReward >= 0 ? 'var(--call)' : 'var(--put)' }}>{formatNum(rlMetrics.avgReward, 2)}%</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Reward final moy: <span style={{ color: rlMetrics.avgReward >= 0 ? 'var(--call)' : 'var(--put)' }}>{formatNum(rlMetrics.avgReward, 2)}%</span></div>
+            </div>
+            <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+              Reward PnL brut moy: <span style={{ color: rlMetrics.avgBaseReward >= 0 ? 'var(--call)' : 'var(--put)' }}>{formatNum(rlMetrics.avgBaseReward, 2)}%</span>
             </div>
             {rlMetrics.lastTs && (
               <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-muted)' }}>
                 Dernier apprentissage: {formatDate(rlMetrics.lastTs)} {formatTime(rlMetrics.lastTs)}
               </div>
             )}
+          </div>
+
+          <div className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 13, color: 'var(--text)' }}>Reward Config</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={resetRewardConfig} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 10, padding: '3px 8px' }}>
+                  Defaut
+                </button>
+                <button onClick={saveRewardConfig} style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, color: '#001016', cursor: 'pointer', fontSize: 10, padding: '3px 8px', fontWeight: 700 }}>
+                  Sauver
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {[
+                ['pnlWeight', 'Poids PnL'],
+                ['calendarWeight', 'Poids calendrier'],
+                ['fridayWeight', 'Poids vendredi'],
+                ['cycleWeight', 'Poids cycle'],
+                ['cycleTargetDays', 'Cible jours'],
+                ['cycleToleranceDays', 'Tolerance jours'],
+                ['exercisedPenalty', 'Penalite exercice'],
+                ['dcaWeight', 'Poids DCA'],
+                ['plusValueWeight', 'Bonus plus-value'],
+                ['trappedWeight', 'Poids marche piege'],
+                ['deltaWeight', 'Poids delta'],
+                ['deltaTarget', 'Delta cible'],
+                ['deltaTolerance', 'Tolerance delta'],
+              ].map(([key, label]) => (
+                <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                  {label}
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={rewardConfig[key]}
+                    onChange={(e) => setRewardConfig((prev) => ({ ...prev, [key]: e.target.value }))}
+                    style={{ width: '100%', padding: 7, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 11 }}
+                  />
+                </label>
+              ))}
+            </div>
           </div>
 
           <div className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
@@ -672,6 +806,22 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
               </div>
             )}
 
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>Contraintes calendrier</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12, fontSize: 10 }}>
+              <div style={{ color: 'var(--text-muted)' }}>Samples: <span style={{ color: 'var(--text)' }}>{rlSnapshot.calendarStats?.samples ?? 0}</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Friday rate: <span style={{ color: 'var(--text)' }}>{formatNum((rlSnapshot.calendarStats?.fridayRate ?? 0) * 100, 1)}%</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Dist. cible: <span style={{ color: 'var(--text)' }}>{rlSnapshot.calendarStats?.avgCycleDistance != null ? `${formatNum(rlSnapshot.calendarStats.avgCycleDistance, 2)}j` : '—'}</span></div>
+            </div>
+
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>Protocole DCA / Delta</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12, fontSize: 10 }}>
+              <div style={{ color: 'var(--text-muted)' }}>Tx plus-value: <span style={{ color: 'var(--text)' }}>{formatNum((rlSnapshot.protocolStats?.plusValueRate ?? 0) * 100, 1)}%</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Delta ≥ cible: <span style={{ color: 'var(--text)' }}>{formatNum((rlSnapshot.protocolStats?.deltaFloorRate ?? 0) * 100, 1)}%</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Tx piege: <span style={{ color: 'var(--text)' }}>{formatNum((rlSnapshot.protocolStats?.trappedRate ?? 0) * 100, 1)}%</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Gap DCA moyen: <span style={{ color: 'var(--text)' }}>{rlSnapshot.protocolStats?.avgDcaGapPct != null ? `${formatNum(rlSnapshot.protocolStats.avgDcaGapPct, 2)}%` : '—'}</span></div>
+              <div style={{ color: 'var(--text-muted)' }}>Delta moyen: <span style={{ color: 'var(--text)' }}>{rlSnapshot.protocolStats?.avgDeltaAbs != null ? formatNum(rlSnapshot.protocolStats.avgDeltaAbs, 3) : '—'}</span></div>
+            </div>
+
             <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>Experiences recentes</div>
             {rlSnapshot.recentExperiences.length === 0 ? (
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Le tableau se remplira apres les premiers settlements.</div>
@@ -687,10 +837,14 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--text)' }}>{entry.stateKey}</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4, fontSize: 10 }}>
+                      <div style={{ color: 'var(--text-muted)' }}>Base PnL: <span style={{ color: (entry.rewardBasePct ?? 0) >= 0 ? 'var(--call)' : 'var(--put)' }}>{Number.isFinite(entry.rewardBasePct) ? `${formatNum(entry.rewardBasePct, 2)}%` : '—'}</span></div>
                       <div style={{ color: 'var(--text-muted)' }}>Trade: <span style={{ color: 'var(--text)' }}>{entry.meta?.asset || '—'} {entry.meta?.side || ''}</span></div>
                       <div style={{ color: 'var(--text-muted)' }}>Net: <span style={{ color: (entry.meta?.netPnlUsd ?? 0) >= 0 ? 'var(--call)' : 'var(--put)' }}>{entry.meta?.netPnlUsd != null ? `${formatNum(entry.meta.netPnlUsd, 2)} USD` : '—'}</span></div>
                       <div style={{ color: 'var(--text-muted)' }}>Exerce: <span style={{ color: entry.meta?.exercised ? 'var(--put)' : 'var(--call)' }}>{entry.meta?.exercised ? 'Oui' : 'Non'}</span></div>
+                      <div style={{ color: 'var(--text-muted)' }}>Bonus cal: <span style={{ color: (entry.rewardDiagnostics?.calendar?.calendarBonus ?? 0) >= 0 ? 'var(--call)' : 'var(--put)' }}>{entry.rewardDiagnostics?.calendar?.calendarBonus != null ? `${formatNum(entry.rewardDiagnostics.calendar.calendarBonus, 2)}%` : '—'}</span></div>
                       <div style={{ color: 'var(--text-muted)' }}>Q: <span style={{ color: 'var(--text)' }}>{formatNum(entry.qSubscribe, 2)} / {formatNum(entry.qSkip, 2)}</span></div>
+                      <div style={{ color: 'var(--text-muted)' }}>DCA: <span style={{ color: entry.rewardDiagnostics?.dca?.plusValueLocked ? 'var(--call)' : 'var(--text)' }}>{entry.rewardDiagnostics?.dca?.plusValueLocked ? 'plus-value' : entry.rewardDiagnostics?.dca?.dcaGapPct != null ? `${formatNum(Math.abs(entry.rewardDiagnostics.dca.dcaGapPct), 2)}% gap` : '—'}</span></div>
+                      <div style={{ color: 'var(--text-muted)' }}>Delta: <span style={{ color: entry.rewardDiagnostics?.delta?.deltaFloorOk ? 'var(--call)' : 'var(--put)' }}>{entry.rewardDiagnostics?.delta?.deltaAbs != null ? formatNum(entry.rewardDiagnostics.delta.deltaAbs, 3) : '—'}</span></div>
                     </div>
                   </div>
                 ))}
@@ -751,6 +905,9 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
                         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
                           RL {pos.rlAction === 'subscribe' ? 'GO' : 'WAIT'} {pos.rlConfidence ?? 50}%
                         </div>
+                        <div style={{ fontSize: 9, color: pos.plusValueLocked ? 'var(--call)' : 'var(--text-muted)', marginTop: 2 }}>
+                          {pos.plusValueLocked ? 'Plus-value si exerce' : pos.dcaGapPct != null ? `Gap DCA ${formatNum(Math.abs(pos.dcaGapPct), 2)}%` : 'DCA non renseigne'} · delta {pos.delta != null ? Math.abs(pos.delta).toFixed(2) : '—'}
+                        </div>
                       </div>
                       <button onClick={() => settlePosition(pos.id)} style={{ background: 'var(--accent)', color: '#001016', border: 'none', borderRadius: 7, padding: '6px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>
                         Regler au spot actuel
@@ -795,8 +952,8 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                  <button className={`asset-btn${tradeForm.asset === 'BTC' ? ' active-btc' : ''}`} onClick={() => setTradeForm((p) => ({ ...p, asset: 'BTC', quantityAsset: Math.max(Number(p.quantityAsset) || 0, MIN_LOT.BTC), iv: '', rlStateKey: null, rlAction: null, rlConfidence: null }))}>BTC</button>
-                  <button className={`asset-btn${tradeForm.asset === 'ETH' ? ' active-eth' : ''}`} onClick={() => setTradeForm((p) => ({ ...p, asset: 'ETH', quantityAsset: Math.max(Number(p.quantityAsset) || 0, MIN_LOT.ETH), iv: '', rlStateKey: null, rlAction: null, rlConfidence: null }))}>ETH</button>
+                  <button className={`asset-btn${tradeForm.asset === 'BTC' ? ' active-btc' : ''}`} onClick={() => setTradeForm((p) => ({ ...p, asset: 'BTC', quantityAsset: Math.max(Number(p.quantityAsset) || 0, MIN_LOT.BTC), iv: '', rlStateKey: null, rlAction: null, rlConfidence: null, trappedTrend: false }))}>BTC</button>
+                  <button className={`asset-btn${tradeForm.asset === 'ETH' ? ' active-eth' : ''}`} onClick={() => setTradeForm((p) => ({ ...p, asset: 'ETH', quantityAsset: Math.max(Number(p.quantityAsset) || 0, MIN_LOT.ETH), iv: '', rlStateKey: null, rlAction: null, rlConfidence: null, trappedTrend: false }))}>ETH</button>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
@@ -850,6 +1007,19 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
                     {liveRlEval.highIvCondition
                       ? `Filtre IV valide (seuil ${liveRlEval.ivFloor}%).`
                       : `Filtre IV non valide: seuil ${liveRlEval.ivFloor}%, IV actuelle ${tradeIv != null ? formatNum(tradeIv, 2) : '—'}%.`}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                    DCA {tradeForm.asset}: {tradeDca != null ? `${formatNum(tradeDca, 2)} USD` : 'non renseigne'} · protocole {liveRlEval.protocol}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                    Delta: <span style={{ color: liveRlEval.deltaFloorOk ? 'var(--call)' : 'var(--put)' }}>{liveRlEval.delta != null ? liveRlEval.delta.toFixed(3) : '—'}</span> · objectif {'>='} {liveRlEval.deltaTarget?.toFixed(2)}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                    {liveRlEval.plusValueLocked
+                      ? 'Si exerce: transaction en plus-value selon le DCA.'
+                      : liveRlEval.trappedProtocolActive
+                        ? `Marche piege: viser le strike le plus proche du DCA (${liveRlEval.dcaGapPct != null ? `${formatNum(Math.abs(liveRlEval.dcaGapPct), 2)}%` : '—'}).`
+                        : 'Si exerce: strike defavorable vs DCA.'}
                   </div>
                 </div>
 

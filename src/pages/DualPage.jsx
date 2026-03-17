@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { getATMIV, getSpot } from '../utils/api.js'
 import { calcPremiumNative, calcPremiumUSD, marketPremiumPct, diScore, scoreLabel, calcPnL, calcDays, countdown, fmtUSD, fmtStrike, fmtExpiry, fmtDuration } from '../utils/di.js'
+import { calcOptionGreeks } from '../utils/greeks.js'
 import { evaluateDualPolicy } from '../utils/rlDual.js'
 
 const SCORE_COLORS = { great: 'var(--call)', good: 'var(--atm)', fair: 'var(--accent2)', poor: 'var(--put)' }
@@ -23,6 +24,19 @@ function defaultSettlement(subscribeDate) {
 function emptyForm() {
   const subscribeDate = defaultSubscribe()
   return { asset: 'BTC', type: 'sell-high', strike: '', subscribeDate, settlementDate: defaultSettlement(subscribeDate), rate: '', quantity: '' }
+}
+
+function computeDualDelta({ side, spot, strike, days, iv }) {
+  if (!Number.isFinite(spot) || !Number.isFinite(strike) || !Number.isFinite(days) || !Number.isFinite(iv) || days <= 0 || iv <= 0) return null
+  const greeks = calcOptionGreeks({
+    type: side === 'sell-high' ? 'call' : 'put',
+    S: spot,
+    K: strike,
+    T: days / 365,
+    sigma: iv / 100,
+    r: 0,
+  })
+  return greeks?.delta ?? null
 }
 
 export default function DualPage() {
@@ -78,19 +92,70 @@ export default function DualPage() {
   const liveRlEval = useMemo(() => {
     const strike = parseFloat(form.strike)
     const apr = parseFloat(form.rate)
+    const expiryTs = form.settlementDate ? new Date(form.settlementDate).getTime() : null
+    const dca = dcaForForm
     const distPct = formSpot && Number.isFinite(strike) && strike > 0
       ? ((strike - formSpot) / formSpot) * 100
+      : null
+    const iv = ivCache[form.asset]?.iv ?? null
+    const delta = computeDualDelta({ side: form.type, spot: formSpot, strike, days: formDays, iv })
+    const plusValueLocked = Number.isFinite(strike) && Number.isFinite(dca)
+      ? (form.type === 'sell-high' ? strike >= dca : strike <= dca)
+      : null
+    const dcaGapPct = Number.isFinite(strike) && Number.isFinite(dca) && dca > 0
+      ? ((strike - dca) / dca) * 100
       : null
 
     return evaluateDualPolicy({
       asset: form.asset,
       side: form.type,
+      strike,
+      dca,
+      delta,
+      plusValueLocked,
+      dcaGapPct,
       days: formDays,
+      expiryTs,
       apr,
       distPct,
-      iv: ivCache[form.asset]?.iv ?? null,
+      iv,
     })
-  }, [form.asset, form.type, form.strike, form.rate, formDays, formSpot, ivCache])
+  }, [dcaForForm, form.asset, form.type, form.strike, form.rate, formDays, formSpot, form.settlementDate, ivCache])
+
+  const offerRlMap = useMemo(() => {
+    const entries = offers.map((offer) => {
+      const settleTs = offer.settlementDate ? new Date(offer.settlementDate).getTime() : null
+      const days = offer.days || calcDays(offer.subscribeDate, offer.settlementDate)
+      const spotNow = spots[offer.asset] ?? null
+      const distPct = spotNow && Number.isFinite(offer.strike) && offer.strike > 0
+        ? ((offer.strike - spotNow) / spotNow) * 100
+        : null
+      const dca = getDCA(offer.asset)
+      const delta = computeDualDelta({ side: offer.type, spot: spotNow, strike: offer.strike, days, iv: offer.deribitIV ?? null })
+      const plusValueLocked = Number.isFinite(offer.strike) && Number.isFinite(dca)
+        ? (offer.type === 'sell-high' ? offer.strike >= dca : offer.strike <= dca)
+        : null
+      const dcaGapPct = Number.isFinite(offer.strike) && Number.isFinite(dca) && dca > 0
+        ? ((offer.strike - dca) / dca) * 100
+        : null
+      const rl = evaluateDualPolicy({
+        asset: offer.asset,
+        side: offer.type,
+        strike: offer.strike,
+        dca,
+        delta,
+        plusValueLocked,
+        dcaGapPct,
+        days,
+        expiryTs: settleTs,
+        apr: offer.rate,
+        distPct,
+        iv: offer.deribitIV ?? null,
+      })
+      return [offer.id, rl]
+    })
+    return Object.fromEntries(entries)
+  }, [offers, spots])
 
   useEffect(() => {
     const assets = [...new Set(offers.map(o => o.asset))]
@@ -362,8 +427,15 @@ export default function DualPage() {
                   <div style={{ color:'var(--text-muted)' }}>Filtre IV: <span style={{ color:liveRlEval.highIvCondition ? 'var(--call)' : 'var(--put)' }}>{liveRlEval.highIvCondition ? 'OK' : `Mini ${liveRlEval.ivFloor}%`}</span></div>
                   <div style={{ color:'var(--text-muted)' }}>Spot: <span style={{ color:'var(--text)' }}>{formSpot ? fmtUSD(formSpot) : '—'}</span></div>
                 </div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:10, marginTop:4 }}>
+                  <div style={{ color:'var(--text-muted)' }}>Delta: <span style={{ color:liveRlEval.deltaFloorOk ? 'var(--call)' : 'var(--put)' }}>{liveRlEval.delta != null ? liveRlEval.delta.toFixed(2) : '—'}</span></div>
+                  <div style={{ color:'var(--text-muted)' }}>DCA: <span style={{ color:liveRlEval.plusValueLocked ? 'var(--call)' : liveRlEval.trappedProtocolActive ? 'var(--accent)' : 'var(--put)' }}>{liveRlEval.plusValueLocked ? 'plus-value lock' : liveRlEval.dcaGapPct != null ? `${Math.abs(liveRlEval.dcaGapPct).toFixed(1)}% du DCA` : '—'}</span></div>
+                </div>
+                <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+                  Calendrier: {liveRlEval.expiryTs ? new Date(liveRlEval.expiryTs).getUTCDay() === 5 ? 'vendredi' : 'hors vendredi' : 'date manquante'}
+                </div>
                 <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
-                  Etat: <span style={{ color:'var(--text)' }}>{liveRlEval.stateKey}</span>
+                  Etat: <span style={{ color:'var(--text)' }}>{liveRlEval.stateKey}</span> · protocole <span style={{ color:'var(--text)' }}>{liveRlEval.protocol}</span>
                 </div>
               </div>
             )}
@@ -421,6 +493,7 @@ export default function DualPage() {
                       <span style={{ fontSize:10, color:'var(--text-muted)' }}>· {assetOffers.length} contrat{assetOffers.length>1?'s':''}</span>
                     </div>
                     {assetOffers.map(o => {
+                      const rl = offerRlMap[o.id]
                       const days   = o.days || calcDays(o.subscribeDate, o.settlementDate)
                       const prime  = calcPremiumNative(o.rate, days, o.quantity) * o.strike
                       const primeN = calcPremiumNative(o.rate, days, o.quantity)
@@ -478,6 +551,23 @@ export default function DualPage() {
                                   <span style={{ fontSize:10, color:'var(--text-muted)' }}>{(ratio*100).toFixed(0)}%</span>
                                 </div>
                                 {margin!=null && <div style={{ fontSize:10, color:margin>40?'var(--put)':'var(--text-muted)', marginTop:3 }}>Marge: {margin.toFixed(1)}% sous marché</div>}
+                              </div>
+                            )}
+                            {rl && (
+                              <div style={{ gridColumn:'span 2', background:'rgba(0,212,255,.06)', border:'1px solid rgba(0,212,255,.2)', borderRadius:8, padding:'8px 10px' }}>
+                                <div style={{ display:'flex', justifyContent:'space-between', gap:8, fontSize:10, marginBottom:4 }}>
+                                  <span style={{ color:'var(--text-muted)' }}>Diagnostic RL</span>
+                                  <span style={{ color:rl.action==='subscribe' ? 'var(--call)' : 'var(--put)', fontWeight:700 }}>RL {rl.action==='subscribe' ? 'GO' : 'WAIT'} {rl.confidence}%</span>
+                                </div>
+                                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:10 }}>
+                                  <div style={{ color:'var(--text-muted)' }}>Q(sub/skip): <span style={{ color:'var(--text)' }}>{rl.qSubscribe.toFixed(2)} / {rl.qSkip.toFixed(2)}</span></div>
+                                  <div style={{ color:'var(--text-muted)' }}>Filtre IV: <span style={{ color:rl.highIvCondition ? 'var(--call)' : 'var(--put)' }}>{rl.highIvCondition ? 'OK' : `Mini ${rl.ivFloor}%`}</span></div>
+                                  <div style={{ color:'var(--text-muted)' }}>Calendrier: <span style={{ color:'var(--text)' }}>{rl.expiryTs ? new Date(rl.expiryTs).getUTCDay() === 5 ? 'vendredi' : 'hors vendredi' : 'date manquante'}</span></div>
+                                  <div style={{ color:'var(--text-muted)' }}>Etat: <span style={{ color:'var(--text)' }}>{rl.stateKey}</span></div>
+                                  <div style={{ color:'var(--text-muted)' }}>Delta: <span style={{ color:rl.deltaFloorOk ? 'var(--call)' : 'var(--put)' }}>{rl.delta != null ? rl.delta.toFixed(2) : '—'}</span></div>
+                                  <div style={{ color:'var(--text-muted)' }}>DCA: <span style={{ color:rl.plusValueLocked ? 'var(--call)' : 'var(--text)' }}>{rl.plusValueLocked ? 'plus-value' : rl.dcaGapPct != null ? `${Math.abs(rl.dcaGapPct).toFixed(1)}% du DCA` : '—'}</span></div>
+                                  <div style={{ color:'var(--text-muted)' }}>Protocole: <span style={{ color:'var(--text)' }}>{rl.protocol}</span></div>
+                                </div>
                               </div>
                             )}
                           </div>
