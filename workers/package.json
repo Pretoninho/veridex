@@ -1,0 +1,15 @@
+{
+  "name": "deribit-rl-bot",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker bot for RL-driven Deribit alerts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "publish": "wrangler deploy --env production",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
