@@ -29,6 +29,16 @@ function calcDaysToExpiry(expiryTs) {
   return Math.max(0.01, (expiryTs - Date.now()) / 86400000)
 }
 
+function nextWeekFridayTs(fromTs = Date.now()) {
+  const d = new Date(fromTs)
+  const dow = d.getUTCDay()
+  const daysToThisFriday = (5 - dow + 7) % 7
+  const daysToNextFriday = daysToThisFriday + 7
+  d.setUTCDate(d.getUTCDate() + daysToNextFriday)
+  d.setUTCHours(8, 0, 0, 0)
+  return d.getTime()
+}
+
 function calcPeriodRate(apr, days) {
   if (!Number.isFinite(apr) || !Number.isFinite(days) || days <= 0) return 0
   return (apr / 100) * (days / 365)
@@ -427,12 +437,14 @@ export default function PaperTradingPage({ onBack, prefillTrade }) {
 
   const openNewTrade = () => {
     const baseAsset = asset
+    const defaultExpiryTs = nextWeekFridayTs()
     setTradeForm((prev) => ({
       ...prev,
       asset: baseAsset,
       side: prev.side || 'buy-low',
       quantityAsset: MIN_LOT[baseAsset] ?? 0.01,
-      days: prev.days || '7',
+      expiryTs: defaultExpiryTs,
+      days: calcDaysToExpiry(defaultExpiryTs).toFixed(2),
       iv: marketIvByAsset[baseAsset]?.iv != null ? Number(marketIvByAsset[baseAsset].iv).toFixed(2) : '',
       rlStateKey: null,
       rlAction: null,

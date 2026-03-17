@@ -8,12 +8,21 @@ const SCORE_COLORS = { great: 'var(--call)', good: 'var(--atm)', fair: 'var(--ac
 function defaultSubscribe() {
   return new Date().toISOString().slice(0, 16)
 }
-function defaultSettlement() {
-  const d = new Date(); d.setDate(d.getDate() + 7)
+function nextWeekFridayIso(fromDate) {
+  const d = new Date(fromDate || Date.now())
+  const dow = d.getUTCDay()
+  const daysToThisFriday = (5 - dow + 7) % 7
+  const daysToNextFriday = daysToThisFriday + 7
+  d.setUTCDate(d.getUTCDate() + daysToNextFriday)
+  d.setUTCHours(8, 0, 0, 0)
   return d.toISOString().slice(0, 16)
 }
+function defaultSettlement(subscribeDate) {
+  return nextWeekFridayIso(subscribeDate ? new Date(subscribeDate) : new Date())
+}
 function emptyForm() {
-  return { asset: 'BTC', type: 'sell-high', strike: '', subscribeDate: defaultSubscribe(), settlementDate: defaultSettlement(), rate: '', quantity: '' }
+  const subscribeDate = defaultSubscribe()
+  return { asset: 'BTC', type: 'sell-high', strike: '', subscribeDate, settlementDate: defaultSettlement(subscribeDate), rate: '', quantity: '' }
 }
 
 export default function DualPage() {

@@ -7,6 +7,37 @@ function fmtTs(ts) {
   return new Date(ts).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'2-digit'}).toUpperCase()
 }
 function daysUntil(ts) { return Math.max(0.01,(ts-Date.now())/86400000) }
+const RL_CYCLE_TARGET_DAYS = 14
+
+function isUtcFriday(ts) {
+  return new Date(ts).getUTCDay() === 5
+}
+
+function pickRlCycleExpiry(expiries, nowMs = Date.now()) {
+  if (!expiries?.length) return null
+
+  const future = expiries.filter((ts) => Number.isFinite(ts) && ts > nowMs)
+  if (!future.length) return expiries[0] ?? null
+
+  const fridayFuture = future.filter((ts) => isUtcFriday(ts))
+  const fridayWindow = fridayFuture.filter((ts) => {
+    const d = (ts - nowMs) / 86400000
+    return d >= 7 && d <= RL_CYCLE_TARGET_DAYS
+  })
+
+  if (fridayWindow.length) {
+    return fridayWindow.sort((a, b) => {
+      const da = Math.abs(((a - nowMs) / 86400000) - RL_CYCLE_TARGET_DAYS)
+      const db = Math.abs(((b - nowMs) / 86400000) - RL_CYCLE_TARGET_DAYS)
+      if (da !== db) return da - db
+      return a - b
+    })[0]
+  }
+
+  if (fridayFuture.length) return fridayFuture[0]
+  return future[0]
+}
+
 function settlesIn(ts) {
   const ms = Math.max(0, ts - Date.now())
   const hours = Math.max(1, Math.round(ms / 3600000))
@@ -98,7 +129,12 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
       setSpot(sp);setInstruments(inst)
       const exps=getAllExpiries(inst)
       setExpiries(exps)
-      if(exps.length){setSelExpiry(exps[0]);setDiExpiry(exps[0]);await loadChain(a,exps[0],inst,sp)}
+      if(exps.length){
+        const preferred = pickRlCycleExpiry(exps) ?? exps[0]
+        setSelExpiry(preferred)
+        setDiExpiry(preferred)
+        await loadChain(a,preferred,inst,sp)
+      }
     } catch(e){setError(e.message)}
     setLoading(false)
   }
@@ -188,6 +224,7 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
   const smileRows=rows.map(r=>({strike:r.strike,iv:r.call?.mark_iv??r.put?.mark_iv??null,distPct:spot?(r.strike-spot)/spot*100:null})).filter(r=>r.iv!=null)
   const maxIV=smileRows.length?Math.max(...smileRows.map(r=>r.iv)):1
   const chainDays=selExpiry?daysUntil(selExpiry):null
+  const isFridaySelection = selExpiry ? isUtcFriday(selExpiry) : false
   const nexoDistance = getNexoStrikeDistance(asset, chainDays)
   const chainRows=rows
     .map(r=>{
@@ -335,6 +372,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
               Filtre Nexo: distance max ±{nexoDistance?.toLocaleString('en-US') ?? '—'} USD ({chainDays ? `${chainDays.toFixed(1)}j` : '—'})
             </div>
             <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+              Cycle RL: vendredi hebdo, cible {RL_CYCLE_TARGET_DAYS}j ({isFridaySelection ? 'vendredi OK' : 'hors vendredi'})
+            </div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
               RL dataset: {rlMetrics.experiences} experiences · {rlMetrics.states} etats
             </div>
           </div>
@@ -387,6 +427,9 @@ export default function ChainPage({ onNavigate, onSubscribe }) {
                             rlStateKey: r.rl.stateKey,
                             rlAction: r.rl.action,
                             rlConfidence: r.rl.confidence,
+                            expiryPolicy: 'weekly-friday',
+                            cycleTargetDays: RL_CYCLE_TARGET_DAYS,
+                            isFridayExpiry: isUtcFriday(selExpiry),
                           }
                           if(onSubscribe) onSubscribe(payload)
                           else if(onNavigate) onNavigate('paper')
