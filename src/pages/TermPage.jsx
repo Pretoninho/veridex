@@ -1,18 +1,12 @@
 import { useState } from 'react'
-import { getSpot, getFutures, getFuturePrice, getATMIV, getInstruments, getOrderBook, getAllExpiries } from '../utils/api.js'
-import { getFundingRate } from '../utils/api.js'
+import { getSpot, getFutures, getFuturePrice, getATMIV, getInstruments, getOrderBook, getAllExpiries, getFundingRate } from '../utils/api.js'
 import { Bar } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js'
+import { calcDIRateSimple, calcTermStructureSignal } from '../data_processing/market_structure/term_structure.js'
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
 function daysUntil(ts) {
   return Math.max(1, Math.round((ts - Date.now()) / 86400000))
-}
-
-function calcDIRateBS(iv, days) {
-  if (!iv || !days) return null
-  const T = days / 365
-  return (iv / 100 * Math.sqrt(T) * 0.4 * 100) * (365 / days)
 }
 
 function fmtTs(ts) {
@@ -84,7 +78,7 @@ export default function TermPage() {
             }
           }
 
-          const diRate = calcDIRateBS(iv, days)
+          const diRate = calcDIRateSimple(iv, days)
           rowData.push({
             instrument: f.instrument_name,
             expiry: isPerp ? 'PERP' : fmtTs(f.expiration_timestamp),
@@ -101,34 +95,10 @@ export default function TermPage() {
         const avg = dated.reduce((s,r)=>s+r.basisAnn,0)/dated.length
         const max = Math.max(...dated.map(r=>r.basisAnn))
         const fundingAnn = fundingData?.avgAnn7d ?? 0
-        const isContango = avg > 0.5
-        const isBackwardation = avg < -0.5
-
-        // Signal DI
-        let diSignal, diColor, diReason
-        if (isContango && fundingAnn > 10) {
-          diSignal = '🔥 Sell High + Short Perp'
-          diColor = 'var(--call)'
-          diReason = `Contango ${avg.toFixed(1)}% ann. + Funding +${fundingAnn.toFixed(1)}% ann. → Tu reçois prime DI + funding`
-        } else if (isContango && fundingAnn > 0) {
-          diSignal = '✓ Sell High favorable'
-          diColor = 'var(--atm)'
-          diReason = `Contango ${avg.toFixed(1)}% ann. — hedge perp optionnel`
-        } else if (isBackwardation && fundingAnn < 0) {
-          diSignal = '🔥 Buy Low + Long Perp'
-          diColor = 'var(--call)'
-          diReason = `Backwardation ${avg.toFixed(1)}% ann. + Funding ${fundingAnn.toFixed(1)}% ann. → Tu reçois prime DI + funding`
-        } else if (isBackwardation) {
-          diSignal = '✓ Buy Low favorable'
-          diColor = 'var(--atm)'
-          diReason = `Backwardation ${avg.toFixed(1)}% ann. — contexte favorable accumulation`
-        } else {
-          diSignal = '~ Marché neutre'
-          diColor = 'var(--accent2)'
-          diReason = `Basis plat — pas de signal directionnel fort`
-        }
-
-        setSignal({ label: isContango?'Contango':isBackwardation?'Backwardation':'Flat', avg, max, count: dated.length, diSignal, diColor, diReason, fundingAnn })
+        const structure = avg > 0.5 ? 'contango' : avg < -0.5 ? 'backwardation' : 'flat'
+        const { signal: diSignal, color: diColor, reason: diReason } =
+          calcTermStructureSignal({ avgBasisAnn: avg, structure }, fundingAnn)
+        setSignal({ label: structure === 'contango' ? 'Contango' : structure === 'backwardation' ? 'Backwardation' : 'Flat', avg, max, count: dated.length, diSignal, diColor, diReason, fundingAnn })
       }
     } catch(e) { setError(e.message) }
     setLoading(false)
