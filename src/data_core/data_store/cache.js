@@ -1,0 +1,234 @@
+/**
+ * cache.js — Store central de données
+ *
+ * Stocke la dernière valeur connue + un historique court pour chaque clé.
+ * Interface unifiée : get / set / subscribe / invalidate
+ *
+ * Clé de cache = `{source}:{asset}:{type}`
+ * Exemples :
+ *   - 'deribit:BTC:spot'
+ *   - 'binance:ETH:funding'
+ *   - 'deribit:BTC:dvol'
+ *   - 'deribit:BTC:option:BTC-28MAR25-80000-C'
+ */
+
+const DEFAULT_MAX_HISTORY = 100  // entrées par clé
+const DEFAULT_TTL_MS = 60_000   // 1 min — après ça, la donnée est "stale"
+
+class DataStore {
+  constructor() {
+    /** @type {Map<string, { value: any, timestamp: number }>} */
+    this._latest = new Map()
+
+    /** @type {Map<string, Array<{ value: any, timestamp: number }>>} */
+    this._history = new Map()
+
+    /** @type {Map<string, Set<Function>>} */
+    this._subscribers = new Map()
+
+    this._maxHistory = DEFAULT_MAX_HISTORY
+    this._ttlMs = DEFAULT_TTL_MS
+  }
+
+  // ── Écriture ───────────────────────────────────────────────────────────────
+
+  /**
+   * Stocke une valeur normalisée dans le cache.
+   * @param {string} key
+   * @param {any} value — objet normalisé (NormalizedTicker, NormalizedOption…)
+   */
+  set(key, value) {
+    const entry = { value, timestamp: Date.now() }
+
+    this._latest.set(key, entry)
+
+    if (!this._history.has(key)) this._history.set(key, [])
+    const hist = this._history.get(key)
+    hist.push(entry)
+    if (hist.length > this._maxHistory) hist.shift()
+
+    this._notify(key, value)
+  }
+
+  // ── Lecture ────────────────────────────────────────────────────────────────
+
+  /**
+   * Retourne la dernière valeur, ou null si absente/expirée.
+   * @param {string} key
+   * @param {boolean} [allowStale=false] — retourner même si TTL dépassé
+   */
+  get(key, allowStale = false) {
+    const entry = this._latest.get(key)
+    if (!entry) return null
+    if (!allowStale && Date.now() - entry.timestamp > this._ttlMs) return null
+    return entry.value
+  }
+
+  /**
+   * Retourne la dernière valeur avec métadonnées.
+   * @param {string} key
+   */
+  getMeta(key) {
+    const entry = this._latest.get(key)
+    if (!entry) return null
+    return {
+      value: entry.value,
+      timestamp: entry.timestamp,
+      age: Date.now() - entry.timestamp,
+      stale: Date.now() - entry.timestamp > this._ttlMs,
+    }
+  }
+
+  /**
+   * Retourne l'historique d'une clé.
+   * @param {string} key
+   * @param {number} [limit] — nombre max d'entrées
+   */
+  getHistory(key, limit) {
+    const hist = this._history.get(key) ?? []
+    return limit ? hist.slice(-limit) : [...hist]
+  }
+
+  /**
+   * Retourne toutes les clés dont le préfixe correspond.
+   * ex: getKeysBy('deribit:BTC') → toutes les données BTC Deribit
+   */
+  getKeysBy(prefix) {
+    return [...this._latest.keys()].filter(k => k.startsWith(prefix))
+  }
+
+  /**
+   * Retourne toutes les valeurs dont la clé commence par prefix.
+   */
+  getAllBy(prefix, allowStale = false) {
+    return this.getKeysBy(prefix)
+      .map(k => this.get(k, allowStale))
+      .filter(Boolean)
+  }
+
+  // ── Invalidation ───────────────────────────────────────────────────────────
+
+  /** Supprime une clé du cache. */
+  invalidate(key) {
+    this._latest.delete(key)
+    this._history.delete(key)
+    this._subscribers.delete(key)
+  }
+
+  /** Supprime toutes les clés d'un préfixe. */
+  invalidateBy(prefix) {
+    this.getKeysBy(prefix).forEach(k => this.invalidate(k))
+  }
+
+  /** Supprime toutes les entrées expirées. */
+  purgeStale() {
+    const now = Date.now()
+    for (const [key, entry] of this._latest) {
+      if (now - entry.timestamp > this._ttlMs) {
+        this._latest.delete(key)
+      }
+    }
+  }
+
+  // ── Subscriptions ──────────────────────────────────────────────────────────
+
+  /**
+   * S'abonne aux mises à jour d'une clé.
+   * @param {string} key
+   * @param {Function} listener  — appelé avec (value, key)
+   * @returns {Function} unsubscribe
+   */
+  subscribe(key, listener) {
+    if (!this._subscribers.has(key)) this._subscribers.set(key, new Set())
+    this._subscribers.get(key).add(listener)
+    return () => {
+      const subs = this._subscribers.get(key)
+      if (subs) {
+        subs.delete(listener)
+        if (!subs.size) this._subscribers.delete(key)
+      }
+    }
+  }
+
+  /**
+   * S'abonne à toutes les clés dont le préfixe correspond.
+   * Pratique pour écouter tous les tickers d'un asset.
+   * @param {string} prefix
+   * @param {Function} listener  — appelé avec (value, key)
+   * @returns {Function} unsubscribe
+   */
+  subscribeBy(prefix, listener) {
+    // Abonnement "pattern" : on stocke séparément
+    const wildcardKey = `__wildcard__${prefix}`
+    if (!this._subscribers.has(wildcardKey)) this._subscribers.set(wildcardKey, new Set())
+    this._subscribers.get(wildcardKey).add(listener)
+    return () => {
+      const subs = this._subscribers.get(wildcardKey)
+      if (subs) {
+        subs.delete(listener)
+        if (!subs.size) this._subscribers.delete(wildcardKey)
+      }
+    }
+  }
+
+  _notify(key, value) {
+    // Abonnés directs
+    this._subscribers.get(key)?.forEach(fn => {
+      try { fn(value, key) } catch (_) {}
+    })
+
+    // Abonnés wildcard
+    for (const [subKey, listeners] of this._subscribers) {
+      if (!subKey.startsWith('__wildcard__')) continue
+      const prefix = subKey.replace('__wildcard__', '')
+      if (key.startsWith(prefix)) {
+        listeners.forEach(fn => {
+          try { fn(value, key) } catch (_) {}
+        })
+      }
+    }
+  }
+
+  // ── Configuration ──────────────────────────────────────────────────────────
+
+  /** Modifie le TTL global en ms. */
+  setTTL(ms) { this._ttlMs = ms }
+
+  /** Modifie la taille max de l'historique par clé. */
+  setMaxHistory(n) { this._maxHistory = n }
+
+  // ── Diagnostic ────────────────────────────────────────────────────────────
+
+  /** Retourne un snapshot de l'état du cache pour debug. */
+  snapshot() {
+    const result = {}
+    for (const [key, entry] of this._latest) {
+      result[key] = {
+        timestamp: entry.timestamp,
+        age: Date.now() - entry.timestamp,
+        stale: Date.now() - entry.timestamp > this._ttlMs,
+        historyLength: this._history.get(key)?.length ?? 0,
+        subscribers: (this._subscribers.get(key)?.size ?? 0),
+      }
+    }
+    return result
+  }
+}
+
+// Singleton partagé dans toute l'application
+export const dataStore = new DataStore()
+
+// ── Clés canoniques ───────────────────────────────────────────────────────────
+// Helpers pour construire des clés cohérentes
+
+export const CacheKey = {
+  spot: (source, asset) => `${source}:${asset}:spot`,
+  future: (source, asset, instrument) => `${source}:${asset}:future:${instrument}`,
+  perp: (source, asset) => `${source}:${asset}:perp`,
+  option: (source, asset, instrument) => `${source}:${asset}:option:${instrument}`,
+  funding: (source, asset) => `${source}:${asset}:funding`,
+  oi: (source, asset) => `${source}:${asset}:oi`,
+  dvol: (source, asset) => `${source}:${asset}:dvol`,
+  instruments: (source, asset) => `${source}:${asset}:instruments`,
+  rv: (source, asset) => `${source}:${asset}:rv`,
+}
