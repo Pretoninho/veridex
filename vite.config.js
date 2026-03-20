@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { readFileSync } from 'fs'
+
+const { version } = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
 export default defineConfig({
   base: './',
@@ -11,7 +14,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate", version: "2.0",
+      registerType: "autoUpdate", version,
       includeAssets: ['favicon.ico'],
       manifest: {
         id: '/deribit-options-pwa/',

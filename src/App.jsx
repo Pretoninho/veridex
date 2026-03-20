@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { version } from '../package.json'
 import HomePage from './pages/HomePage.jsx'
 import ChainPage from './pages/ChainPage.jsx'
 import TrackerPage from './pages/TrackerPage.jsx'
@@ -151,6 +152,9 @@ export default function App() {
           MAJ
         </button>
       </nav>
+      <div style={{ textAlign:'center', fontSize:9, color:'var(--text-muted)', opacity:.4, paddingBottom:4, letterSpacing:'1px' }}>
+        v{version}
+      </div>
     </div>
   )
 }
