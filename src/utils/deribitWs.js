@@ -1,3 +1,9 @@
+/**
+ * @deprecated Ce fichier est remplacé par src/data_core/streams/websocket.js
+ * Les nouvelles pages doivent importer wsStream depuis data_core.
+ * Ce fichier est conservé pour la compatibilité des pages existantes.
+ */
+
 const DERIBIT_WS_URL = 'wss://www.deribit.com/ws/api/v2'
 const HEARTBEAT_INTERVAL_MS = 15000
 const STALE_CONNECTION_MS = 45000

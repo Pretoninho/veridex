@@ -1,3 +1,9 @@
+/**
+ * @deprecated Ce fichier est remplacé par src/data_core/providers/deribit.js
+ * Les nouvelles pages doivent importer depuis data_core ou data_processing.
+ * Ce fichier est conservé pour la compatibilité des pages existantes.
+ */
+
 const API = 'https://www.deribit.com/api/v2/public'
 
 async function apiFetch(url, timeoutMs = 15000) {
