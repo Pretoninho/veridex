@@ -19,6 +19,7 @@ import {
   normalizeOKXOptions,
   normalizeOKXSpot,
   normalizeOKXOptionsOI,
+  normalizeOKXFunding,
 } from '../normalizers/format_data.js'
 import { dataStore, CacheKey } from '../data_store/cache.js'
 
@@ -64,6 +65,19 @@ export async function getSpot(asset) {
   const raw = Array.isArray(data) ? data[0] : data
   const normalized = normalizeOKXSpot(asset, raw)
   if (normalized) dataStore.set(CacheKey.spot('okx', asset), normalized)
+  return normalized
+}
+
+/**
+ * Funding rate du perpetuel USDT-margined (SWAP).
+ * @param {'BTC'|'ETH'} asset
+ */
+export async function getFundingRate(asset) {
+  const instId = `${asset.toUpperCase()}-USDT-SWAP`
+  const data = await apiFetch('/api/v5/public/funding-rate', { instId })
+  const raw = Array.isArray(data) ? data[0] : data
+  const normalized = normalizeOKXFunding(asset, raw)
+  if (normalized) dataStore.set(CacheKey.funding('okx', asset), normalized)
   return normalized
 }
 

@@ -691,6 +691,27 @@ export function normalizeOKXOptionsOI(asset, oiData) {
   }
 }
 
+/**
+ * Normalise le funding rate du perpetuel OKX (USDT-margined SWAP)
+ * rawResult : réponse de GET /api/v5/public/funding-rate
+ * Champs : fundingRate, fundingTime, nextFundingRate, nextFundingTime
+ */
+export function normalizeOKXFunding(asset, rawResult) {
+  if (!rawResult) return null
+  const rate8h  = rawResult.fundingRate != null ? Number(rawResult.fundingRate) * 100 : null
+  const rateAnn = rate8h != null ? rate8h * 3 * 365 : null
+  return {
+    source:          'okx',
+    asset:           asset.toUpperCase(),
+    rate8h,
+    rateAnn,
+    nextFundingTime: rawResult.nextFundingTime != null ? Number(rawResult.nextFundingTime) : null,
+    bullish:         rateAnn != null ? rateAnn > 0 : null,
+    timestamp:       Date.now(),
+    raw:             rawResult,
+  }
+}
+
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 
 /**
