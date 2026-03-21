@@ -327,7 +327,6 @@ export default function OptionsDataPage({ asset }) {
   const dTotalOI = dOI?.callOI != null ? (dOI.callOI + dOI.putOI) : null
   const dPCR     = safe(dOI?.putCallRatio)
   const bPCR     = safe(bOI?.putCallRatio)
-  const oPCR     = safe(oOI?.putCallRatio)
 
   return (
     <div className="page-wrap">
