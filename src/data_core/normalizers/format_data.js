@@ -572,6 +572,125 @@ export function normalizeBinanceOptionsOI(asset, oiData) {
   }
 }
 
+// ── Normalisateurs OKX ───────────────────────────────────────────────────────
+
+/**
+ * Normalise le ticker spot OKX → NormalizedTicker
+ * raw : réponse de GET /api/v5/market/ticker
+ * Champs : instId, last, askPx, bidPx, volCcy24h, ts
+ */
+export function normalizeOKXSpot(asset, raw) {
+  if (!raw) return null
+  return {
+    source:    'okx',
+    asset:     asset.toUpperCase(),
+    type:      'spot',
+    instrument: raw.instId ?? `${asset}-USDT`,
+    price:     raw.last     != null ? Number(raw.last)     : null,
+    bid:       raw.bidPx    != null ? Number(raw.bidPx)    : null,
+    ask:       raw.askPx    != null ? Number(raw.askPx)    : null,
+    volume24h: raw.volCcy24h != null ? Number(raw.volCcy24h) : null,
+    change24h: (raw.open24h && raw.last)
+      ? (Number(raw.last) - Number(raw.open24h)) / Number(raw.open24h) * 100
+      : null,
+    timestamp: raw.ts ? Number(raw.ts) : Date.now(),
+    raw,
+  }
+}
+
+/**
+ * Normalise le résumé des options OKX (opt-summary)
+ * marks : tableau de { instId, uly, delta, gamma, vega, theta, markVol, bidVol, askVol, fwdPx, ts }
+ *
+ * OKX instrument format : BTC-USD-YYMMDD-STRIKE-C/P
+ * markVol est en décimal (ex: 0.55 = 55%)
+ */
+export function normalizeOKXOptions(asset, marks) {
+  if (!marks?.length) return null
+
+  const options = marks.map(m => {
+    // BTC-USD-250328-80000-C → parts[2]=250328, parts[3]=80000, parts[4]=C
+    const parts     = (m.instId ?? '').split('-')
+    const strike    = Number(parts[3]) || 0
+    const optType   = parts[4] === 'C' ? 'call' : 'put'
+    const expiryStr = parts[2] ?? ''  // YYMMDD
+    let expiry = 0
+    if (expiryStr.length === 6) {
+      expiry = new Date(
+        `20${expiryStr.slice(0,2)}-${expiryStr.slice(2,4)}-${expiryStr.slice(4,6)}T08:00:00Z`
+      ).getTime()
+    }
+    const daysToExpiry = expiry ? Math.max(0, (expiry - Date.now()) / 86400000) : 0
+
+    // OKX retourne markVol en décimal (0.55 → 55%)
+    const markIV = m.markVol && m.markVol !== '--' ? Number(m.markVol) * 100 : null
+    const bidIV  = m.bidVol  && m.bidVol  !== '--' ? Number(m.bidVol)  * 100 : null
+    const askIV  = m.askVol  && m.askVol  !== '--' ? Number(m.askVol)  * 100 : null
+
+    return {
+      source:       'okx',
+      asset:        asset.toUpperCase(),
+      instrument:   m.instId,
+      optionType:   optType,
+      strike,
+      expiry,
+      daysToExpiry,
+      markPrice:    null,  // non fourni par opt-summary, utiliser market/ticker
+      markIV,
+      bidIV,
+      askIV,
+      greeks: {
+        delta: m.delta != null && m.delta !== '--' ? Number(m.delta) : null,
+        gamma: m.gamma != null && m.gamma !== '--' ? Number(m.gamma) : null,
+        vega:  m.vega  != null && m.vega  !== '--' ? Number(m.vega)  : null,
+        theta: m.theta != null && m.theta !== '--' ? Number(m.theta) : null,
+      },
+      forwardPrice: m.fwdPx && m.fwdPx !== '--' ? Number(m.fwdPx) : null,
+      timestamp:    m.ts ? Number(m.ts) : Date.now(),
+      raw:          m,
+    }
+  })
+
+  return {
+    source:    'okx',
+    asset:     asset.toUpperCase(),
+    options,
+    timestamp: Date.now(),
+    raw:       marks,
+  }
+}
+
+/**
+ * Normalise l'open interest des options OKX par instrument
+ * oiData : tableau de { instId, oi, oiCcy, ts }
+ */
+export function normalizeOKXOptionsOI(asset, oiData) {
+  if (!oiData?.length) return null
+
+  // Parse instrument names pour séparer calls/puts
+  let callOI = 0, putOI = 0
+  for (const r of oiData) {
+    const parts   = (r.instId ?? '').split('-')
+    const optType = parts[4]
+    const oi      = Number(r.oi) || 0
+    if (optType === 'C') callOI += oi
+    else if (optType === 'P') putOI += oi
+  }
+  const total = callOI + putOI
+
+  return {
+    source:       'okx',
+    asset:        asset.toUpperCase(),
+    total,
+    callOI,
+    putOI,
+    putCallRatio: callOI > 0 ? putOI / callOI : null,
+    byExpiry:     [],  // agrégé ici, pas besoin par échéance
+    timestamp:    Date.now(),
+    raw:          oiData,
+  }
+}
+
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 
 /**
