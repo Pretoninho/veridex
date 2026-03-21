@@ -1,14 +1,18 @@
 /**
  * OptionsDataPage — Vue options multi-source
+ * Onglets : Analyse · Signaux · Journal
  *
  * Sources : Deribit (référence) | Binance European
  *
  * Données affichées :
  *   - DVOL + IV Rank Deribit
+ *   - Funding rate perpetuel Deribit
  *   - Structure à terme ATM IV
  *   - Greeks ATM (Deribit)
  *   - OI comparaison 2 sources
  *   - IV spread Deribit / Binance
+ *   - Signaux options dérivés des données chargées
+ *   - Journal de snapshots persisté en localStorage
  */
 import { useState, useEffect, useRef } from 'react'
 import * as deribit from '../data_core/providers/deribit.js'
@@ -144,6 +148,18 @@ function TableHead({ cols }) {
   )
 }
 
+// Clé localStorage pour le journal des snapshots
+const journalKey = (asset) => `options_journal_${asset}`
+
+// Nombre maximum de snapshots conservés dans le journal
+const MAX_SNAPSHOTS = 50
+
+// Seuils de scoring pour l'onglet Signaux
+const IV_PREMIUM_SCORE_DIVISOR = 30
+const PCR_SCORE_MULTIPLIER     = 50
+const FUNDING_SCORE_OFFSET     = 50
+const FUNDING_SCORE_DIVISOR    = 2
+
 // Sparkline DVOL
 function DvolSparkline({ history }) {
   if (!history?.length) return null
@@ -164,12 +180,31 @@ function DvolSparkline({ history }) {
   )
 }
 
-// ── Page principale ───────────────────────────────────────────────────────────
+// Barre de signal pour l'onglet Signaux
+function SignalBar({ label, score, detail, color }) {
+  const pct = Math.min(100, Math.max(0, score ?? 0))
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+        <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: color || 'var(--text)' }}>
+          {detail}
+        </span>
+      </div>
+      <div style={{ height: 5, background: 'rgba(255,255,255,.06)', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, borderRadius: 3, background: color || 'var(--accent)', transition: 'width .5s' }} />
+      </div>
+    </div>
+  )
+}
 
+// ── Page principale ───────────────────────────────────────────────────────────
 export default function OptionsDataPage({ asset }) {
+  const [activeTab,   setActiveTab]   = useState('analyse')
   const [spot,        setSpot]        = useState(null)
   const [dvol,        setDvol]        = useState(null)
   const [rv,          setRv]          = useState(null)
+  const [funding,     setFunding]     = useState(null)
   const [ivAnalysis,  setIvAnalysis]  = useState(null)
   const [greeks,      setGreeks]      = useState(null)
   // Options chains par source
@@ -180,7 +215,17 @@ export default function OptionsDataPage({ asset }) {
   const [bOI,         setBOI]         = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [lastUpdate,  setLastUpdate]  = useState(null)
+  // Journal
+  const [snapshots,   setSnapshots]   = useState([])
   const isMounted = useRef(true)
+
+  // Charger le journal depuis localStorage quand l'asset change
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(journalKey(asset)) ?? '[]')
+      setSnapshots(Array.isArray(stored) ? stored : [])
+    } catch (e) { console.warn('Journal load error:', e); setSnapshots([]) }
+  }, [asset])
 
   useEffect(() => {
     isMounted.current = true
@@ -194,11 +239,12 @@ export default function OptionsDataPage({ asset }) {
     setLoading(true)
     try {
       // ── Phase 1 : données de base ──────────────────────────────────────────
-      const [spotRes, dvolRes, rvRes, bOptRes, bOIRes, dOIRes] =
+      const [spotRes, dvolRes, rvRes, fundingRes, bOptRes, bOIRes, dOIRes] =
         await Promise.allSettled([
           deribit.getSpot(asset),
           deribit.getDVOL(asset),
           deribit.getRealizedVol(asset),
+          deribit.getFundingRate(asset),
           binance.getOptionsChain(asset),
           binance.getOpenInterest(asset),   // futures OI (fiable) — eapi options trop peu liquides
           deribit.getOpenInterest(asset),
@@ -214,6 +260,7 @@ export default function OptionsDataPage({ asset }) {
       setSpot(spotData)
       setDvol(dvolData)
       setRv(rvData)
+      setFunding(fundingRes.status === 'fulfilled' ? fundingRes.value : null)
       setBChain(bOptRes.status === 'fulfilled' ? bOptRes.value : null)
       setBOI(bOIRes.status === 'fulfilled' ? bOIRes.value : null)
       setDOI(dOIRes.status === 'fulfilled' ? dOIRes.value : null)
@@ -281,6 +328,25 @@ export default function OptionsDataPage({ asset }) {
     if (isMounted.current) setLoading(false)
   }
 
+  // Enregistre un snapshot de la situation actuelle dans le journal
+  const recordSnapshot = () => {
+    if (!spot && !dvol) return
+    const snap = {
+      id:      Date.now(),
+      ts:      new Date().toISOString(),
+      asset,
+      spot:    spot?.price ?? null,
+      dvol:    dvol?.current ?? null,
+      ivRank:  ivAnalysis?.ivRank != null ? Math.round(ivAnalysis.ivRank) : null,
+      funding: funding?.rateAnn ?? null,
+      pcr:     dOI?.putCallRatio ?? null,
+      rv:      rv?.current ?? null,
+    }
+    const updated = [snap, ...snapshots].slice(0, MAX_SNAPSHOTS)
+    setSnapshots(updated)
+    try { localStorage.setItem(journalKey(asset), JSON.stringify(updated)) } catch (e) { console.warn('Snapshot save error:', e) }
+  }
+
   // ── Calculs cross-exchange ─────────────────────────────────────────────────
   const spotPrice = safe(spot?.price)
 
@@ -328,6 +394,40 @@ export default function OptionsDataPage({ asset }) {
   const dPCR     = safe(dOI?.putCallRatio)
   const bPCR     = safe(bOI?.putCallRatio)
 
+  // ── Signaux options dérivés ────────────────────────────────────────────────
+  const ivRankVal  = safe(ivAnalysis?.ivRank)
+  const fundingAnn = safe(funding?.rateAnn)
+  const signalItems = [
+    {
+      label:  'IV Rank (30j)',
+      value:  ivRankVal != null ? Math.round(ivRankVal) + '/100' : '—',
+      detail: ivRankVal > 70 ? 'Vendre vol' : ivRankVal < 30 ? 'Acheter vol' : 'Neutre',
+      color:  ivRankVal > 70 ? 'var(--put)' : ivRankVal < 30 ? 'var(--call)' : 'var(--text-muted)',
+      score:  ivRankVal,
+    },
+    {
+      label:  'Prime IV / RV',
+      value:  ivPremium != null ? fmtSigned(ivPremium, 1) + ' pts' : '—',
+      detail: safe(ivPremium) > 15 ? 'Short Vega' : safe(ivPremium) < 2 ? 'Long Vega' : 'Neutre',
+      color:  safe(ivPremium) > 15 ? 'var(--put)' : safe(ivPremium) < 2 ? 'var(--call)' : 'var(--text-muted)',
+      score:  ivPremium != null ? Math.min(100, Math.max(0, (safe(ivPremium) / IV_PREMIUM_SCORE_DIVISOR) * 100)) : null,
+    },
+    {
+      label:  'Put/Call Ratio',
+      value:  dPCR != null ? dPCR.toFixed(3) : '—',
+      detail: dPCR > 1.2 ? 'Baissier' : dPCR < 0.7 ? 'Haussier' : 'Neutre',
+      color:  dPCR > 1.2 ? 'var(--put)' : dPCR < 0.7 ? 'var(--call)' : 'var(--text-muted)',
+      score:  dPCR != null ? Math.min(100, Math.max(0, dPCR * PCR_SCORE_MULTIPLIER)) : null,
+    },
+    {
+      label:  'Funding /an',
+      value:  fundingAnn != null ? fmtSigned(fundingAnn, 2) + '%' : '—',
+      detail: fundingAnn > 50 ? 'Suracheté' : fundingAnn < 0 ? 'Pression baissière' : 'Neutre',
+      color:  fundingAnn > 50 ? 'var(--put)' : fundingAnn < 0 ? 'var(--call)' : 'var(--text-muted)',
+      score:  fundingAnn != null ? Math.min(100, Math.max(0, FUNDING_SCORE_OFFSET + fundingAnn / FUNDING_SCORE_DIVISOR)) : null,
+    },
+  ]
+
   return (
     <div className="page-wrap">
       {/* Header */}
@@ -345,177 +445,352 @@ export default function OptionsDataPage({ asset }) {
         </div>
       </div>
 
-      {/* Cards DVOL */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <MetricCard
-          label="DVOL Deribit"
-          value={dvol?.current != null ? dvol.current.toFixed(1) : '—'}
-          sub={dvolChange != null ? `7j: ${fmtSigned(dvolChange, 1)}` : `${fmtPct(dvol?.monthMin, 1)}–${fmtPct(dvol?.monthMax, 1)}`}
-          color={safe(dvol?.current) > 80 ? 'var(--put)' : safe(dvol?.current) > 60 ? 'var(--atm)' : 'var(--call)'}
-          bar={dvol ? (dvol.current - dvol.monthMin) / (dvol.monthMax - dvol.monthMin) * 100 : null}
-        />
-        <MetricCard
-          label="IV Rank (30j)"
-          value={ivAnalysis?.ivRank != null ? Math.round(ivAnalysis.ivRank) + '/100' : '—'}
-          sub={`IV pct: ${ivAnalysis?.ivPercentile != null ? Math.round(ivAnalysis.ivPercentile) : '—'}`}
-          color={safe(ivAnalysis?.ivRank) > 70 ? 'var(--put)' : safe(ivAnalysis?.ivRank) > 30 ? 'var(--atm)' : 'var(--call)'}
-          bar={ivAnalysis?.ivRank}
-        />
-        <MetricCard
-          label="Vol réalisée 30j"
-          value={rv?.current != null ? fmtPct(rv.current, 1) : '—'}
-          sub={`Moy: ${fmtPct(rv?.avg30, 1)}`}
-        />
-        <MetricCard
-          label="Prime IV / RV"
-          value={ivPremium != null ? fmtSigned(ivPremium, 1) + ' pts' : '—'}
-          sub="DVOL − Vol Réalisée"
-          color={safe(ivPremium) > 10 ? 'var(--put)' : safe(ivPremium) > 0 ? 'var(--atm)' : 'var(--call)'}
-        />
-      </div>
-
-      {/* DVOL sparkline */}
-      {dvol?.history?.length > 0 && (
-        <>
-          <SectionTitle>DVOL — 72 dernières heures</SectionTitle>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px' }}>
-            <DvolSparkline history={dvol.history} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>Min: {fmtPct(dvol.monthMin, 1)}</span>
-              <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 700 }}>Act: {fmtPct(dvol.current, 1)}</span>
-              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>Max: {fmtPct(dvol.monthMax, 1)}</span>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── IV Cross-Exchange ── */}
-      {ivArbSignals.length > 0 && (
-        <>
-          <SectionTitle>IV Cross-Exchange — Deribit vs Binance</SectionTitle>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            <TableHead cols={['Jours', 'Deribit', 'Binance', 'Spread']} />
-            {ivArbSignals.map((r, i) => (
-              <div key={r.days} style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                gap: 4, padding: '10px 16px', alignItems: 'center',
-                borderBottom: i < ivArbSignals.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-                background: r.spread > 5 ? 'rgba(255,193,7,.04)' : 'transparent',
-              }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.days}j</div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
-                  {r.deribit != null ? fmtPct(r.deribit, 1) : '—'}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#F0B90B' }}>
-                  {r.binance != null ? fmtPct(r.binance, 1) : '—'}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 800, color: r.spread > 5 ? 'var(--atm)' : 'var(--text-muted)' }}>
-                  {fmtPct(r.spread, 1)}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ── Structure à terme Deribit ── */}
-      {dChain?.length > 0 && (
-        <>
-          <SectionTitle badge="Deribit">Structure à terme — IV ATM</SectionTitle>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            <TableHead cols={['Jours', 'Strike ATM', 'IV Call', 'IV Put', 'IV moyen']} />
-            {dChain.map((row, i) => (
-              <div key={row.expiry} style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
-                gap: 4, padding: '10px 16px', alignItems: 'center',
-                borderBottom: i < dChain.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-              }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{row.daysToExpiry.toFixed(0)}j</div>
-                <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
-                  ${row.strike?.toLocaleString('en-US')}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
-                  {row.callIV != null ? fmtPct(row.callIV, 1) : '—'}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
-                  {row.putIV != null ? fmtPct(row.putIV, 1) : '—'}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: 'var(--atm)' }}>
-                  {row.atmIV != null ? fmtPct(row.atmIV, 1) : '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ── Greeks ATM ── */}
-      {greeks && (
-        <>
-          <SectionTitle badge="Deribit">Greeks ATM — Échéance proche</SectionTitle>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 10 }}>
-              {[
-                { label: 'Delta', value: greeks.delta != null ? greeks.delta.toFixed(3) : '—', color: 'var(--accent)' },
-                { label: 'Gamma', value: greeks.gamma != null ? greeks.gamma.toExponential(2) : '—', color: 'var(--atm)' },
-                { label: 'Vega',  value: greeks.vega  != null ? greeks.vega.toFixed(2)  : '—', color: 'var(--call)' },
-                { label: 'Theta', value: greeks.theta != null ? greeks.theta.toFixed(2) : '—', color: 'var(--put)' },
-              ].map(g => (
-                <div key={g.label} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>{g.label}</div>
-                  <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 15, color: g.color }}>{g.value}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-              ATM Call · Strike ${greeks.strike?.toLocaleString('en-US')} · IV {fmtPct(greeks.iv, 1)} · {greeks.expiry?.toFixed(0)}j
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ── OI multi-source ── */}
-      <SectionTitle>Open Interest — Options</SectionTitle>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-        <TableHead cols={['Source', 'Call OI', 'Put OI', 'P/C Ratio']} />
+      {/* Onglets internes */}
+      <div style={{
+        display: 'flex', gap: 4, marginBottom: 18,
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 10, padding: 4,
+      }}>
         {[
-          { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio, total: null },
-          { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,         putOI: null,        pcr: null,              total: bOI?.total },
-        ].map((row, i) => (
-          <div key={row.name} style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-            gap: 4, padding: '10px 16px', alignItems: 'center',
-            borderBottom: i < 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-          }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
-                <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700 }}>{row.name}</span>
-              </div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, paddingLeft: 12 }}>{row.type}</div>
-            </div>
-            <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
-              {row.callOI != null
-                ? Number(row.callOI).toFixed(0)
-                : row.total != null
-                  ? <span style={{ color: 'var(--text-muted)' }}>{Number(row.total).toFixed(0)}</span>
-                  : '—'}
-            </div>
-            <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
-              {row.putOI != null ? Number(row.putOI).toFixed(0) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-            </div>
-            <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: safe(row.pcr) > 1 ? 'var(--put)' : safe(row.pcr) !== null ? 'var(--call)' : 'var(--text-muted)' }}>
-              {safe(row.pcr) !== null ? Number(row.pcr).toFixed(3) : '—'}
-            </div>
-          </div>
+          { id: 'analyse', label: 'Analyse' },
+          { id: 'signaux', label: 'Signaux' },
+          { id: 'journal', label: 'Journal' },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            style={{
+              flex: 1, padding: '7px 0', border: 'none', borderRadius: 7, cursor: 'pointer',
+              fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12,
+              background: activeTab === t.id ? 'var(--accent)' : 'transparent',
+              color: activeTab === t.id ? '#000' : 'var(--text-muted)',
+              transition: 'all .2s',
+            }}
+          >
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {/* Hint si pas de données */}
-      {!dvol && !dChain?.length && !loading && (
-        <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
-          Appuie sur Refresh pour charger les données
-        </div>
+      {/* ═══════════════════════════ ONGLET ANALYSE ═══════════════════════════ */}
+      {activeTab === 'analyse' && (
+        <>
+          {/* Cards DVOL + Funding */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <MetricCard
+              label="DVOL Deribit"
+              value={dvol?.current != null ? dvol.current.toFixed(1) : '—'}
+              sub={dvolChange != null ? `7j: ${fmtSigned(dvolChange, 1)}` : `${fmtPct(dvol?.monthMin, 1)}–${fmtPct(dvol?.monthMax, 1)}`}
+              color={safe(dvol?.current) > 80 ? 'var(--put)' : safe(dvol?.current) > 60 ? 'var(--atm)' : 'var(--call)'}
+              bar={dvol ? (dvol.current - dvol.monthMin) / (dvol.monthMax - dvol.monthMin) * 100 : null}
+            />
+            <MetricCard
+              label="IV Rank (30j)"
+              value={ivAnalysis?.ivRank != null ? Math.round(ivAnalysis.ivRank) + '/100' : '—'}
+              sub={`IV pct: ${ivAnalysis?.ivPercentile != null ? Math.round(ivAnalysis.ivPercentile) : '—'}`}
+              color={safe(ivAnalysis?.ivRank) > 70 ? 'var(--put)' : safe(ivAnalysis?.ivRank) > 30 ? 'var(--atm)' : 'var(--call)'}
+              bar={ivAnalysis?.ivRank}
+            />
+            <MetricCard
+              label="Vol réalisée 30j"
+              value={rv?.current != null ? fmtPct(rv.current, 1) : '—'}
+              sub={`Moy: ${fmtPct(rv?.avg30, 1)}`}
+            />
+            <MetricCard
+              label="Prime IV / RV"
+              value={ivPremium != null ? fmtSigned(ivPremium, 1) + ' pts' : '—'}
+              sub="DVOL − Vol Réalisée"
+              color={safe(ivPremium) > 10 ? 'var(--put)' : safe(ivPremium) > 0 ? 'var(--atm)' : 'var(--call)'}
+            />
+            <MetricCard
+              label="Funding /an"
+              value={funding?.rateAnn != null ? fmtSigned(funding.rateAnn, 2) + '%' : '—'}
+              sub={`8h: ${funding?.rate8h != null ? fmtSigned(funding.rate8h, 4) + '%' : '—'}`}
+              color={safe(funding?.rateAnn) > 50 ? 'var(--put)' : safe(funding?.rateAnn) < 0 ? 'var(--call)' : 'var(--atm)'}
+            />
+          </div>
+
+          {/* DVOL sparkline */}
+          {dvol?.history?.length > 0 && (
+            <>
+              <SectionTitle>DVOL — 72 dernières heures</SectionTitle>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px' }}>
+                <DvolSparkline history={dvol.history} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>Min: {fmtPct(dvol.monthMin, 1)}</span>
+                  <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 700 }}>Act: {fmtPct(dvol.current, 1)}</span>
+                  <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>Max: {fmtPct(dvol.monthMax, 1)}</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── IV Cross-Exchange ── */}
+          {ivArbSignals.length > 0 && (
+            <>
+              <SectionTitle>IV Cross-Exchange — Deribit vs Binance</SectionTitle>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                <TableHead cols={['Jours', 'Deribit', 'Binance', 'Spread']} />
+                {ivArbSignals.map((r, i) => (
+                  <div key={r.days} style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                    gap: 4, padding: '10px 16px', alignItems: 'center',
+                    borderBottom: i < ivArbSignals.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                    background: r.spread > 5 ? 'rgba(255,193,7,.04)' : 'transparent',
+                  }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.days}j</div>
+                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                      {r.deribit != null ? fmtPct(r.deribit, 1) : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#F0B90B' }}>
+                      {r.binance != null ? fmtPct(r.binance, 1) : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 800, color: r.spread > 5 ? 'var(--atm)' : 'var(--text-muted)' }}>
+                      {fmtPct(r.spread, 1)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* ── Structure à terme Deribit ── */}
+          {dChain?.length > 0 && (
+            <>
+              <SectionTitle badge="Deribit">Structure à terme — IV ATM</SectionTitle>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                <TableHead cols={['Jours', 'Strike ATM', 'IV Call', 'IV Put', 'IV moyen']} />
+                {dChain.map((row, i) => (
+                  <div key={row.expiry} style={{
+                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
+                    gap: 4, padding: '10px 16px', alignItems: 'center',
+                    borderBottom: i < dChain.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                  }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{row.daysToExpiry.toFixed(0)}j</div>
+                    <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
+                      ${row.strike?.toLocaleString('en-US')}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
+                      {row.callIV != null ? fmtPct(row.callIV, 1) : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
+                      {row.putIV != null ? fmtPct(row.putIV, 1) : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: 'var(--atm)' }}>
+                      {row.atmIV != null ? fmtPct(row.atmIV, 1) : '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* ── Greeks ATM ── */}
+          {greeks && (
+            <>
+              <SectionTitle badge="Deribit">Greeks ATM — Échéance proche</SectionTitle>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 10 }}>
+                  {[
+                    { label: 'Delta', value: greeks.delta != null ? greeks.delta.toFixed(3) : '—', color: 'var(--accent)' },
+                    { label: 'Gamma', value: greeks.gamma != null ? greeks.gamma.toExponential(2) : '—', color: 'var(--atm)' },
+                    { label: 'Vega',  value: greeks.vega  != null ? greeks.vega.toFixed(2)  : '—', color: 'var(--call)' },
+                    { label: 'Theta', value: greeks.theta != null ? greeks.theta.toFixed(2) : '—', color: 'var(--put)' },
+                  ].map(g => (
+                    <div key={g.label} style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>{g.label}</div>
+                      <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 15, color: g.color }}>{g.value}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                  ATM Call · Strike ${greeks.strike?.toLocaleString('en-US')} · IV {fmtPct(greeks.iv, 1)} · {greeks.expiry?.toFixed(0)}j
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── OI multi-source ── */}
+          <SectionTitle>Open Interest — Options</SectionTitle>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+            <TableHead cols={['Source', 'Call OI', 'Put OI', 'P/C Ratio']} />
+            {[
+              { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio, total: null },
+              { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,         putOI: null,        pcr: null,              total: bOI?.total },
+            ].map((row, i) => (
+              <div key={row.name} style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                gap: 4, padding: '10px 16px', alignItems: 'center',
+                borderBottom: i < 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700 }}>{row.name}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, paddingLeft: 12 }}>{row.type}</div>
+                </div>
+                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
+                  {row.callOI != null
+                    ? Number(row.callOI).toFixed(0)
+                    : row.total != null
+                      ? <span style={{ color: 'var(--text-muted)' }}>{Number(row.total).toFixed(0)}</span>
+                      : '—'}
+                </div>
+                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
+                  {row.putOI != null ? Number(row.putOI).toFixed(0) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                </div>
+                <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: safe(row.pcr) > 1 ? 'var(--put)' : safe(row.pcr) !== null ? 'var(--call)' : 'var(--text-muted)' }}>
+                  {safe(row.pcr) !== null ? Number(row.pcr).toFixed(3) : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Hint si pas de données */}
+          {!dvol && !dChain?.length && !loading && (
+            <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              Appuie sur Refresh pour charger les données
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ═══════════════════════════ ONGLET SIGNAUX ═══════════════════════════ */}
+      {activeTab === 'signaux' && (
+        <>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', marginBottom: 16 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 16 }}>
+              Signaux options — données chargées
+            </div>
+            {signalItems.map(s => (
+              <SignalBar
+                key={s.label}
+                label={s.label}
+                score={s.score}
+                detail={`${s.value} · ${s.detail}`}
+                color={s.color}
+              />
+            ))}
+            {signalItems.every(s => s.score == null) && !loading && (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                Appuie sur Refresh pour charger les signaux
+              </div>
+            )}
+          </div>
+
+          {signalItems.some(s => s.score != null) && (
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12 }}>
+                Interprétation
+              </div>
+              {[
+                { label: 'IV Rank > 70', note: 'Vol chère → Vendre des options (straddle, strangle, covered call)' },
+                { label: 'IV Rank < 30', note: 'Vol bon marché → Acheter des spreads ou calendrier' },
+                { label: 'Prime IV/RV > 15 pts', note: 'Sell vega : le marché sur-évalue la volatilité future' },
+                { label: 'PCR > 1.2', note: 'Hedging actif → possible support sur une baisse' },
+                { label: 'Funding > 50%/an', note: 'Longs paient cher → risque de long squeeze' },
+              ].map((r, i, arr) => (
+                <div key={r.label} style={{
+                  paddingBottom: i < arr.length - 1 ? 10 : 0,
+                  marginBottom: i < arr.length - 1 ? 10 : 0,
+                  borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                }}>
+                  <div style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{r.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{r.note}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ═══════════════════════════ ONGLET JOURNAL ═══════════════════════════ */}
+      {activeTab === 'journal' && (
+        <>
+          {/* Bouton enregistrer snapshot */}
+          <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
+            <button
+              onClick={recordSnapshot}
+              disabled={!spot && !dvol}
+              style={{
+                flex: 1, padding: '11px 0',
+                background: (!spot && !dvol) ? 'rgba(255,255,255,.04)' : 'rgba(0,212,255,.12)',
+                border: '1px solid ' + ((!spot && !dvol) ? 'var(--border)' : 'rgba(0,212,255,.35)'),
+                borderRadius: 10, cursor: (!spot && !dvol) ? 'not-allowed' : 'pointer',
+                color: (!spot && !dvol) ? 'var(--text-muted)' : 'var(--accent)',
+                fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13,
+              }}
+            >
+              📸 Enregistrer snapshot
+            </button>
+            {snapshots.length > 0 && (
+              <button
+                onClick={() => {
+                  if (window.confirm('Vider le journal ?')) {
+                    setSnapshots([])
+                    try { localStorage.removeItem(journalKey(asset)) } catch (e) { console.warn('Journal clear error:', e) }
+                  }
+                }}
+                style={{
+                  padding: '11px 14px', background: 'none',
+                  border: '1px solid var(--border)', borderRadius: 10,
+                  cursor: 'pointer', color: 'var(--text-muted)',
+                  fontFamily: 'var(--sans)', fontSize: 12,
+                }}
+              >
+                Vider
+              </button>
+            )}
+          </div>
+
+          {/* Liste des snapshots */}
+          {snapshots.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
+              <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 14, color: 'var(--text-dim)', marginBottom: 6 }}>
+                Journal vide
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                Charge les données (Refresh) puis appuie sur<br />
+                « Enregistrer snapshot » pour sauvegarder la situation.
+              </div>
+            </div>
+          ) : (
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+              <TableHead cols={['Heure', 'DVOL', 'IV Rank', 'PCR', 'Funding']} />
+              {snapshots.map((s, i) => {
+                const dt   = new Date(s.ts)
+                const time = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                const date = dt.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
+                return (
+                  <div key={s.id} style={{
+                    display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr',
+                    gap: 2, padding: '10px 16px', alignItems: 'center',
+                    borderBottom: i < snapshots.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)' }}>{time}</div>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{date}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
+                      {s.dvol != null ? s.dvol.toFixed(1) : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, color: s.ivRank > 70 ? 'var(--put)' : s.ivRank < 30 ? 'var(--call)' : 'var(--text)' }}>
+                      {s.ivRank != null ? s.ivRank + '/100' : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, color: s.pcr > 1.2 ? 'var(--put)' : s.pcr < 0.7 ? 'var(--call)' : 'var(--text-muted)' }}>
+                      {s.pcr != null ? Number(s.pcr).toFixed(3) : '—'}
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 11, fontWeight: 700, color: s.funding > 50 ? 'var(--put)' : s.funding < 0 ? 'var(--call)' : 'var(--text-muted)' }}>
+                      {s.funding != null ? fmtSigned(s.funding, 1) + '%' : '—'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {lastUpdate && (
