@@ -8,7 +8,6 @@ import { useState, useEffect, useRef } from 'react'
 import * as deribit  from '../data_core/providers/deribit.js'
 import * as binance  from '../data_core/providers/binance.js'
 import * as coinbase from '../data_core/providers/coinbase.js'
-import * as okx      from '../data_core/providers/okx.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,14 +129,12 @@ export default function MarketPage({ asset }) {
         deribit.getSpot(asset),
         binance.getSpot(asset),
         coinbase.getSpot(asset),
-        okx.getSpot(asset),
       ])
       if (!isMounted.current) return
       setSpots({
         deribit:  dSpot.status  === 'fulfilled' ? dSpot.value  : null,
         binance:  bSpot.status  === 'fulfilled' ? bSpot.value  : null,
         coinbase: cSpot.status  === 'fulfilled' ? cSpot.value  : null,
-        okx:      oSpot.status  === 'fulfilled' ? oSpot.value  : null,
       })
       setLastUpdate(new Date())
     } catch (_) {}
@@ -163,7 +160,6 @@ export default function MarketPage({ asset }) {
   const exchanges = [
     { key: 'deribit',  name: 'Deribit',  color: 'var(--accent)', note: 'Index' },
     { key: 'binance',  name: 'Binance',  color: '#F0B90B' },
-    { key: 'okx',      name: 'OKX',      color: '#1A84FF' },
     { key: 'coinbase', name: 'Coinbase', color: '#0052FF' },
   ]
 

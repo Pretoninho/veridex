@@ -42,7 +42,6 @@ export { dataStore, CacheKey } from './data_store/cache.js'
 export * as deribit  from './providers/deribit.js'
 export * as binance  from './providers/binance.js'
 export * as coinbase from './providers/coinbase.js'
-export * as okx      from './providers/okx.js'
 
 // ── Exports : streams ─────────────────────────────────────────────────────────
 export { wsStream, DeribitChannels }     from './streams/websocket.js'
@@ -70,10 +69,6 @@ export {
   normalizeBinanceLiquidations,
   normalizeBinanceOptions,
   normalizeBinanceOptionsOI,
-  // OKX
-  normalizeOKXSpot,
-  normalizeOKXOptions,
-  normalizeOKXOptionsOI,
   // Coinbase
   normalizeCoinbaseTicker,
   // Utilitaires
@@ -87,7 +82,6 @@ import { dataStore, CacheKey }                from './data_store/cache.js'
 import * as deribitProvider                   from './providers/deribit.js'
 import * as binanceProvider                   from './providers/binance.js'
 import * as coinbaseProvider                  from './providers/coinbase.js'
-import * as okxProvider                       from './providers/okx.js'
 import { wsStream, DeribitChannels }          from './streams/websocket.js'
 import { pollingStream, PollInterval, pollToStore } from './streams/polling.js'
 
@@ -102,7 +96,6 @@ class DataCore {
       deribit:  deribitProvider,
       binance:  binanceProvider,
       coinbase: coinbaseProvider,
-      okx:      okxProvider,
     }
 
     this._stopFns = []
@@ -117,7 +110,7 @@ class DataCore {
    * @param {Object} [opts]
    * @param {boolean} [opts.websocket=true]  — activer le WS temps réel
    * @param {boolean} [opts.binance=true]    — activer les polls Binance
-   * @param {boolean} [opts.coinbase=false]  — activer les polls Coinbase
+   * @param {boolean} [opts.coinbase=true]   — activer les polls Coinbase
    */
   async init(assets = ['BTC'], opts = {}) {
     const list = [assets].flat().map(a => a.toUpperCase())
@@ -125,7 +118,6 @@ class DataCore {
       websocket = true,
       binance   = true,
       coinbase  = true,
-      okx       = true,
     } = opts
 
     // 1. Chargement initial (snapshot REST)
@@ -137,14 +129,12 @@ class DataCore {
       await Promise.allSettled(
         list.map(asset => binanceProvider.getMarketSnapshot(asset))
       )
-      // Données supplémentaires au démarrage
       await Promise.allSettled(
         list.flatMap(asset => [
           binanceProvider.getLongShortRatio(asset),
           binanceProvider.getTakerVolume(asset),
           binanceProvider.getLiquidations(asset),
           binanceProvider.getOptionsChain(asset),
-          binanceProvider.getOptionsOI(asset),
         ])
       )
       await Promise.allSettled(
@@ -162,52 +152,39 @@ class DataCore {
       )
     }
 
-    if (okx) {
-      await Promise.allSettled(
-        list.map(asset => okxProvider.getMarketSnapshot(asset))
-      )
-    }
-
     // 2. Polls de fond
     list.forEach(asset => {
       // ── Deribit ────────────────────────────────────────────────────────────
-      // Spot toutes les 5s
       this._stopFns.push(pollToStore(
         CacheKey.spot('deribit', asset),
         () => deribitProvider.getSpot(asset),
         PollInterval.REALTIME, dataStore,
       ))
-      // DVOL toutes les 60s
       this._stopFns.push(pollToStore(
         CacheKey.dvol('deribit', asset),
         () => deribitProvider.getDVOL(asset),
         PollInterval.NORMAL, dataStore,
       ))
-      // OI options toutes les 15s
       this._stopFns.push(pollToStore(
         CacheKey.oi('deribit', asset),
         () => deribitProvider.getOpenInterest(asset),
         PollInterval.FAST, dataStore,
       ))
-      // Funding perp Deribit toutes les 15s
       this._stopFns.push(pollToStore(
         CacheKey.funding('deribit', asset),
         () => deribitProvider.getFundingRate(asset),
         PollInterval.FAST, dataStore,
       ))
-      // Historique funding Deribit toutes les 5min
       this._stopFns.push(pollToStore(
         CacheKey.fundingHistory('deribit', asset),
         () => deribitProvider.getFundingRateHistory(asset),
         PollInterval.SLOW, dataStore,
       ))
-      // Trades récents Deribit toutes les 30s
       this._stopFns.push(pollToStore(
         CacheKey.trades('deribit', asset),
         () => deribitProvider.getLastTrades(asset),
         PollInterval.FAST, dataStore,
       ))
-      // Prix de livraison Deribit toutes les 5min
       this._stopFns.push(pollToStore(
         CacheKey.deliveryPrices('deribit', asset),
         () => deribitProvider.getDeliveryPrices(asset),
@@ -216,75 +193,40 @@ class DataCore {
 
       // ── Binance ────────────────────────────────────────────────────────────
       if (binance) {
-        // Spot toutes les 5s
         this._stopFns.push(pollToStore(
           CacheKey.spot('binance', asset),
           () => binanceProvider.getSpot(asset),
           PollInterval.REALTIME, dataStore,
         ))
-        // Premium index (mark + funding) toutes les 15s
         this._stopFns.push(pollToStore(
           CacheKey.premiumIndex('binance', asset),
           () => binanceProvider.getPremiumIndex(asset),
           PollInterval.FAST, dataStore,
         ))
-        // OI futures toutes les 15s
         this._stopFns.push(pollToStore(
           CacheKey.oi('binance', asset),
           () => binanceProvider.getOpenInterest(asset),
           PollInterval.FAST, dataStore,
         ))
-        // Sentiment long/short toutes les 60s
         this._stopFns.push(pollToStore(
           CacheKey.sentiment('binance', asset),
           () => binanceProvider.getLongShortRatio(asset),
           PollInterval.NORMAL, dataStore,
         ))
-        // Volume takers toutes les 60s
         this._stopFns.push(pollToStore(
           CacheKey.takerVolume('binance', asset),
           () => binanceProvider.getTakerVolume(asset),
           PollInterval.NORMAL, dataStore,
         ))
-        // Liquidations toutes les 30s
         this._stopFns.push(pollToStore(
           CacheKey.liquidations('binance', asset),
           () => binanceProvider.getLiquidations(asset),
           PollInterval.FAST, dataStore,
         ))
-        // Options chain Binance (eapi) toutes les 60s
         this._stopFns.push(pollToStore(
           CacheKey.optionsMark('binance', asset),
           () => binanceProvider.getOptionsChain(asset),
           PollInterval.NORMAL, dataStore,
-        ))
-        // OI options Binance (eapi) toutes les 5min
-        this._stopFns.push(pollToStore(
-          CacheKey.optionsOI('binance', asset),
-          () => binanceProvider.getOptionsOI(asset),
-          PollInterval.SLOW, dataStore,
-        ))
-      }
-
-      // ── OKX ────────────────────────────────────────────────────────────────
-      if (okx) {
-        // Spot OKX toutes les 5s
-        this._stopFns.push(pollToStore(
-          CacheKey.spot('okx', asset),
-          () => okxProvider.getSpot(asset),
-          PollInterval.REALTIME, dataStore,
-        ))
-        // Options chain OKX (IV + greeks) toutes les 60s
-        this._stopFns.push(pollToStore(
-          CacheKey.optionsMark('okx', asset),
-          () => okxProvider.getOptionsChain(asset),
-          PollInterval.NORMAL, dataStore,
-        ))
-        // OI options OKX toutes les 5min
-        this._stopFns.push(pollToStore(
-          CacheKey.optionsOI('okx', asset),
-          () => okxProvider.getOptionsOI(asset),
-          PollInterval.SLOW, dataStore,
         ))
       }
     })
@@ -292,7 +234,6 @@ class DataCore {
     // 3. WebSocket temps réel (Deribit)
     if (websocket) {
       list.forEach(asset => {
-        // Index price
         const stop = wsStream.subscribe(
           'deribit',
           DeribitChannels.indexPrice(asset),
@@ -313,7 +254,6 @@ class DataCore {
         )
         this._stopFns.push(stop)
 
-        // DVOL
         const stopDvol = wsStream.subscribe(
           'deribit',
           DeribitChannels.dvol(asset),
