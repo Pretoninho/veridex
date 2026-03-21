@@ -212,7 +212,7 @@ export async function getFuturesKlines(asset, interval = '1d', limit = 30) {
  * @param {'BTC'|'ETH'} asset
  */
 export async function getOptionsChain(asset) {
-  const underlying = `${asset.toUpperCase()}-USD`
+  const underlying = `${asset.toUpperCase()}USDT`
   const raw = await apiFetch(OPTIONS_BASE, '/eapi/v1/mark', { underlying })
   const marks = Array.isArray(raw) ? raw : []
   const normalized = normalizeBinanceOptions(asset, marks)
@@ -225,7 +225,7 @@ export async function getOptionsChain(asset) {
  * @param {'BTC'|'ETH'} asset
  */
 export async function getOptionsOI(asset) {
-  const underlying = `${asset.toUpperCase()}-USD`
+  const underlying = `${asset.toUpperCase()}USDT`
   const raw = await apiFetch(OPTIONS_BASE, '/eapi/v1/openInterest', { underlying })
   const oiData = Array.isArray(raw) ? raw : []
   const normalized = normalizeBinanceOptionsOI(asset, oiData)

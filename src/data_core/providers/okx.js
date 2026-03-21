@@ -50,7 +50,7 @@ async function apiFetch(path, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
 }
 
 // Underlying OKX : BTC → BTC-USD
-const toUnderlying = asset => `${asset.toUpperCase()}-USD`
+const toUnderlying = asset => `${asset.toUpperCase()}-USDT`
 const toSpotInstId = asset => `${asset.toUpperCase()}-USDT`
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────

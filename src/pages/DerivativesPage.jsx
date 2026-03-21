@@ -330,7 +330,7 @@ export default function DerivativesPage({ asset }) {
       </div>
 
       {/* ── Funding Perpétuel — 3 exchanges ── */}
-      <SectionTitle>Funding Perpétuel — Deribit · Binance · OKX</SectionTitle>
+      <SectionTitle>Funding Perpétuel</SectionTitle>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         <TableHead cols={['Exchange', 'Taux 8h', 'Ann.', 'Moy.30p']} />
         {fundingRows.map((row, i) => (
@@ -413,7 +413,7 @@ export default function DerivativesPage({ asset }) {
       </div>
 
       {/* ── Open Interest — 3 sources ── */}
-      <SectionTitle>Open Interest — Deribit · Binance · OKX</SectionTitle>
+      <SectionTitle>Open Interest</SectionTitle>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         <TableHead cols={['Source', 'Call OI', 'Put OI', 'P/C Ratio']} />
         {oiRows.map((row, i) => (
@@ -447,7 +447,7 @@ export default function DerivativesPage({ asset }) {
       </div>
 
       {/* ── Sentiment Binance ── */}
-      <SectionTitle badge="Binance">Sentiment marché</SectionTitle>
+      <SectionTitle badge="Binance Futures">Sentiment marché</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 8 }}>
@@ -523,7 +523,7 @@ export default function DerivativesPage({ asset }) {
       </div>
 
       {/* ── Liquidations ── */}
-      <SectionTitle badge="Binance">Liquidations récentes</SectionTitle>
+      <SectionTitle badge="Binance Futures">Liquidations récentes</SectionTitle>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
         {liquidations ? (
           <>
@@ -577,7 +577,7 @@ export default function DerivativesPage({ asset }) {
       {/* ── Prix de règlement Deribit ── */}
       {deliveries?.deliveries?.length > 0 && (
         <>
-          <SectionTitle badge="Deribit">Prix de règlement (historique)</SectionTitle>
+          <SectionTitle badge="Deribit · Options settlement">Prix de règlement</SectionTitle>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
             {deliveries.deliveries.slice(-6).reverse().map((d, i, arr) => (
               <div key={i} style={{

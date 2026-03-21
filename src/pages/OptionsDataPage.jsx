@@ -275,7 +275,7 @@ export default function OptionsDataPage({ asset }) {
               // Greeks ATM (premier expiry uniquement)
               if (termRows.length === 1 && atmIV && spotPrice) {
                 try {
-                  const g = calcOptionGreeks(spotPrice, atmStrike, days / 365, 0, atmIV / 100, 'call')
+                  const g = calcOptionGreeks({ type: 'call', S: spotPrice, K: atmStrike, T: days / 365, sigma: atmIV / 100, r: 0 })
                   setGreeks({ ...g, expiry: days, iv: atmIV, strike: atmStrike })
                 } catch (_) {}
               }
@@ -508,6 +508,7 @@ export default function OptionsDataPage({ asset }) {
           { name: 'Deribit', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio },
           { name: 'Binance', color: '#F0B90B',       callOI: bOI?.callOI, putOI: bOI?.putOI, pcr: bOI?.putCallRatio },
           { name: 'OKX',     color: '#1A84FF',       callOI: oOI?.callOI, putOI: oOI?.putOI, pcr: oOI?.putCallRatio },
+          // Coinbase = spot uniquement, pas de marché options
         ].map((row, i) => (
           <div key={row.name} style={{
             display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',

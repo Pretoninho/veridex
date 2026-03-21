@@ -53,7 +53,7 @@ function SectionTitle({ children }) {
   )
 }
 
-function ExchangeRow({ name, color, price, asset, bid, ask, volume24h, change24h }) {
+function ExchangeRow({ name, color, note, price, asset, bid, ask, volume24h, change24h }) {
   const spread = (safe(bid) !== null && safe(ask) !== null && safe(ask) > 0)
     ? ((ask - bid) / ask * 100)
     : null
@@ -65,9 +65,12 @@ function ExchangeRow({ name, color, price, asset, bid, ask, volume24h, change24h
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text)' }}>
-          {name}
-        </span>
+        <div>
+          <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text)' }}>
+            {name}
+          </span>
+          {note && <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1 }}>{note}</div>}
+        </div>
       </div>
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 14, color: 'var(--text)' }}>
@@ -158,7 +161,7 @@ export default function MarketPage({ asset }) {
   const change24h = bRaw?.priceChangePercent != null ? safe(bRaw.priceChangePercent) : null
 
   const exchanges = [
-    { key: 'deribit',  name: 'Deribit',  color: 'var(--accent)' },
+    { key: 'deribit',  name: 'Deribit',  color: 'var(--accent)', note: 'Index' },
     { key: 'binance',  name: 'Binance',  color: '#F0B90B' },
     { key: 'okx',      name: 'OKX',      color: '#1A84FF' },
     { key: 'coinbase', name: 'Coinbase', color: '#0052FF' },
@@ -251,7 +254,7 @@ export default function MarketPage({ asset }) {
           return (
             <ExchangeRow
               key={ex.key}
-              name={ex.name} color={ex.color}
+              name={ex.name} color={ex.color} note={ex.note}
               price={s?.price} asset={asset}
               bid={s?.bid} ask={s?.ask}
               volume24h={s?.volume24h}
@@ -301,15 +304,6 @@ export default function MarketPage({ asset }) {
           </div>
         </>
       )}
-
-      {/* Note sur les futures */}
-      <div style={{
-        marginTop: 16, padding: '10px 14px', borderRadius: 10,
-        background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.15)',
-        fontSize: 11, color: 'var(--text-muted)',
-      }}>
-        Structure à terme futures + funding perpétuel → onglet <strong style={{ color: 'var(--accent)' }}>Derivés</strong>
-      </div>
 
       {lastUpdate && (
         <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5, marginTop: 12, marginBottom: 4 }}>

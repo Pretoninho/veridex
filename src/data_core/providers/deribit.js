@@ -228,8 +228,12 @@ export async function getTicker(instrumentName) {
  * @param {number} [count=90]  — nombre de points (1 par 8h)
  */
 export async function getFundingRateHistory(asset, count = 90) {
+  const end   = Date.now()
+  const start = end - count * 8 * 3600 * 1000  // count périodes de 8h
   const result = await apiFetch('get_funding_rate_history', {
     instrument_name: `${asset}-PERPETUAL`,
+    start_timestamp: start,
+    end_timestamp:   end,
     count,
   })
   const normalized = normalizeDeribitFundingHistory(asset, result)

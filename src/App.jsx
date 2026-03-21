@@ -99,21 +99,25 @@ function AppHeader({ asset, setAsset }) {
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,.04)', borderRadius: 20, padding: 3 }}>
-        {ASSETS.map(a => (
-          <button
-            key={a}
-            onClick={() => setAsset(a)}
-            style={{
-              padding: '4px 14px', borderRadius: 16, border: 'none', cursor: 'pointer',
-              fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, transition: 'all .15s',
-              background: asset === a ? 'var(--accent)' : 'transparent',
-              color: asset === a ? '#000' : 'var(--text-muted)',
-            }}
-          >
-            {a}
-          </button>
-        ))}
+      <div style={{ position: 'relative' }}>
+        <select
+          value={asset}
+          onChange={e => setAsset(e.target.value)}
+          style={{
+            appearance: 'none', background: 'rgba(255,255,255,.06)',
+            border: '1px solid var(--border)', borderRadius: 8,
+            color: 'var(--accent)', fontFamily: 'var(--sans)', fontWeight: 700,
+            fontSize: 13, padding: '5px 28px 5px 12px', cursor: 'pointer', outline: 'none',
+          }}
+        >
+          {ASSETS.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <svg
+          width="10" height="10" viewBox="0 0 10 10" fill="none"
+          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+        >
+          <path d="M2 3.5L5 6.5L8 3.5" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
       </div>
     </header>
   )

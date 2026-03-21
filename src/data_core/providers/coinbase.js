@@ -11,7 +11,7 @@
 import { normalizeCoinbaseTicker } from '../normalizers/format_data.js'
 import { dataStore, CacheKey } from '../data_store/cache.js'
 
-const BASE_URL = 'https://api.coinbase.com/api/v3/brokerage'
+const BASE_URL = 'https://api.exchange.coinbase.com'
 const DEFAULT_TIMEOUT_MS = 10_000
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
@@ -43,16 +43,15 @@ const toProductId = asset => `${asset.toUpperCase()}-USD`
  */
 export async function getSpot(asset) {
   const productId = toProductId(asset)
-  const raw = await apiFetch(`/products/${productId}/ticker`, { limit: 1 })
-  // L'API retourne { trades: [...], best_bid, best_ask }
-  // On normalise en ajoutant product_id
+  // api.exchange.coinbase.com (public, no auth) : { price, bid, ask, volume, time, ... }
+  const raw = await apiFetch(`/products/${productId}/ticker`)
   const ticker = {
     product_id: productId,
-    price: raw.trades?.[0]?.price ?? null,
-    best_bid: raw.best_bid ?? null,
-    best_ask: raw.best_ask ?? null,
-    volume_24_h: null, // non disponible sur cet endpoint public
-    time: raw.trades?.[0]?.time ?? null,
+    price:       raw.price     ?? null,
+    best_bid:    raw.bid       ?? null,
+    best_ask:    raw.ask       ?? null,
+    volume_24_h: raw.volume    ?? null,
+    time:        raw.time      ?? null,
   }
 
   const normalized = normalizeCoinbaseTicker(ticker)
