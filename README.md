@@ -1,15 +1,15 @@
 # OptionLab — PWA Mobile
 
 Application React PWA installable sur mobile pour l'analyse des marchés crypto dérivés :
-options, futures, funding, IV, Greeks, OI — données en temps réel depuis 4 exchanges.
+options, futures, funding, IV, Greeks, OI — données en temps réel depuis 3 exchanges.
 
 ## Onglets
 
 | Onglet | Contenu |
 |---|---|
 | **Market** | Prix spot 4 exchanges (Deribit index, Binance, OKX, Coinbase), VWAP pondéré volume, spread cross-exchange, prix relatif au VWAP |
-| **Dérivés** | Funding perpétuel (Deribit · Binance · OKX), term structure futures + basis annualisé, Open Interest 3 sources, sentiment Long/Short (Binance), liquidations (Binance), prix de règlement Deribit |
-| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV cross-exchange (Deribit · Binance · OKX), OI options Call/Put/P·C Ratio |
+| **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest (Deribit options + Binance futures), sentiment Long/Short (Binance), liquidations (Binance), prix de règlement Deribit, spot Coinbase fiat |
+| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI Deribit options + Binance futures |
 | **Signaux** | *(en développement)* |
 | **Trade** | *(en développement)* |
 
@@ -26,7 +26,6 @@ src/
 │   ├── providers/
 │   │   ├── deribit.js          ← REST Deribit : index, options, DVOL, OI, funding, RV, settlement
 │   │   ├── binance.js          ← REST Binance : spot, perp, funding, OI, sentiment, liquidations
-│   │   ├── okx.js              ← REST OKX : spot, options, OI, funding perp USDT-SWAP
 │   │   └── coinbase.js         ← REST Coinbase Exchange : spot fiat (BTC-USD, ETH-USD)
 │   ├── normalizers/
 │   │   └── format_data.js      ← Format canonique unifié (Ticker, Option, Funding, OI…)
@@ -105,8 +104,7 @@ Dans GitHub :
 | **Deribit API v2** | `get_index_price`, `get_volatility_index_data`, `get_funding_rate_value`, `get_funding_rate_history`, `get_book_summary_by_currency`, `get_delivery_prices` | Index, options, DVOL, funding, OI, settlement |
 | **Binance Spot** | `/api/v3/ticker/24hr` | Prix spot USDT |
 | **Binance Futures** | `/fapi/v1/*`, `/futures/data/*` | Perp, funding, OI, sentiment, liquidations |
-| **Binance Options** | `/eapi/v1/mark`, `/eapi/v1/openInterest` | Options européennes (BTCUSDT) |
-| **OKX** | `/api/v5/market/ticker`, `/api/v5/public/opt-summary`, `/api/v5/market/open-interest`, `/api/v5/public/funding-rate` | Spot USDT, options, OI, funding SWAP |
+| **Binance Options** | `/eapi/v1/mark` | Mark IV options européennes (BTCUSDT) |
 | **Coinbase Exchange** | `/products/{id}/ticker` | Spot fiat USD (public, sans auth) |
 
 Toutes les APIs utilisées sont **publiques** — aucune clé d'authentification requise.

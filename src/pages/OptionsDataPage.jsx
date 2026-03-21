@@ -1,20 +1,18 @@
 /**
  * OptionsDataPage — Vue options multi-source
  *
- * 3 sources : Deribit (référence) | Binance European | OKX
+ * Sources : Deribit (référence) | Binance European
  *
  * Données affichées :
  *   - DVOL + IV Rank Deribit
- *   - Structure à terme ATM IV cross-exchange
- *   - Skew 25-delta cross-exchange
+ *   - Structure à terme ATM IV
  *   - Greeks ATM (Deribit)
- *   - OI comparaison 3 sources
- *   - IV Arbitrage signal (spread entre exchanges)
+ *   - OI comparaison 2 sources
+ *   - IV spread Deribit / Binance
  */
 import { useState, useEffect, useRef } from 'react'
 import * as deribit from '../data_core/providers/deribit.js'
 import * as binance from '../data_core/providers/binance.js'
-import * as okx     from '../data_core/providers/okx.js'
 import { analyzeIV } from '../data_processing/volatility/iv_rank.js'
 import { calcOptionGreeks } from '../data_processing/volatility/greeks.js'
 
@@ -177,11 +175,9 @@ export default function OptionsDataPage({ asset }) {
   // Options chains par source
   const [dChain,      setDChain]      = useState(null)  // Deribit ATM IV per expiry
   const [bChain,      setBChain]      = useState(null)  // Binance options
-  const [oChain,      setOChain]      = useState(null)  // OKX options
   // OI
   const [dOI,         setDOI]         = useState(null)
   const [bOI,         setBOI]         = useState(null)
-  const [oOI,         setOOI]         = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [lastUpdate,  setLastUpdate]  = useState(null)
   const isMounted = useRef(true)
@@ -198,15 +194,13 @@ export default function OptionsDataPage({ asset }) {
     setLoading(true)
     try {
       // ── Phase 1 : données de base ──────────────────────────────────────────
-      const [spotRes, dvolRes, rvRes, bOptRes, oOptRes, bOIRes, oOIRes, dOIRes] =
+      const [spotRes, dvolRes, rvRes, bOptRes, bOIRes, dOIRes] =
         await Promise.allSettled([
           deribit.getSpot(asset),
           deribit.getDVOL(asset),
           deribit.getRealizedVol(asset),
           binance.getOptionsChain(asset),
-          okx.getOptionsChain(asset),
-          binance.getOptionsOI(asset),
-          okx.getOptionsOI(asset),
+          binance.getOpenInterest(asset),   // futures OI (fiable) — eapi options trop peu liquides
           deribit.getOpenInterest(asset),
         ])
 
@@ -221,17 +215,12 @@ export default function OptionsDataPage({ asset }) {
       setDvol(dvolData)
       setRv(rvData)
       setBChain(bOptRes.status === 'fulfilled' ? bOptRes.value : null)
-      setOChain(oOptRes.status === 'fulfilled' ? oOptRes.value : null)
       setBOI(bOIRes.status === 'fulfilled' ? bOIRes.value : null)
-      setOOI(oOIRes.status === 'fulfilled' ? oOIRes.value : null)
       setDOI(dOIRes.status === 'fulfilled' ? dOIRes.value : null)
 
       // IV Rank / Percentile
-      if (dvolData?.history?.length) {
-        try {
-          const h30 = dvolData.history.map(h => h[1])
-          setIvAnalysis(analyzeIV(dvolData.current, h30))
-        } catch (_) {}
+      if (dvolData) {
+        try { setIvAnalysis(analyzeIV(dvolData)) } catch (_) {}
       }
 
       // ── Phase 2 : structure à terme Deribit ───────────────────────────────
@@ -295,14 +284,11 @@ export default function OptionsDataPage({ asset }) {
   // ── Calculs cross-exchange ─────────────────────────────────────────────────
   const spotPrice = safe(spot?.price)
 
-  // ATM IV par expiry pour Binance et OKX
+  // ATM IV par expiry pour Binance
   const bGroups = groupByExpiry(bChain?.options)
-  const oGroups = groupByExpiry(oChain?.options)
   const bATM    = spotPrice ? calcATMIV(bGroups, spotPrice) : []
-  const oATM    = spotPrice ? calcATMIV(oGroups, spotPrice) : []
 
   // Cross-exchange IV par expiry (matching approx par daysToExpiry)
-  // On fait une jointure approximative par bucket de jours
   const allExpiries = new Map()
   ;(dChain ?? []).forEach(r => {
     const bucket = Math.round(r.daysToExpiry)
@@ -314,20 +300,15 @@ export default function OptionsDataPage({ asset }) {
     if (!allExpiries.has(bucket)) allExpiries.set(bucket, { days: bucket })
     allExpiries.get(bucket).binance = r.atmIV
   })
-  oATM.forEach(r => {
-    const bucket = Math.round(r.daysToExpiry)
-    if (!allExpiries.has(bucket)) allExpiries.set(bucket, { days: bucket })
-    allExpiries.get(bucket).okx = r.atmIV
-  })
   const crossTable = [...allExpiries.values()]
-    .filter(r => r.deribit || r.binance || r.okx)
+    .filter(r => r.deribit || r.binance)
     .sort((a, b) => a.days - b.days)
     .slice(0, 6)
 
-  // IV Arbitrage : pour chaque ligne avec 2+ sources, calcule spread
+  // IV spread : pour chaque ligne avec 2 sources, calcule spread Deribit − Binance
   const ivArbSignals = crossTable
     .map(r => {
-      const ivs = [r.deribit, r.binance, r.okx].filter(v => v != null)
+      const ivs = [r.deribit, r.binance].filter(v => v != null)
       if (ivs.length < 2) return null
       const maxIV = Math.max(...ivs)
       const minIV = Math.min(...ivs)
@@ -409,18 +390,15 @@ export default function OptionsDataPage({ asset }) {
         </>
       )}
 
-      {/* ── IV Arbitrage signal ── */}
+      {/* ── IV Cross-Exchange ── */}
       {ivArbSignals.length > 0 && (
         <>
-          <SectionTitle>IV Cross-Exchange — Spread d'arbitrage</SectionTitle>
+          <SectionTitle>IV Cross-Exchange — Deribit vs Binance</SectionTitle>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ padding: '10px 16px', background: 'rgba(0,212,255,.04)', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)' }}>
-              Un spread élevé entre exchanges indique une opportunité ou un manque de liquidité.
-            </div>
-            <TableHead cols={['Jours', 'Deribit', 'Binance', 'OKX', 'Spread']} />
+            <TableHead cols={['Jours', 'Deribit', 'Binance', 'Spread']} />
             {ivArbSignals.map((r, i) => (
               <div key={r.days} style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
                 gap: 4, padding: '10px 16px', alignItems: 'center',
                 borderBottom: i < ivArbSignals.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
                 background: r.spread > 5 ? 'rgba(255,193,7,.04)' : 'transparent',
@@ -432,10 +410,7 @@ export default function OptionsDataPage({ asset }) {
                 <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#F0B90B' }}>
                   {r.binance != null ? fmtPct(r.binance, 1) : '—'}
                 </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#1A84FF' }}>
-                  {r.okx != null ? fmtPct(r.okx, 1) : '—'}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 800, color: r.spread > 5 ? 'var(--atm)' : r.spread > 2 ? 'var(--text-muted)' : 'var(--text-muted)' }}>
+                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 800, color: r.spread > 5 ? 'var(--atm)' : 'var(--text-muted)' }}>
                   {fmtPct(r.spread, 1)}
                 </div>
               </div>
@@ -501,29 +476,34 @@ export default function OptionsDataPage({ asset }) {
       )}
 
       {/* ── OI multi-source ── */}
-      <SectionTitle>Open Interest — 3 sources</SectionTitle>
+      <SectionTitle>Open Interest — Options</SectionTitle>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         <TableHead cols={['Source', 'Call OI', 'Put OI', 'P/C Ratio']} />
         {[
-          { name: 'Deribit', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio },
-          { name: 'Binance', color: '#F0B90B',       callOI: bOI?.callOI, putOI: bOI?.putOI, pcr: bOI?.putCallRatio },
-          { name: 'OKX',     color: '#1A84FF',       callOI: oOI?.callOI, putOI: oOI?.putOI, pcr: oOI?.putCallRatio },
-          // Coinbase = spot uniquement, pas de marché options
+          { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio, total: null },
+          { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,         putOI: null,        pcr: null,              total: bOI?.total },
         ].map((row, i) => (
           <div key={row.name} style={{
             display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
             gap: 4, padding: '10px 16px', alignItems: 'center',
-            borderBottom: i < 2 ? '1px solid rgba(255,255,255,.04)' : 'none',
+            borderBottom: i < 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700 }}>{row.name}</span>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700 }}>{row.name}</span>
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, paddingLeft: 12 }}>{row.type}</div>
             </div>
             <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
-              {safe(row.callOI) !== null ? Number(row.callOI).toFixed(0) : '—'}
+              {row.callOI != null
+                ? Number(row.callOI).toFixed(0)
+                : row.total != null
+                  ? <span style={{ color: 'var(--text-muted)' }}>{Number(row.total).toFixed(0)}</span>
+                  : '—'}
             </div>
             <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
-              {safe(row.putOI) !== null ? Number(row.putOI).toFixed(0) : '—'}
+              {row.putOI != null ? Number(row.putOI).toFixed(0) : <span style={{ color: 'var(--text-muted)' }}>{row.total != null ? 'total' : '—'}</span>}
             </div>
             <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: safe(row.pcr) > 1 ? 'var(--put)' : safe(row.pcr) !== null ? 'var(--call)' : 'var(--text-muted)' }}>
               {safe(row.pcr) !== null ? Number(row.pcr).toFixed(3) : '—'}

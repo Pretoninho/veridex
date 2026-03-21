@@ -166,7 +166,7 @@ export async function getLongShortRatio(asset, period = '1h') {
  */
 export async function getTakerVolume(asset, period = '1h') {
   const symbol = toFutureSymbol(asset)
-  const raw = await apiFetch(FUTURE_BASE, '/futures/data/takerbuyselsvol', {
+  const raw = await apiFetch(FUTURE_BASE, '/futures/data/takerbuysellvol', {
     symbol, period, limit: 1,
   })
   const last = Array.isArray(raw) ? raw[0] : raw

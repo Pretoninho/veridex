@@ -1,15 +1,15 @@
 /**
  * DerivativesPage — Vue dérivés cross-exchange
  *
- * Futures Deribit (structure à terme), perpétuels funding (Deribit / Binance / OKX),
+ * Futures Deribit (structure à terme), perpétuels funding (Deribit / Binance),
  * sentiment Binance, liquidations, OI multi-source, prix règlement.
  *
- * Sources : Deribit + Binance + OKX
+ * Sources : Deribit + Binance + Coinbase (spot référence fiat)
  */
 import { useState, useEffect, useRef } from 'react'
-import * as deribit from '../data_core/providers/deribit.js'
-import * as binance from '../data_core/providers/binance.js'
-import * as okx     from '../data_core/providers/okx.js'
+import * as deribit  from '../data_core/providers/deribit.js'
+import * as binance  from '../data_core/providers/binance.js'
+import * as coinbase from '../data_core/providers/coinbase.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -141,15 +141,14 @@ function TableHead({ cols, firstLeft = true }) {
 export default function DerivativesPage({ asset }) {
   const [state, setState] = useState({
     spot:         null,
+    cSpot:        null,   // Coinbase spot fiat
     dFunding:     null,
     bFunding:     null,
-    oFunding:     null,   // OKX perpetuel
     dFundingHist: null,
     sentiment:    null,
     takerVol:     null,
     dOI:          null,
     bOI:          null,
-    oOI:          null,   // OKX options OI
     liquidations: null,
     deliveries:   null,
     futures:      [],
@@ -170,11 +169,11 @@ export default function DerivativesPage({ asset }) {
     setLoading(true)
     try {
       const [
-        spotRes, dFundRes, bFundRes, dFundHistRes,
-        sentRes, tvRes, dOIRes, bOIRes, liqRes, delRes,
-        instrRes, oFundRes, oOIRes,
+        spotRes, cSpotRes, dFundRes, bFundRes, dFundHistRes,
+        sentRes, tvRes, dOIRes, bOIRes, liqRes, delRes, instrRes,
       ] = await Promise.allSettled([
         deribit.getSpot(asset),
+        coinbase.getSpot(asset),
         deribit.getFundingRate(asset),
         binance.getPremiumIndex(asset),
         deribit.getFundingRateHistory(asset, 30),
@@ -185,8 +184,6 @@ export default function DerivativesPage({ asset }) {
         binance.getLiquidations(asset),
         deribit.getDeliveryPrices(asset),
         deribit.getInstruments(asset, 'future'),
-        okx.getFundingRate(asset),
-        okx.getOptionsOI(asset),
       ])
 
       if (!isMounted.current) return
@@ -226,15 +223,14 @@ export default function DerivativesPage({ asset }) {
 
       setState({
         spot:         spotRes.status      === 'fulfilled' ? spotRes.value      : null,
+        cSpot:        cSpotRes.status     === 'fulfilled' ? cSpotRes.value     : null,
         dFunding:     dFundRes.status     === 'fulfilled' ? dFundRes.value     : null,
         bFunding:     bFundRes.status     === 'fulfilled' ? bFundRes.value     : null,
-        oFunding:     oFundRes.status     === 'fulfilled' ? oFundRes.value     : null,
         dFundingHist: dFundHistRes.status === 'fulfilled' ? dFundHistRes.value : null,
         sentiment:    sentRes.status      === 'fulfilled' ? sentRes.value      : null,
         takerVol:     tvRes.status        === 'fulfilled' ? tvRes.value        : null,
         dOI:          dOIRes.status       === 'fulfilled' ? dOIRes.value       : null,
         bOI:          bOIRes.status       === 'fulfilled' ? bOIRes.value       : null,
-        oOI:          oOIRes.status       === 'fulfilled' ? oOIRes.value       : null,
         liquidations: liqRes.status       === 'fulfilled' ? liqRes.value       : null,
         deliveries:   delRes.status       === 'fulfilled' ? delRes.value       : null,
         futures:      futureRows,
@@ -246,8 +242,8 @@ export default function DerivativesPage({ asset }) {
     if (isMounted.current) setLoading(false)
   }
 
-  const { spot, dFunding, bFunding, oFunding, dFundingHist, sentiment, takerVol,
-          dOI, bOI, oOI, liquidations, deliveries, futures } = state
+  const { spot, cSpot, dFunding, bFunding, dFundingHist, sentiment, takerVol,
+          dOI, bOI, liquidations, deliveries, futures } = state
 
   const avgFunding30 = dFundingHist?.history?.length
     ? dFundingHist.history.reduce((s, r) => s + (safe(r.rateAnn) ?? 0), 0) / dFundingHist.history.length
@@ -272,14 +268,12 @@ export default function DerivativesPage({ asset }) {
   const fundingRows = [
     { name: 'Deribit', color: 'var(--accent)', rate8h: dFunding?.rate8h, rateAnn: dFunding?.rateAnn, avg: avgFunding30 },
     { name: 'Binance', color: '#F0B90B',       rate8h: bFunding?.rate8h, rateAnn: bFunding?.rateAnn, avg: null },
-    { name: 'OKX',     color: '#1A84FF',       rate8h: oFunding?.rate8h, rateAnn: oFunding?.rateAnn, avg: null },
   ]
 
   // Exchanges pour le tableau OI
   const oiRows = [
-    { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI,  putOI: dOI?.putOI,  pcr: dOI?.putCallRatio, total: null },
-    { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,          putOI: null,         pcr: null,               total: bOI?.total },
-    { name: 'OKX',     type: 'Options', color: '#1A84FF',       callOI: oOI?.callOI,  putOI: oOI?.putOI,  pcr: oOI?.putCallRatio, total: null },
+    { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio, total: null },
+    { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,         putOI: null,        pcr: null,              total: bOI?.total },
   ]
 
   return (
@@ -326,6 +320,12 @@ export default function DerivativesPage({ asset }) {
           value={spot?.price != null ? fmtPrice(spot.price, asset) : '—'}
           sub="Deribit index"
           color="var(--accent)"
+        />
+        <Card
+          label={`${asset} / USD`}
+          value={cSpot?.price != null ? fmtPrice(cSpot.price, asset) : '—'}
+          sub="Coinbase fiat"
+          color="var(--text)"
         />
       </div>
 
@@ -412,7 +412,7 @@ export default function DerivativesPage({ asset }) {
         ))}
       </div>
 
-      {/* ── Open Interest — 3 sources ── */}
+      {/* ── Open Interest ── */}
       <SectionTitle>Open Interest</SectionTitle>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         <TableHead cols={['Source', 'Call OI', 'Put OI', 'P/C Ratio']} />
