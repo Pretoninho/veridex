@@ -1,48 +1,45 @@
 /**
  * MarketPage — Vue marché multi-exchange
  *
- * Affiche les prix spot de toutes les plateformes côte à côte,
- * puis les futures Deribit avec basis.
+ * Prix spot de toutes les plateformes côte à côte,
+ * volume, spread, VWAP. Les futures sont dans l'onglet Derivés.
  */
 import { useState, useEffect, useRef } from 'react'
-import { dataCore } from '../data_core/index.js'
-import * as deribit from '../data_core/providers/deribit.js'
-import * as binance from '../data_core/providers/binance.js'
+import * as deribit  from '../data_core/providers/deribit.js'
+import * as binance  from '../data_core/providers/binance.js'
 import * as coinbase from '../data_core/providers/coinbase.js'
-import { dataStore, CacheKey } from '../data_core/data_store/cache.js'
+import * as okx      from '../data_core/providers/okx.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function safe(n) {
+  const v = Number(n)
+  return Number.isFinite(v) ? v : null
+}
+
 function fmtPrice(n, asset) {
-  if (!Number.isFinite(n)) return '—'
-  return '$' + n.toLocaleString('en-US', { maximumFractionDigits: asset === 'ETH' ? 2 : 0 })
+  const v = safe(n)
+  if (v === null) return '—'
+  return '$' + v.toLocaleString('en-US', { maximumFractionDigits: asset === 'ETH' ? 2 : 0 })
 }
 
 function fmtVol(n) {
-  if (!Number.isFinite(n) || n === 0) return '—'
-  if (n >= 1e9) return '$' + (n / 1e9).toFixed(1) + 'B'
-  if (n >= 1e6) return '$' + (n / 1e6).toFixed(0) + 'M'
-  return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 })
-}
-
-function fmtExpiry(ts) {
-  return new Date(ts).toLocaleDateString('fr-FR', {
-    day: '2-digit', month: 'short', year: '2-digit',
-  }).toUpperCase()
-}
-
-function daysUntil(ts) {
-  return Math.max(1, Math.round((ts - Date.now()) / 86400000))
+  const v = safe(n)
+  if (v === null || v === 0) return '—'
+  if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B'
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(0) + 'M'
+  return '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 })
 }
 
 function pctColor(v) {
-  if (!Number.isFinite(v)) return 'var(--text-muted)'
-  if (v > 0) return 'var(--call)'
-  if (v < 0) return 'var(--put)'
+  const n = safe(v)
+  if (n === null) return 'var(--text-muted)'
+  if (n > 0) return 'var(--call)'
+  if (n < 0) return 'var(--put)'
   return 'var(--text-muted)'
 }
 
-// ── Sous-composants ───────────────────────────────────────────────────────────
+// ── Composants ────────────────────────────────────────────────────────────────
 
 function SectionTitle({ children }) {
   return (
@@ -57,11 +54,13 @@ function SectionTitle({ children }) {
 }
 
 function ExchangeRow({ name, color, price, asset, bid, ask, volume24h, change24h }) {
-  const spread = (bid && ask) ? ((ask - bid) / ask * 100) : null
+  const spread = (safe(bid) !== null && safe(ask) !== null && safe(ask) > 0)
+    ? ((ask - bid) / ask * 100)
+    : null
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '80px 1fr 1fr 1fr',
-      alignItems: 'center', gap: 6, padding: '10px 16px',
+      alignItems: 'center', gap: 6, padding: '11px 16px',
       borderBottom: '1px solid rgba(255,255,255,.04)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -74,9 +73,9 @@ function ExchangeRow({ name, color, price, asset, bid, ask, volume24h, change24h
         <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 14, color: 'var(--text)' }}>
           {fmtPrice(price, asset)}
         </div>
-        {Number.isFinite(change24h) && (
+        {safe(change24h) !== null && (
           <div style={{ fontSize: 9, color: pctColor(change24h), fontWeight: 700 }}>
-            {change24h > 0 ? '+' : ''}{change24h.toFixed(2)}%
+            {change24h > 0 ? '+' : ''}{Number(change24h).toFixed(2)}%
           </div>
         )}
       </div>
@@ -84,14 +83,14 @@ function ExchangeRow({ name, color, price, asset, bid, ask, volume24h, change24h
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {fmtVol(volume24h)}
         </div>
-        {spread != null && (
+        {spread !== null && (
           <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-            spread {spread.toFixed(3)}%
+            sprd {spread.toFixed(3)}%
           </div>
         )}
       </div>
       <div style={{ textAlign: 'right' }}>
-        {bid && ask ? (
+        {safe(bid) !== null && safe(ask) !== null ? (
           <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.6 }}>
             <span style={{ color: 'var(--call)' }}>{fmtPrice(bid, asset)}</span>
             {' / '}
@@ -108,97 +107,62 @@ function ExchangeRow({ name, color, price, asset, bid, ask, volume24h, change24h
 // ── Page principale ───────────────────────────────────────────────────────────
 
 export default function MarketPage({ asset }) {
-  const [spots, setSpots]       = useState({})
-  const [futures, setFutures]   = useState([])
-  const [loading, setLoading]   = useState(false)
+  const [spots,      setSpots]      = useState({})
+  const [loading,    setLoading]    = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
   const isMounted = useRef(true)
 
   useEffect(() => {
     isMounted.current = true
     load()
-    // Rafraîchissement auto toutes les 10s
     const timer = setInterval(() => { if (isMounted.current) load() }, 10_000)
     return () => { isMounted.current = false; clearInterval(timer) }
   }, [asset])
 
   const load = async () => {
+    if (!isMounted.current) return
     setLoading(true)
     try {
-      // Spots multi-exchange en parallèle
-      const [dSpot, bSpot, cSpot] = await Promise.allSettled([
+      const [dSpot, bSpot, cSpot, oSpot] = await Promise.allSettled([
         deribit.getSpot(asset),
         binance.getSpot(asset),
         coinbase.getSpot(asset),
+        okx.getSpot(asset),
       ])
-
-      // Binance: récupère change 24h via ticker
-      const bTicker24h = await binance.getSpot(asset).catch(() => null)
-
-      if (isMounted.current) {
-        setSpots({
-          deribit:  dSpot.status  === 'fulfilled' ? dSpot.value  : null,
-          binance:  bSpot.status  === 'fulfilled' ? bSpot.value  : null,
-          coinbase: cSpot.status  === 'fulfilled' ? cSpot.value  : null,
-        })
-      }
-
-      // Futures Deribit
-      const instruments = await deribit.getInstruments(asset, 'future')
-      const futureRows = []
-      const spotPrice = dSpot.status === 'fulfilled' ? dSpot.value?.price : null
-
-      await Promise.all(instruments.slice(0, 10).map(async f => {
-        try {
-          const ticker = await deribit.getTicker(f.instrument_name)
-          if (!ticker?.price) return
-          const isPerp = f.instrument_name.includes('PERPETUAL')
-          const days = isPerp ? null : daysUntil(f.expiration_timestamp)
-          const basis = spotPrice ? (ticker.price - spotPrice) / spotPrice * 100 : null
-          const basisAnn = (!isPerp && basis != null && days) ? basis / days * 365 : null
-          futureRows.push({
-            name:     f.instrument_name,
-            expiry:   isPerp ? 'PERP' : fmtExpiry(f.expiration_timestamp),
-            expiryTs: isPerp ? 0 : f.expiration_timestamp,
-            price:    ticker.price,
-            days, basis, basisAnn, isPerp,
-          })
-        } catch (_) {}
-      }))
-
-      futureRows.sort((a, b) => {
-        if (a.isPerp) return -1
-        if (b.isPerp) return 1
-        return a.days - b.days
+      if (!isMounted.current) return
+      setSpots({
+        deribit:  dSpot.status  === 'fulfilled' ? dSpot.value  : null,
+        binance:  bSpot.status  === 'fulfilled' ? bSpot.value  : null,
+        coinbase: cSpot.status  === 'fulfilled' ? cSpot.value  : null,
+        okx:      oSpot.status  === 'fulfilled' ? oSpot.value  : null,
       })
-
-      if (isMounted.current) {
-        setFutures(futureRows)
-        setLastUpdate(new Date())
-      }
+      setLastUpdate(new Date())
     } catch (_) {}
     if (isMounted.current) setLoading(false)
   }
 
-  // VWAP multi-exchange
-  const spotPrices  = Object.values(spots).filter(s => s?.price != null)
-  const vwap        = spotPrices.length > 0
-    ? spotPrices.reduce((s, t) => s + t.price, 0) / spotPrices.length
-    : null
-  const deribitSpot = spots.deribit?.price
-  const binanceSpot = spots.binance?.price
-  const coinbaseSpot = spots.coinbase?.price
+  // Calculs VWAP + prix individuels
+  const allSpots = Object.values(spots).filter(s => s?.price != null)
+  const prices   = allSpots.map(s => safe(s.price)).filter(v => v !== null)
 
-  const binanceVol  = spots.binance?.volume24h
-  const coinbaseVol = spots.coinbase?.volume24h
-  const binanceRaw  = spots.binance?.raw
-  const change24h   = binanceRaw?.priceChangePercent != null ? Number(binanceRaw.priceChangePercent) : null
+  const totalVol = allSpots.reduce((s, t) => s + (safe(t.volume24h) ?? 0), 0)
+  const vwap = totalVol > 0
+    ? allSpots.reduce((s, t) => s + (safe(t.price) ?? 0) * (safe(t.volume24h) ?? 0), 0) / totalVol
+    : prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null
 
-  const bestBasisAnn = futures
-    .filter(r => !r.isPerp && r.basisAnn != null)
-    .reduce((best, r) => (best == null || r.basisAnn > best ? r.basisAnn : best), null)
-  const nearest = futures.find(r => !r.isPerp)
-  const perp    = futures.find(r => r.isPerp)
+  const minPrice = prices.length ? Math.min(...prices) : null
+  const maxPrice = prices.length ? Math.max(...prices) : null
+  const spread   = (minPrice && maxPrice && minPrice > 0) ? (maxPrice - minPrice) / minPrice * 100 : null
+
+  const bRaw      = spots.binance?.raw
+  const change24h = bRaw?.priceChangePercent != null ? safe(bRaw.priceChangePercent) : null
+
+  const exchanges = [
+    { key: 'deribit',  name: 'Deribit',  color: 'var(--accent)' },
+    { key: 'binance',  name: 'Binance',  color: '#F0B90B' },
+    { key: 'okx',      name: 'OKX',      color: '#1A84FF' },
+    { key: 'coinbase', name: 'Coinbase', color: '#0052FF' },
+  ]
 
   return (
     <div className="page-wrap">
@@ -209,56 +173,68 @@ export default function MarketPage({ asset }) {
           {loading && <div className="dot-live" />}
           <button onClick={load} disabled={loading} style={{
             background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-            color: 'var(--text-muted)', fontSize: 11, padding: '4px 10px', cursor: 'pointer',
-            fontFamily: 'var(--sans)', fontWeight: 600,
+            color: 'var(--text-muted)', fontSize: 11, padding: '4px 10px',
+            cursor: 'pointer', fontFamily: 'var(--sans)', fontWeight: 600,
           }}>
             {loading ? '...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {/* Cards résumé */}
+      {/* Metric cards */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>VWAP {asset}</div>
-          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: 'var(--accent)' }}>{fmtPrice(vwap, asset)}</div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{spotPrices.length} exchange{spotPrices.length > 1 ? 's' : ''}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+            VWAP {asset}
+          </div>
+          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: 'var(--accent)' }}>
+            {fmtPrice(vwap, asset)}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+            {allSpots.length} exchange{allSpots.length > 1 ? 's' : ''}
+          </div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>24h Change</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+            24h Change
+          </div>
           <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: pctColor(change24h) }}>
-            {change24h != null ? (change24h > 0 ? '+' : '') + change24h.toFixed(2) + '%' : '—'}
+            {change24h !== null ? (change24h > 0 ? '+' : '') + change24h.toFixed(2) + '%' : '—'}
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Binance 24h</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>Future proche</div>
-          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: 'var(--atm)' }}>
-            {nearest ? fmtPrice(nearest.price, asset) : '—'}
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+            Spread cross-exchange
+          </div>
+          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: safe(spread) > 0.1 ? 'var(--put)' : 'var(--text-muted)' }}>
+            {spread !== null ? spread.toFixed(3) + '%' : '—'}
           </div>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
-            {nearest ? `${nearest.expiry} · ${nearest.days}j` : 'Deribit'}
+            {fmtPrice(minPrice, asset)} — {fmtPrice(maxPrice, asset)}
           </div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>Basis max /an</div>
-          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: bestBasisAnn > 3 ? 'var(--call)' : bestBasisAnn > 0 ? 'var(--atm)' : 'var(--text-muted)' }}>
-            {bestBasisAnn != null ? (bestBasisAnn > 0 ? '+' : '') + bestBasisAnn.toFixed(2) + '%' : '—'}
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+            Volume total 24h
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Meilleure échéance</div>
+          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: 'var(--text)' }}>
+            {fmtVol(totalVol)}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Tous exchanges</div>
         </div>
       </div>
 
-      {/* Spot multi-exchange */}
-      <SectionTitle>Spot — Comparaison exchanges</SectionTitle>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', marginBottom: 4 }}>
+      {/* Tableau spot multi-exchange */}
+      <SectionTitle>Spot — Comparaison 4 exchanges</SectionTitle>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {/* Header colonnes */}
         <div style={{
           display: 'grid', gridTemplateColumns: '80px 1fr 1fr 1fr',
           gap: 6, padding: '8px 16px',
           background: 'rgba(255,255,255,.02)', borderBottom: '1px solid var(--border)',
         }}>
-          {['Exchange', 'Prix', 'Volume 24h', 'Bid / Ask'].map((h, i) => (
+          {['Exchange', 'Prix', 'Vol 24h', 'Bid / Ask'].map((h, i) => (
             <div key={h} style={{
               fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
               fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase',
@@ -266,87 +242,73 @@ export default function MarketPage({ asset }) {
             }}>{h}</div>
           ))}
         </div>
-        <ExchangeRow
-          name="Deribit" color="var(--accent)"
-          price={deribitSpot} asset={asset}
-          bid={null} ask={null} volume24h={null}
-        />
-        <ExchangeRow
-          name="Binance" color="#F0B90B"
-          price={binanceSpot} asset={asset}
-          bid={spots.binance?.bid} ask={spots.binance?.ask}
-          volume24h={binanceVol}
-          change24h={change24h}
-        />
-        <ExchangeRow
-          name="Coinbase" color="#0052FF"
-          price={coinbaseSpot} asset={asset}
-          bid={spots.coinbase?.bid} ask={spots.coinbase?.ask}
-          volume24h={coinbaseVol}
-        />
-        {/* Spread Deribit↔Binance */}
-        {deribitSpot && binanceSpot && (
-          <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Deribit vs Binance</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: pctColor(deribitSpot - binanceSpot) }}>
-              {deribitSpot > binanceSpot ? '+' : ''}{((deribitSpot - binanceSpot) / binanceSpot * 100).toFixed(3)}%
+
+        {exchanges.map(ex => {
+          const s = spots[ex.key]
+          const exChange = ex.key === 'binance'
+            ? (bRaw?.priceChangePercent != null ? safe(bRaw.priceChangePercent) : null)
+            : s?.change24h ?? null
+          return (
+            <ExchangeRow
+              key={ex.key}
+              name={ex.name} color={ex.color}
+              price={s?.price} asset={asset}
+              bid={s?.bid} ask={s?.ask}
+              volume24h={s?.volume24h}
+              change24h={exChange}
+            />
+          )
+        })}
+
+        {/* Ligne spread résumé */}
+        {allSpots.length >= 2 && (
+          <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.02)' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Spread max cross-exchange</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: safe(spread) > 0.05 ? 'var(--atm)' : 'var(--call)' }}>
+              {spread !== null ? spread.toFixed(4) + '%' : '—'}
             </span>
           </div>
         )}
       </div>
 
-      {/* Futures Deribit */}
-      <SectionTitle>Futures Deribit — Structure à terme</SectionTitle>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-        {/* Colonnes header */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-          gap: 4, padding: '8px 16px',
-          background: 'rgba(255,255,255,.02)', borderBottom: '1px solid var(--border)',
-        }}>
-          {['Échéance', 'Prix', 'Basis', 'Basis/an'].map((h, i) => (
-            <div key={h} style={{
-              fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
-              fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase',
-              textAlign: i === 0 ? 'left' : 'right',
-            }}>{h}</div>
-          ))}
-        </div>
-
-        {futures.length === 0 && !loading && (
-          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            Appuie sur Refresh
+      {/* Prix par exchange (mini bar chart relatif) */}
+      {allSpots.length >= 2 && vwap && (
+        <>
+          <SectionTitle>Prix relatif au VWAP</SectionTitle>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {exchanges.map(ex => {
+              const s = spots[ex.key]
+              if (!s?.price) return null
+              const diff = (s.price - vwap) / vwap * 100
+              const barW = Math.abs(diff) * 200  // échelle visuelle
+              return (
+                <div key={ex.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 60, fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{ex.name}</div>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                    <div style={{
+                      height: 4, width: `${Math.min(barW, 50)}%`,
+                      background: diff >= 0 ? 'var(--call)' : 'var(--put)',
+                      borderRadius: 2,
+                      marginLeft: diff >= 0 ? '50%' : `${50 - Math.min(barW, 50)}%`,
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: pctColor(diff), width: 60, textAlign: 'right' }}>
+                    {diff >= 0 ? '+' : ''}{diff.toFixed(4)}%
+                  </div>
+                </div>
+              )
+            }).filter(Boolean)}
           </div>
-        )}
+        </>
+      )}
 
-        {futures.map((r, i) => (
-          <div key={r.name} style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-            gap: 4, padding: '11px 16px', alignItems: 'center',
-            borderBottom: i < futures.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-            background: r.isPerp ? 'rgba(0,212,255,.03)' : 'transparent',
-          }}>
-            <div>
-              <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: r.isPerp ? 'var(--accent)' : 'var(--text)', fontWeight: 600 }}>
-                {r.expiry}
-              </div>
-              {r.days && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.days}j</div>}
-            </div>
-            <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13, color: 'var(--text)', textAlign: 'right' }}>
-              {fmtPrice(r.price, asset)}
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              {r.basis != null
-                ? <span style={{ fontSize: 12, fontWeight: 700, color: pctColor(r.basis) }}>{r.basis > 0 ? '+' : ''}{r.basis.toFixed(2)}%</span>
-                : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              {r.basisAnn != null
-                ? <span style={{ fontSize: 12, fontWeight: 700, color: r.basisAnn > 5 ? 'var(--call)' : r.basisAnn > 0 ? 'var(--atm)' : 'var(--put)' }}>{r.basisAnn > 0 ? '+' : ''}{r.basisAnn.toFixed(1)}%/an</span>
-                : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
-            </div>
-          </div>
-        ))}
+      {/* Note sur les futures */}
+      <div style={{
+        marginTop: 16, padding: '10px 14px', borderRadius: 10,
+        background: 'rgba(0,212,255,.05)', border: '1px solid rgba(0,212,255,.15)',
+        fontSize: 11, color: 'var(--text-muted)',
+      }}>
+        Structure à terme futures + funding perpétuel → onglet <strong style={{ color: 'var(--accent)' }}>Derivés</strong>
       </div>
 
       {lastUpdate && (

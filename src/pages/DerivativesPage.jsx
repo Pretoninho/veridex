@@ -1,51 +1,85 @@
 /**
  * DerivativesPage — Vue dérivés cross-exchange
  *
- * Perpétuels funding, sentiment, liquidations, OI.
+ * Futures Deribit (structure à terme), perpétuels funding,
+ * sentiment Binance, liquidations, OI, prix règlement.
+ *
  * Sources : Deribit + Binance
  */
 import { useState, useEffect, useRef } from 'react'
 import * as deribit from '../data_core/providers/deribit.js'
 import * as binance from '../data_core/providers/binance.js'
-import { dataStore, CacheKey } from '../data_core/data_store/cache.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmt(n, decimals = 2, suffix = '') {
-  if (!Number.isFinite(n)) return '—'
-  return (n > 0 ? '+' : '') + n.toFixed(decimals) + suffix
+function safe(n) {
+  return Number.isFinite(Number(n)) ? Number(n) : null
 }
 
-function fmtPure(n, decimals = 2, suffix = '') {
-  if (!Number.isFinite(n)) return '—'
-  return n.toFixed(decimals) + suffix
+function fmtPct(n, d = 2) {
+  const v = safe(n)
+  if (v === null) return '—'
+  return (v > 0 ? '+' : '') + v.toFixed(d) + '%'
+}
+
+function fmtNum(n, d = 2) {
+  const v = safe(n)
+  if (v === null) return '—'
+  return v.toFixed(d)
 }
 
 function fmtUSD(n) {
-  if (!Number.isFinite(n) || n === 0) return '—'
-  if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B'
-  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K'
-  return '$' + n.toFixed(0)
+  const v = safe(n)
+  if (v === null || v === 0) return '—'
+  if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B'
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K'
+  return '$' + v.toFixed(0)
+}
+
+function fmtPrice(n, asset) {
+  const v = safe(n)
+  if (v === null) return '—'
+  return '$' + v.toLocaleString('en-US', { maximumFractionDigits: asset === 'ETH' ? 2 : 0 })
+}
+
+function fmtExpiry(ts) {
+  return new Date(ts).toLocaleDateString('fr-FR', {
+    day: '2-digit', month: 'short', year: '2-digit',
+  }).toUpperCase()
+}
+
+function daysUntil(ts) {
+  return Math.max(1, Math.round((ts - Date.now()) / 86400000))
 }
 
 function pctColor(v) {
-  if (!Number.isFinite(v)) return 'var(--text-muted)'
-  if (v > 0) return 'var(--call)'
-  if (v < 0) return 'var(--put)'
+  const n = safe(v)
+  if (n === null) return 'var(--text-muted)'
+  if (n > 0) return 'var(--call)'
+  if (n < 0) return 'var(--put)'
   return 'var(--text-muted)'
 }
 
-// ── Composants partagés ───────────────────────────────────────────────────────
+// ── Sous-composants ───────────────────────────────────────────────────────────
 
-function SectionTitle({ children }) {
+function SectionTitle({ children, badge }) {
   return (
-    <div style={{
-      fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
-      fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
-      marginBottom: 8, marginTop: 20,
-    }}>
-      {children}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, marginTop: 20 }}>
+      <div style={{
+        fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+        fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
+      }}>
+        {children}
+      </div>
+      {badge && (
+        <span style={{
+          fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+          background: 'rgba(255,255,255,.06)', color: 'var(--text-muted)',
+        }}>
+          {badge}
+        </span>
+      )}
     </div>
   )
 }
@@ -56,59 +90,47 @@ function Card({ label, value, sub, color, badge }) {
       background: 'var(--surface)', border: '1px solid var(--border)',
       borderRadius: 12, padding: '14px 16px',
     }}>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
+      <div style={{
+        fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+        fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6,
+      }}>
         {label}
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: color || 'var(--text)' }}>
           {value}
         </div>
         {badge && (
-          <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: badge === 'BULL' ? 'rgba(0,255,127,.12)' : badge === 'BEAR' ? 'rgba(255,77,109,.12)' : 'rgba(255,255,255,.08)', color: badge === 'BULL' ? 'var(--call)' : badge === 'BEAR' ? 'var(--put)' : 'var(--text-muted)' }}>
+          <span style={{
+            fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+            background: badge === 'BULL' ? 'rgba(0,255,127,.12)' : badge === 'BEAR' ? 'rgba(255,77,109,.12)' : 'rgba(255,255,255,.06)',
+            color: badge === 'BULL' ? 'var(--call)' : badge === 'BEAR' ? 'var(--put)' : 'var(--text-muted)',
+          }}>
             {badge}
           </span>
         )}
       </div>
-      {sub && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{sub}</div>}
+      {sub != null && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>{sub}</div>}
     </div>
   )
 }
 
-/** Ligne dans un tableau de comparaison funding */
-function FundingRow({ exchange, color, rate8h, rateAnn, markPrice, nextFundingTime }) {
-  const timeLeft = nextFundingTime ? Math.max(0, nextFundingTime - Date.now()) : null
-  const hLeft = timeLeft ? Math.floor(timeLeft / 3600000) : null
-  const mLeft = timeLeft ? Math.floor((timeLeft % 3600000) / 60000) : null
+function TableHead({ cols, firstLeft = true }) {
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '90px 1fr 1fr 1fr',
-      alignItems: 'center', gap: 4, padding: '10px 16px',
-      borderBottom: '1px solid rgba(255,255,255,.04)',
+      display: 'grid', gridTemplateColumns: cols.map(() => '1fr').join(' '),
+      gap: 4, padding: '8px 16px',
+      background: 'rgba(255,255,255,.02)', borderBottom: '1px solid var(--border)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
-        <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text)' }}>
-          {exchange}
-        </span>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: pctColor(rate8h), fontFamily: 'var(--sans)' }}>
-          {fmt(rate8h, 4, '%')}
+      {cols.map((h, i) => (
+        <div key={h} style={{
+          fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+          fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase',
+          textAlign: (i === 0 && firstLeft) ? 'left' : 'right',
+        }}>
+          {h}
         </div>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ 8h</div>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: pctColor(rateAnn), fontFamily: 'var(--sans)' }}>
-          {fmt(rateAnn, 2, '%')}
-        </div>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>/ an</div>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        {hLeft != null
-          ? <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{hLeft}h {mLeft}m</div>
-          : markPrice ? <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>${Number(markPrice).toLocaleString('en-US', { maximumFractionDigits: 0 })}</div>
-          : <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</div>}
-      </div>
+      ))}
     </div>
   )
 }
@@ -116,17 +138,21 @@ function FundingRow({ exchange, color, rate8h, rateAnn, markPrice, nextFundingTi
 // ── Page principale ───────────────────────────────────────────────────────────
 
 export default function DerivativesPage({ asset }) {
-  const [dFunding,     setDFunding]     = useState(null)
-  const [bFunding,     setBFunding]     = useState(null)
-  const [dFundingHist, setDFundingHist] = useState(null)
-  const [sentiment,    setSentiment]    = useState(null)
-  const [takerVol,     setTakerVol]     = useState(null)
-  const [dOI,          setDOI]          = useState(null)
-  const [bOI,          setBOI]          = useState(null)
-  const [liquidations, setLiquidations] = useState(null)
-  const [deliveries,   setDeliveries]   = useState(null)
-  const [loading,      setLoading]      = useState(false)
-  const [lastUpdate,   setLastUpdate]   = useState(null)
+  const [state, setState] = useState({
+    spot:         null,
+    dFunding:     null,
+    bFunding:     null,
+    dFundingHist: null,
+    sentiment:    null,
+    takerVol:     null,
+    dOI:          null,
+    bOI:          null,
+    liquidations: null,
+    deliveries:   null,
+    futures:      [],    // term structure Deribit
+  })
+  const [loading,    setLoading]    = useState(false)
+  const [lastUpdate, setLastUpdate] = useState(null)
   const isMounted = useRef(true)
 
   useEffect(() => {
@@ -137,40 +163,107 @@ export default function DerivativesPage({ asset }) {
   }, [asset])
 
   const load = async () => {
-    setLoading(true)
-    const results = await Promise.allSettled([
-      deribit.getFundingRate(asset),
-      binance.getPremiumIndex(asset),
-      deribit.getFundingRateHistory(asset, 30),
-      binance.getLongShortRatio(asset),
-      binance.getTakerVolume(asset),
-      deribit.getOpenInterest(asset),
-      binance.getOpenInterest(asset),
-      binance.getLiquidations(asset),
-      deribit.getDeliveryPrices(asset),
-    ])
     if (!isMounted.current) return
+    setLoading(true)
+    try {
+      // ── Données base + futures en parallèle ──────────────────────────────
+      const [
+        spotRes, dFundRes, bFundRes, dFundHistRes,
+        sentRes, tvRes, dOIRes, bOIRes, liqRes, delRes,
+        instrRes,
+      ] = await Promise.allSettled([
+        deribit.getSpot(asset),
+        deribit.getFundingRate(asset),
+        binance.getPremiumIndex(asset),
+        deribit.getFundingRateHistory(asset, 30),
+        binance.getLongShortRatio(asset),
+        binance.getTakerVolume(asset),
+        deribit.getOpenInterest(asset),
+        binance.getOpenInterest(asset),
+        binance.getLiquidations(asset),
+        deribit.getDeliveryPrices(asset),
+        deribit.getInstruments(asset, 'future'),
+      ])
 
-    const [df, bf, dfh, sent, tv, doi, boi, liq, del] = results
-    setDFunding(     df.status  === 'fulfilled' ? df.value   : null)
-    setBFunding(     bf.status  === 'fulfilled' ? bf.value   : null)
-    setDFundingHist( dfh.status === 'fulfilled' ? dfh.value  : null)
-    setSentiment(    sent.status=== 'fulfilled' ? sent.value : null)
-    setTakerVol(     tv.status  === 'fulfilled' ? tv.value   : null)
-    setDOI(          doi.status === 'fulfilled' ? doi.value  : null)
-    setBOI(          boi.status === 'fulfilled' ? boi.value  : null)
-    setLiquidations( liq.status === 'fulfilled' ? liq.value  : null)
-    setDeliveries(   del.status === 'fulfilled' ? del.value  : null)
-    setLastUpdate(new Date())
-    setLoading(false)
+      if (!isMounted.current) return
+
+      const spotPrice  = spotRes.status === 'fulfilled' ? spotRes.value?.price : null
+      const instruments = instrRes.status === 'fulfilled' ? (instrRes.value ?? []) : []
+
+      // ── Structure à terme futures Deribit ────────────────────────────────
+      const futureRows = []
+      if (instruments.length > 0 && spotPrice) {
+        const tickerResults = await Promise.allSettled(
+          instruments.slice(0, 10).map(f => deribit.getTicker(f.instrument_name))
+        )
+        instruments.slice(0, 10).forEach((f, idx) => {
+          try {
+            const ticker = tickerResults[idx]?.status === 'fulfilled' ? tickerResults[idx].value : null
+            if (!ticker?.price) return
+            const isPerp = f.instrument_name.includes('PERPETUAL')
+            const days   = isPerp ? null : daysUntil(f.expiration_timestamp)
+            const basis  = spotPrice ? (ticker.price - spotPrice) / spotPrice * 100 : null
+            const basisAnn = (!isPerp && basis != null && days) ? basis / days * 365 : null
+            futureRows.push({
+              name: f.instrument_name,
+              expiry: isPerp ? 'PERP' : fmtExpiry(f.expiration_timestamp),
+              price: ticker.price, days, basis, basisAnn, isPerp,
+            })
+          } catch (_) {}
+        })
+        futureRows.sort((a, b) => {
+          if (a.isPerp) return -1
+          if (b.isPerp) return 1
+          return (a.days ?? 9999) - (b.days ?? 9999)
+        })
+      }
+
+      if (!isMounted.current) return
+
+      setState({
+        spot:         spotRes.status      === 'fulfilled' ? spotRes.value      : null,
+        dFunding:     dFundRes.status     === 'fulfilled' ? dFundRes.value     : null,
+        bFunding:     bFundRes.status     === 'fulfilled' ? bFundRes.value     : null,
+        dFundingHist: dFundHistRes.status === 'fulfilled' ? dFundHistRes.value : null,
+        sentiment:    sentRes.status      === 'fulfilled' ? sentRes.value      : null,
+        takerVol:     tvRes.status        === 'fulfilled' ? tvRes.value        : null,
+        dOI:          dOIRes.status       === 'fulfilled' ? dOIRes.value       : null,
+        bOI:          bOIRes.status       === 'fulfilled' ? bOIRes.value       : null,
+        liquidations: liqRes.status       === 'fulfilled' ? liqRes.value       : null,
+        deliveries:   delRes.status       === 'fulfilled' ? delRes.value       : null,
+        futures:      futureRows,
+      })
+      setLastUpdate(new Date())
+    } catch (err) {
+      console.warn('DerivativesPage load error:', err)
+    }
+    if (isMounted.current) setLoading(false)
   }
 
-  // Métriques calculées
-  const fundingDiff = (dFunding?.rateAnn != null && bFunding?.rateAnn != null)
+  const { spot, dFunding, bFunding, dFundingHist, sentiment, takerVol,
+          dOI, bOI, liquidations, deliveries, futures } = state
+
+  const fundingDiff = (safe(dFunding?.rateAnn) !== null && safe(bFunding?.rateAnn) !== null)
     ? dFunding.rateAnn - bFunding.rateAnn
     : null
-  const avgDFunding30 = dFundingHist?.history?.length
-    ? dFundingHist.history.reduce((s, r) => s + r.rateAnn, 0) / dFundingHist.history.length
+
+  const avgFunding30 = dFundingHist?.history?.length
+    ? dFundingHist.history.reduce((s, r) => s + (safe(r.rateAnn) ?? 0), 0) / dFundingHist.history.length
+    : null
+
+  const bestBasisAnn = futures
+    .filter(r => !r.isPerp && safe(r.basisAnn) !== null)
+    .reduce((best, r) => (best === null || r.basisAnn > best ? r.basisAnn : best), null)
+
+  const nextFundingMs = safe(bFunding?.nextFundingTime)
+  const fundingCountdown = nextFundingMs
+    ? (() => {
+        const diff = nextFundingMs - Date.now()
+        if (diff <= 0) return null
+        const h = Math.floor(diff / 3600000)
+        const m = Math.floor((diff % 3600000) / 60000)
+        return `${h}h ${m}m`
+      })()
     : null
 
   return (
@@ -182,143 +275,190 @@ export default function DerivativesPage({ asset }) {
           {loading && <div className="dot-live" />}
           <button onClick={load} disabled={loading} style={{
             background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-            color: 'var(--text-muted)', fontSize: 11, padding: '4px 10px', cursor: 'pointer',
-            fontFamily: 'var(--sans)', fontWeight: 600,
+            color: 'var(--text-muted)', fontSize: 11, padding: '4px 10px',
+            cursor: 'pointer', fontFamily: 'var(--sans)', fontWeight: 600,
           }}>
             {loading ? '...' : 'Refresh'}
           </button>
         </div>
       </div>
 
-      {/* Résumé cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
+      {/* Cards résumé */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <Card
           label="Funding Deribit /an"
-          value={dFunding?.rateAnn != null ? fmt(dFunding.rateAnn, 2, '%') : '—'}
-          sub={`8h: ${dFunding?.rate8h != null ? fmt(dFunding.rate8h, 4, '%') : '—'}`}
+          value={dFunding?.rateAnn != null ? fmtPct(dFunding.rateAnn) : '—'}
+          sub={`8h: ${dFunding?.rate8h != null ? fmtPct(dFunding.rate8h, 4) : '—'}`}
           color={pctColor(dFunding?.rateAnn)}
           badge={dFunding?.bullish == null ? null : dFunding.bullish ? 'BULL' : 'BEAR'}
         />
         <Card
           label="Funding Binance /an"
-          value={bFunding?.rateAnn != null ? fmt(bFunding.rateAnn, 2, '%') : '—'}
-          sub={`8h: ${bFunding?.rate8h != null ? fmt(bFunding.rate8h, 4, '%') : '—'}`}
+          value={bFunding?.rateAnn != null ? fmtPct(bFunding.rateAnn) : '—'}
+          sub={fundingCountdown ? `Prochain: ${fundingCountdown}` : `8h: ${bFunding?.rate8h != null ? fmtPct(bFunding.rate8h, 4) : '—'}`}
           color={pctColor(bFunding?.rateAnn)}
           badge={bFunding?.bullish == null ? null : bFunding.bullish ? 'BULL' : 'BEAR'}
         />
         <Card
           label="Long/Short ratio"
-          value={sentiment?.ratio != null ? fmtPure(sentiment.ratio, 3) : '—'}
-          sub={`Long ${fmtPure(sentiment?.longPct, 1, '%')} · Short ${fmtPure(sentiment?.shortPct, 1, '%')}`}
+          value={sentiment?.ratio != null ? fmtNum(sentiment.ratio, 3) : '—'}
+          sub={`L ${fmtNum(sentiment?.longPct, 1)}% · S ${fmtNum(sentiment?.shortPct, 1)}%`}
           color={sentiment?.bullish == null ? 'var(--text)' : sentiment.bullish ? 'var(--call)' : 'var(--put)'}
           badge={sentiment?.bullish == null ? null : sentiment.bullish ? 'BULL' : 'BEAR'}
         />
         <Card
           label="Taker Buy/Sell"
-          value={takerVol?.ratio != null ? fmtPure(takerVol.ratio, 3) : '—'}
-          sub="Volume acheteurs / vendeurs"
+          value={takerVol?.ratio != null ? fmtNum(takerVol.ratio, 3) : '—'}
+          sub="Ratio acheteurs / vendeurs"
           color={takerVol?.bullish == null ? 'var(--text)' : takerVol.bullish ? 'var(--call)' : 'var(--put)'}
           badge={takerVol?.bullish == null ? null : takerVol.bullish ? 'BULL' : 'BEAR'}
         />
+        <Card
+          label="Basis max /an"
+          value={bestBasisAnn != null ? fmtPct(bestBasisAnn) : '—'}
+          sub="Meilleure échéance Deribit"
+          color={safe(bestBasisAnn) > 5 ? 'var(--call)' : safe(bestBasisAnn) > 0 ? 'var(--atm)' : 'var(--text-muted)'}
+        />
+        <Card
+          label="Spot {asset}"
+          value={spot?.price != null ? fmtPrice(spot.price, asset) : '—'}
+          sub="Deribit index"
+          color="var(--accent)"
+        />
       </div>
 
-      {/* Funding comparison */}
-      <SectionTitle>Funding Rate Perpétuel — Deribit vs Binance</SectionTitle>
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', marginBottom: 4 }}>
-        {/* En-têtes colonnes */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '90px 1fr 1fr 1fr',
-          gap: 4, padding: '8px 16px',
-          background: 'rgba(255,255,255,.02)', borderBottom: '1px solid var(--border)',
-        }}>
-          {['Exchange', 'Taux 8h', 'Annualisé', 'Prochain'].map((h, i) => (
-            <div key={h} style={{
-              fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
-              fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase',
-              textAlign: i === 0 ? 'left' : 'right',
-            }}>{h}</div>
-          ))}
-        </div>
-        <FundingRow
-          exchange="Deribit" color="var(--accent)"
-          rate8h={dFunding?.rate8h}
-          rateAnn={dFunding?.rateAnn}
-          markPrice={null}
-          nextFundingTime={null}
-        />
-        <FundingRow
-          exchange="Binance" color="#F0B90B"
-          rate8h={bFunding?.rate8h}
-          rateAnn={bFunding?.rateAnn}
-          markPrice={bFunding?.markPrice}
-          nextFundingTime={bFunding?.nextFundingTime}
-        />
+      {/* ── Structure à terme futures Deribit ── */}
+      <SectionTitle badge="Deribit">Structure à terme — Futures</SectionTitle>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        <TableHead cols={['Échéance', 'Prix', 'Basis', 'Basis/an']} />
+        {futures.length === 0 && !loading && (
+          <div style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+            Appuie sur Refresh pour charger
+          </div>
+        )}
+        {futures.map((r, i) => (
+          <div key={r.name} style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+            gap: 4, padding: '11px 16px', alignItems: 'center',
+            borderBottom: i < futures.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+            background: r.isPerp ? 'rgba(0,212,255,.03)' : 'transparent',
+          }}>
+            <div>
+              <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, fontWeight: 600, color: r.isPerp ? 'var(--accent)' : 'var(--text)' }}>
+                {r.expiry}
+              </div>
+              {r.days && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.days}j</div>}
+            </div>
+            <div style={{ textAlign: 'right', fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>
+              {fmtPrice(r.price, asset)}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              {r.basis != null
+                ? <span style={{ fontSize: 12, fontWeight: 700, color: pctColor(r.basis) }}>{fmtPct(r.basis)}</span>
+                : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              {r.basisAnn != null
+                ? <span style={{ fontSize: 12, fontWeight: 700, color: safe(r.basisAnn) > 5 ? 'var(--call)' : safe(r.basisAnn) > 0 ? 'var(--atm)' : 'var(--put)' }}>
+                    {fmtPct(r.basisAnn, 1)}</span>
+                : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Funding comparaison ── */}
+      <SectionTitle>Funding Perpétuel — Deribit vs Binance</SectionTitle>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        <TableHead cols={['Exchange', 'Taux 8h', 'Ann.', 'Moy.30p']} />
+        {[
+          {
+            name: 'Deribit', color: 'var(--accent)',
+            rate8h: dFunding?.rate8h, rateAnn: dFunding?.rateAnn,
+            avg: avgFunding30,
+          },
+          {
+            name: 'Binance', color: '#F0B90B',
+            rate8h: bFunding?.rate8h, rateAnn: bFunding?.rateAnn,
+            avg: null,
+          },
+        ].map((row, i) => (
+          <div key={row.name} style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
+            alignItems: 'center', gap: 4, padding: '10px 16px',
+            borderBottom: i === 0 ? '1px solid rgba(255,255,255,.04)' : 'none',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700 }}>{row.name}</span>
+            </div>
+            <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: pctColor(row.rate8h) }}>
+              {row.rate8h != null ? fmtPct(row.rate8h, 4) : '—'}
+            </div>
+            <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: pctColor(row.rateAnn) }}>
+              {row.rateAnn != null ? fmtPct(row.rateAnn) : '—'}
+            </div>
+            <div style={{ textAlign: 'right', fontSize: 11, color: pctColor(row.avg) }}>
+              {row.avg != null ? fmtPct(row.avg) : '—'}
+            </div>
+          </div>
+        ))}
         {fundingDiff != null && (
-          <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Spread Deribit−Binance</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: pctColor(fundingDiff) }}>
-              {fmt(fundingDiff, 2, '%/an')}
-            </span>
-          </div>
-        )}
-        {avgDFunding30 != null && (
-          <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Moy. 30 périodes Deribit</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: pctColor(avgDFunding30) }}>
-              {fmt(avgDFunding30, 2, '%/an')}
-            </span>
+          <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.04)', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Spread Deribit − Binance</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: pctColor(fundingDiff) }}>{fmtPct(fundingDiff)}</span>
           </div>
         )}
       </div>
 
-      {/* Open Interest */}
+      {/* ── Open Interest ── */}
       <SectionTitle>Open Interest</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 8 }}>Deribit Options OI</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
+            Deribit Options
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: 'var(--call)', fontWeight: 700 }}>CALL</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                {dOI?.callOI != null ? fmtPure(dOI.callOI, 0) : '—'}
-              </span>
+              <span style={{ fontSize: 11, color: 'var(--call)', fontWeight: 700 }}>Call OI</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>{dOI?.callOI != null ? fmtNum(dOI.callOI, 0) : '—'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: 'var(--put)', fontWeight: 700 }}>PUT</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                {dOI?.putOI != null ? fmtPure(dOI.putOI, 0) : '—'}
-              </span>
+              <span style={{ fontSize: 11, color: 'var(--put)', fontWeight: 700 }}>Put OI</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>{dOI?.putOI != null ? fmtNum(dOI.putOI, 0) : '—'}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 4, borderTop: '1px solid var(--border)' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>P/C ratio</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: dOI?.putCallRatio > 1 ? 'var(--put)' : 'var(--call)' }}>
-                {dOI?.putCallRatio != null ? fmtPure(dOI.putCallRatio, 3) : '—'}
+            <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>P/C Ratio</span>
+              <span style={{ fontSize: 14, fontWeight: 800, color: safe(dOI?.putCallRatio) > 1 ? 'var(--put)' : 'var(--call)' }}>
+                {dOI?.putCallRatio != null ? fmtNum(dOI.putCallRatio, 3) : '—'}
               </span>
             </div>
           </div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 8 }}>Binance Futures OI</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10 }}>
+            Binance Futures
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text)' }}>
-                {bOI?.total != null ? fmtPure(bOI.total, 0) + ' ' + asset : '—'}
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>OI total</span>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>
+                {bOI?.total != null ? fmtNum(bOI.total, 0) + ' ' + asset : '—'}
               </span>
             </div>
-            {bFunding?.markPrice && (
+            {bFunding?.markPrice != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Mark Price</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                  ${Number(bFunding.markPrice).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                <span style={{ fontSize: 12, fontWeight: 700 }}>
+                  {fmtPrice(bFunding.markPrice, asset)}
                 </span>
               </div>
             )}
-            {bFunding?.indexPrice && (
+            {bFunding?.indexPrice != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Index Price</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                  ${Number(bFunding.indexPrice).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                <span style={{ fontSize: 12, fontWeight: 700 }}>
+                  {fmtPrice(bFunding.indexPrice, asset)}
                 </span>
               </div>
             )}
@@ -326,67 +466,66 @@ export default function DerivativesPage({ asset }) {
         </div>
       </div>
 
-      {/* Liquidations */}
-      <SectionTitle>Liquidations récentes — Binance</SectionTitle>
-      {liquidations ? (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginBottom: 4 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Longs liq.</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--put)', fontFamily: 'var(--sans)' }}>
-                {fmtUSD(liquidations.longLiqUSD)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Shorts liq.</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--call)', fontFamily: 'var(--sans)' }}>
-                {fmtUSD(liquidations.shortLiqUSD)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Total</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
-                {fmtUSD(liquidations.total)}
-              </div>
-            </div>
-          </div>
-          {liquidations.recent?.length > 0 && (
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-              <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
-                Dernières ({liquidations.recent.length})
-              </div>
-              {liquidations.recent.slice(0, 8).map((l, i) => (
-                <div key={i} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '5px 0', borderBottom: i < 7 ? '1px solid rgba(255,255,255,.04)' : 'none',
-                }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 700,
-                    color: l.side === 'SELL' ? 'var(--put)' : 'var(--call)',
-                  }}>
-                    {l.side === 'SELL' ? 'LONG LIQ' : 'SHORT LIQ'}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text)' }}>
-                    ${l.price.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </span>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                    {fmtUSD(l.value)}
-                  </span>
+      {/* ── Liquidations ── */}
+      <SectionTitle badge="Binance">Liquidations récentes</SectionTitle>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+        {liquidations ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Longs liq.</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--put)', fontFamily: 'var(--sans)' }}>
+                  {fmtUSD(liquidations.longLiqUSD)}
                 </div>
-              ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Shorts liq.</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--call)', fontFamily: 'var(--sans)' }}>
+                  {fmtUSD(liquidations.shortLiqUSD)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 4 }}>Total</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
+                  {fmtUSD(liquidations.total)}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-          {loading ? 'Chargement...' : 'Aucune donnée'}
-        </div>
-      )}
+            {liquidations.recent?.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
+                  Détail ({liquidations.recent.length})
+                </div>
+                {liquidations.recent.slice(0, 6).map((l, i) => (
+                  <div key={i} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '5px 0', borderBottom: i < 5 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                  }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: l.side === 'SELL' ? 'var(--put)' : 'var(--call)' }}>
+                      {l.side === 'SELL' ? 'LONG LIQ' : 'SHORT LIQ'}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text)' }}>
+                      {fmtPrice(l.price, asset)}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      {fmtUSD(l.value)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+            {loading ? 'Chargement...' : 'Aucune liquidation récente'}
+          </div>
+        )}
+      </div>
 
-      {/* Prix de règlement Deribit */}
+      {/* ── Prix de règlement Deribit ── */}
       {deliveries?.deliveries?.length > 0 && (
         <>
-          <SectionTitle>Prix de règlement Deribit (historique)</SectionTitle>
+          <SectionTitle badge="Deribit">Prix de règlement (historique)</SectionTitle>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
             {deliveries.deliveries.slice(-6).reverse().map((d, i, arr) => (
               <div key={i} style={{
@@ -396,7 +535,7 @@ export default function DerivativesPage({ asset }) {
               }}>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--sans)' }}>{d.date}</span>
                 <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
-                  ${d.price.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  {fmtPrice(d.price, asset)}
                 </span>
               </div>
             ))}

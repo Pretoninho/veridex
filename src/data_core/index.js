@@ -42,6 +42,7 @@ export { dataStore, CacheKey } from './data_store/cache.js'
 export * as deribit  from './providers/deribit.js'
 export * as binance  from './providers/binance.js'
 export * as coinbase from './providers/coinbase.js'
+export * as okx      from './providers/okx.js'
 
 // ── Exports : streams ─────────────────────────────────────────────────────────
 export { wsStream, DeribitChannels }     from './streams/websocket.js'
@@ -69,6 +70,10 @@ export {
   normalizeBinanceLiquidations,
   normalizeBinanceOptions,
   normalizeBinanceOptionsOI,
+  // OKX
+  normalizeOKXSpot,
+  normalizeOKXOptions,
+  normalizeOKXOptionsOI,
   // Coinbase
   normalizeCoinbaseTicker,
   // Utilitaires
@@ -82,6 +87,7 @@ import { dataStore, CacheKey }                from './data_store/cache.js'
 import * as deribitProvider                   from './providers/deribit.js'
 import * as binanceProvider                   from './providers/binance.js'
 import * as coinbaseProvider                  from './providers/coinbase.js'
+import * as okxProvider                       from './providers/okx.js'
 import { wsStream, DeribitChannels }          from './streams/websocket.js'
 import { pollingStream, PollInterval, pollToStore } from './streams/polling.js'
 
@@ -96,6 +102,7 @@ class DataCore {
       deribit:  deribitProvider,
       binance:  binanceProvider,
       coinbase: coinbaseProvider,
+      okx:      okxProvider,
     }
 
     this._stopFns = []
@@ -118,6 +125,7 @@ class DataCore {
       websocket = true,
       binance   = true,
       coinbase  = true,
+      okx       = true,
     } = opts
 
     // 1. Chargement initial (snapshot REST)
@@ -151,6 +159,12 @@ class DataCore {
     if (coinbase) {
       await Promise.allSettled(
         list.map(asset => coinbaseProvider.getMarketSnapshot(asset))
+      )
+    }
+
+    if (okx) {
+      await Promise.allSettled(
+        list.map(asset => okxProvider.getMarketSnapshot(asset))
       )
     }
 
@@ -248,6 +262,28 @@ class DataCore {
         this._stopFns.push(pollToStore(
           CacheKey.optionsOI('binance', asset),
           () => binanceProvider.getOptionsOI(asset),
+          PollInterval.SLOW, dataStore,
+        ))
+      }
+
+      // ── OKX ────────────────────────────────────────────────────────────────
+      if (okx) {
+        // Spot OKX toutes les 5s
+        this._stopFns.push(pollToStore(
+          CacheKey.spot('okx', asset),
+          () => okxProvider.getSpot(asset),
+          PollInterval.REALTIME, dataStore,
+        ))
+        // Options chain OKX (IV + greeks) toutes les 60s
+        this._stopFns.push(pollToStore(
+          CacheKey.optionsMark('okx', asset),
+          () => okxProvider.getOptionsChain(asset),
+          PollInterval.NORMAL, dataStore,
+        ))
+        // OI options OKX toutes les 5min
+        this._stopFns.push(pollToStore(
+          CacheKey.optionsOI('okx', asset),
+          () => okxProvider.getOptionsOI(asset),
           PollInterval.SLOW, dataStore,
         ))
       }

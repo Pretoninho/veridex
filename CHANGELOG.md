@@ -6,18 +6,19 @@ Ce projet suit le [Versioning Sémantique](https://semver.org/lang/fr/) (Major.M
 
 ---
 
-## [1.1.0] — 2026-03-20
+## [1.1.0] — 2026-03-21
 
 ### Ajouté
 
 **Architecture data_core/**
-- `providers/deribit.js` — REST Deribit unifié (spot, DVOL, options, funding, OI, RV)
-- `providers/binance.js` — REST Binance (spot, perp, funding, klines)
+- `providers/deribit.js` — REST Deribit unifié (spot, DVOL, options, funding, OI, RV, ticker, funding history, delivery prices, last trades)
+- `providers/binance.js` — REST Binance étendu (spot, perp, funding, premium index, long/short ratio, taker volume, liquidations, options eapi, OI options, Coin-M)
 - `providers/coinbase.js` — REST Coinbase (spot fiat)
+- `providers/okx.js` — REST OKX (spot, options chain avec IV+Greeks, OI options)
 - `streams/websocket.js` — WebSocket multi-sources avec reconnexion automatique (backoff + jitter)
 - `streams/polling.js` — Polling configurable par intervalle, pause auto si page cachée
-- `normalizers/format_data.js` — Format canonique unifié (Ticker, Option, Funding, OI…)
-- `data_store/cache.js` — Cache central avec TTL, historique et subscriptions réactives
+- `normalizers/format_data.js` — Format canonique unifié + 12 nouveaux normalizers (OKX spot/options/OI, Binance premium index/sentiment/taker/liquidations/options/OI, Deribit funding history/delivery prices/trades)
+- `data_store/cache.js` — Cache central avec TTL, historique et subscriptions réactives (14 CacheKey types)
 
 **Architecture data_processing/**
 - `volatility/greeks.js` — Black-Scholes pricing + Greeks (delta, gamma, vega, theta)
@@ -30,13 +31,21 @@ Ce projet suit le [Versioning Sémantique](https://semver.org/lang/fr/) (Major.M
 - `strategies/dual_investment.js` — Calculs Dual Investment (premium, P&L, scoring BS)
 - `decision_engine.js` — Moteur de décision Q-learning pour le DI
 
+**Pages UI**
+- `MarketPage` — Comparaison spot 4 exchanges (Deribit/Binance/OKX/Coinbase), VWAP, spread cross-exchange, bar chart prix relatif
+- `DerivativesPage` — Structure à terme futures, funding Deribit vs Binance, OI multi-source, liquidations, delivery prices
+- `OptionsDataPage` — Comparaison IV 3 sources (Deribit/Binance/OKX), table arbitrage IV cross-exchange, term structure ATM IV, Greeks ATM, OI multi-source avec ratio P/C
+
 **Versioning**
-- Version affichée dans la barre de navigation (UI)
+- Version affichée dans la barre de navigation (`VersionBar`)
 - `vite.config.js` lit la version depuis `package.json` (source unique)
 - `CHANGELOG.md` initialisé
 
 ### Modifié
 
+- Navigation restructurée : **Market | Derivés | Options | Signaux | Trade**
+- `DerivativesPage` — réécriture complète (correctif crash : état unifié, `safe()` null-guards, try-catch)
+- Structure à terme futures déplacée de `MarketPage` → `DerivativesPage`
 - `SignalPage.jsx` — logique de scoring extraite vers `data_processing/signals/signal_engine.js`
 - `TermPage.jsx` — logique de basis et signal extraite vers `data_processing/market_structure/term_structure.js`
 - `utils/greeks.js` — devient un re-export depuis `data_processing/volatility/greeks.js`
