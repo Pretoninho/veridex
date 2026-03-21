@@ -40,3 +40,30 @@ export {
   getSignal,
   computeSignal,
 } from './signals/signal_engine.js'
+
+export {
+  buildCriteria,
+  computeConvergence,
+} from './signals/convergence.js'
+
+// ── Historisation ─────────────────────────────────────────────────────────────
+export {
+  recordSnapshot,
+  getMetricHistory,
+  getMetricPoints,
+  calcPercentile,
+  calcThresholdAtPct,
+  calcMovingAvg,
+  livePercentile,
+  dynamicThreshold,
+  metricDiag,
+} from './history/metric_history.js'
+
+// ── Journal de trades ─────────────────────────────────────────────────────────
+export {
+  logTrade,
+  closeTrade,
+  deleteTrade,
+  getTrades,
+  getTradeStats,
+} from './trades/trade_log.js'
