@@ -140,6 +140,25 @@ export {
   generateTwitterThread,
 } from '../data_processing/signals/twitter_generator.js'
 
+// ── Exports : Notification Engine ─────────────────────────────────────────────
+export {
+  checkNotifications,
+  notifyAnomaly,
+} from '../data_processing/signals/notification_engine.js'
+
+// ── Exports : Notification Manager ────────────────────────────────────────────
+export {
+  DEFAULT_THRESHOLDS,
+  requestPermission,
+  getPermissionStatus,
+  getThresholds,
+  updateThreshold,
+  resetThresholds,
+  sendNotification,
+  getNotificationHistory,
+  clearNotificationHistory,
+} from '../data_processing/signals/notification_manager.js'
+
 // ── Exports : signals & fingerprint ──────────────────────────────────────────
 export {
   detectMarketAnomaly,

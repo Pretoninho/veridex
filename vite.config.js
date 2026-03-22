@@ -39,6 +39,7 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        importScripts: ['push-handlers.js'],
         runtimeCaching: [
           {
             urlPattern: ({ request, url }) => request.destination === 'style' || request.destination === 'script' || request.destination === 'font' || (request.destination === 'image' && url.origin === self.location.origin),

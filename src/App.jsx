@@ -17,6 +17,9 @@ import { getSignalHistory } from './data_processing/signals/signal_engine.js'
 import { setupSettlementWatcher } from './data_processing/signals/settlement_tracker.js'
 import { syncServerClocks, SYNC_INTERVAL_MS } from './data_core/providers/clock_sync.js'
 import { setCachedClockSync, dataStore, CacheKey } from './data_core/data_store/cache.js'
+import { checkNotifications, notifyAnomaly } from './data_processing/signals/notification_engine.js'
+import { requestPermission } from './data_processing/signals/notification_manager.js'
+import NotificationSettingsPage from './pages/NotificationSettingsPage.jsx'
 import './App.css'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -25,13 +28,14 @@ const ANOMALY_LOG_KEY   = 'veridex_anomaly_log'
 const RECENT_WINDOW_MS  = 10 * 60 * 1000
 
 const PAGE_NAMES = {
-  market:  'Market',
-  deriv:   'Dérivés',
-  options: 'Options',
-  signals: 'Signaux',
-  trade:   'Trade',
-  onchain: 'On-Chain',
-  audit:   'Audit',
+  market:        'Market',
+  deriv:         'Dérivés',
+  options:       'Options',
+  signals:       'Signaux',
+  trade:         'Trade',
+  onchain:       'On-Chain',
+  audit:         'Audit',
+  notifications: 'Notifications',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -102,6 +106,46 @@ export default function App() {
     return cleanup
   }, [])
 
+  // Demande de permission notifications (une seule fois, à l'entrée dans l'app)
+  useEffect(() => {
+    if (!inApp) return
+    // Ne demander qu'une fois (permission 'default') — jamais sans interaction utilisateur
+    if ('Notification' in window && Notification.permission === 'default') {
+      // Délai de 3s pour ne pas interrompre immédiatement l'entrée dans l'app
+      const timer = setTimeout(() => requestPermission().catch(() => {}), 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [inApp])
+
+  // Polling de fond pour les vérifications de notifications (toutes les 60s)
+  useEffect(() => {
+    if (!inApp) return
+
+    const check = async () => {
+      for (const asset of ['BTC', 'ETH']) {
+        try {
+          const spot    = dataStore.get(CacheKey.spot('deribit', asset), true)?.price ?? null
+          const dvol    = dataStore.get(CacheKey.dvol('deribit', asset), true)
+          const funding = dataStore.get(CacheKey.funding('deribit', asset), true)
+          const ivRank  = dvol
+            ? Math.round(((dvol.current - dvol.monthMin) / ((dvol.monthMax - dvol.monthMin) || 1)) * 100)
+            : null
+          const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
+
+          await checkNotifications(asset, {
+            spotPrice:  spot,
+            ivRank,
+            fundingAnn,
+          })
+        } catch (_) {}
+      }
+    }
+
+    check()
+    const timer = setInterval(check, 60_000)
+    return () => clearInterval(timer)
+  }, [inApp])
+
   // Prix landing
   useEffect(() => {
     coinbase.getSpot('BTC').then(p => setBtcPrice(p?.price ?? null)).catch(() => {})
@@ -163,13 +207,14 @@ export default function App() {
 
       {/* Contenu des pages */}
       <div className="app-content">
-        {tab === 'market'   && <MarketPage      asset={asset} />}
-        {tab === 'deriv'    && <DerivativesPage  asset={asset} clockSync={clockSync} />}
-        {tab === 'options'  && <OptionsDataPage  asset={asset} clockSync={clockSync} />}
-        {tab === 'signals'  && <SignalsPage      asset={asset} clockSync={clockSync} />}
-        {tab === 'trade'    && <TradePage        asset={asset} />}
-        {tab === 'onchain'  && <OnChainPage      asset={asset} />}
-        {tab === 'audit'    && <AuditPage />}
+        {tab === 'market'        && <MarketPage             asset={asset} />}
+        {tab === 'deriv'         && <DerivativesPage        asset={asset} clockSync={clockSync} />}
+        {tab === 'options'       && <OptionsDataPage        asset={asset} clockSync={clockSync} />}
+        {tab === 'signals'       && <SignalsPage            asset={asset} clockSync={clockSync} />}
+        {tab === 'trade'         && <TradePage              asset={asset} />}
+        {tab === 'onchain'       && <OnChainPage            asset={asset} />}
+        {tab === 'audit'         && <AuditPage />}
+        {tab === 'notifications' && <NotificationSettingsPage />}
         <VersionBar version={version} forceUpdate={forceUpdate} />
       </div>
 
