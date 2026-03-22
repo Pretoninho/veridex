@@ -12,6 +12,7 @@ import { getSignalHistory, getAnomalyLog }  from '../data_processing/signals/sig
 import { getAllPatterns }                    from '../data_processing/signals/market_fingerprint.js'
 import { smartCache }                        from '../data_core/data_store/cache.js'
 import HashJournal                           from '../components/HashJournal.jsx'
+import SnapshotManager                       from '../components/SnapshotManager.jsx'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -122,8 +123,9 @@ function OverviewTab({ signalCount, anomalyCount, patternCount, cacheCount, last
 // ── AuditPage ─────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'overview', label: 'Vue générale' },
-  { id: 'journal',  label: 'Journal de hashage' },
+  { id: 'overview',  label: 'Vue générale' },
+  { id: 'journal',   label: 'Journal de hashage' },
+  { id: 'snapshot',  label: 'Snapshot' },
 ]
 
 export default function AuditPage() {
@@ -213,6 +215,8 @@ export default function AuditPage() {
           onRefresh={loadData}
         />
       )}
+
+      {activeTab === 'snapshot' && <SnapshotManager />}
     </div>
   )
 }

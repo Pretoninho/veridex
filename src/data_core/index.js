@@ -184,6 +184,27 @@ export {
   getAllPatterns,
 } from '../data_processing/signals/market_fingerprint.js'
 
+// ── Exports : Snapshot Generator ──────────────────────────────────────────────
+export {
+  SNAPSHOT_VERSION,
+  MIN_OCCURRENCES_TO_EXPORT,
+  GENESIS_HASH,
+  generateSnapshot,
+  verifySnapshot,
+  snapshotToJSON,
+  snapshotFromJSON,
+  getSnapshotHistory,
+} from '../data_processing/signals/snapshot_generator.js'
+
+// ── Exports : Snapshot Importer ───────────────────────────────────────────────
+export {
+  shouldImportSnapshot,
+  importSnapshot,
+  runInitialImport,
+  getImportState,
+  resetImportState,
+} from '../data_processing/signals/snapshot_importer.js'
+
 // ── Facade DataCore ───────────────────────────────────────────────────────────
 // Interface de haut niveau pour initialiser et piloter le data core.
 

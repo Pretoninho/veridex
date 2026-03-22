@@ -19,6 +19,7 @@ import { syncServerClocks, SYNC_INTERVAL_MS } from './data_core/providers/clock_
 import { setCachedClockSync, dataStore, CacheKey } from './data_core/data_store/cache.js'
 import { checkNotifications, notifyAnomaly } from './data_processing/signals/notification_engine.js'
 import { requestPermission } from './data_processing/signals/notification_manager.js'
+import { runInitialImport } from './data_processing/signals/snapshot_importer.js'
 import NotificationSettingsPage from './pages/NotificationSettingsPage.jsx'
 import './App.css'
 
@@ -84,6 +85,12 @@ export default function App() {
     doSync()
     const timer = setInterval(doSync, SYNC_INTERVAL_MS)
     return () => clearInterval(timer)
+  }, [])
+
+  // Import initial des snapshots de patterns (fire-and-forget)
+  useEffect(() => {
+    runInitialImport('BTC').catch(() => {})
+    runInitialImport('ETH').catch(() => {})
   }, [])
 
   // Watcher settlement quotidien Deribit (08:00 UTC)
