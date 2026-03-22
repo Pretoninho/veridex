@@ -1,20 +1,20 @@
 # OptionLab — PWA Mobile
 
 Application React PWA installable sur mobile pour l'analyse des marchés crypto dérivés :
-options, futures, funding, IV, Greeks, OI — données en temps réel depuis 3 exchanges.
+options, futures, funding, IV, Greeks, signaux — données en temps réel depuis 3 exchanges.
 
 ## Onglets
 
 | Onglet | Contenu |
 |---|---|
-| **Market** | Prix spot 4 exchanges (Deribit index, Binance, OKX, Coinbase), VWAP pondéré volume, spread cross-exchange, prix relatif au VWAP |
-| **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest (Deribit options + Binance futures), sentiment Long/Short (Binance), liquidations (Binance), prix de règlement Deribit, spot Coinbase fiat |
-| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI Deribit options + Binance futures |
-| **Signaux** | *(en développement)* |
+| **Market** | Prix spot 4 exchanges (Deribit index, Binance, OKX, Coinbase), VWAP pondéré volume, spread cross-exchange |
+| **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest, sentiment Long/Short (Binance), liquidations, countdown prochain fixing funding |
+| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI, prix de règlement, onglet Signaux avec couche Expert/Simple (Claude API) |
+| **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain), 3 blocs recommandations indépendants (Spot / Futures / Options), couche Expert et Simple (6 tons paramétrables, génération Claude API) |
 | **Trade** | *(en développement)* |
+| **On-Chain** | Score on-chain composite, Mempool, Exchange Flows, Mining — couche Expert/Simple |
 
-Le sélecteur d'actif (BTC / ETH) dans le header est global : il met à jour tous les onglets simultanément.
-Pour ajouter un actif, modifier uniquement `const ASSETS` dans `src/App.jsx`.
+Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour tous les onglets simultanément.
 
 ---
 
@@ -22,38 +22,94 @@ Pour ajouter un actif, modifier uniquement `const ASSETS` dans `src/App.jsx`.
 
 ```
 src/
-├── data_core/                  ← Couche données (source unique de vérité)
+├── data_core/                      ← Couche données (source unique de vérité)
 │   ├── providers/
-│   │   ├── deribit.js          ← REST Deribit : index, options, DVOL, OI, funding, RV, settlement
-│   │   ├── binance.js          ← REST Binance : spot, perp, funding, OI, sentiment, liquidations
-│   │   └── coinbase.js         ← REST Coinbase Exchange : spot fiat (BTC-USD, ETH-USD)
+│   │   ├── deribit.js              ← REST Deribit : index, options, DVOL, OI, funding, RV, settlement
+│   │   ├── binance.js              ← REST Binance : spot, perp, funding, OI, sentiment, liquidations
+│   │   ├── coinbase.js             ← REST Coinbase Exchange : spot fiat USD
+│   │   ├── okx.js                  ← REST OKX : spot
+│   │   └── onchain.js              ← On-chain : blockchain.info, mempool.space, Glassnode, CryptoQuant
 │   ├── normalizers/
-│   │   └── format_data.js      ← Format canonique unifié (Ticker, Option, Funding, OI…)
+│   │   └── format_data.js          ← Format canonique unifié + validateDataFreshness + normalizeOnChain
 │   ├── data_store/
-│   │   └── cache.js            ← Cache central avec clés typées (CacheKey)
-│   └── index.js                ← Façade dataCore + exports unifiés
+│   │   └── cache.js                ← SmartCache FNV-1a (hash-based, évite re-renders React inutiles)
+│   └── index.js                    ← Façade dataCore + exports unifiés
 │
-├── data_processing/            ← Calculs financiers
+├── data_processing/                ← Calculs financiers et signaux
 │   ├── volatility/
-│   │   ├── greeks.js           ← Black-Scholes : delta, gamma, vega, theta (param objet)
-│   │   ├── iv_rank.js          ← IV Rank, IV Percentile, détection spike
-│   │   └── skew.js             ← Skew 25-delta
+│   │   ├── greeks.js               ← Black-Scholes : delta, gamma, vega, theta
+│   │   ├── iv_rank.js              ← IV Rank, IV Percentile, détection spike
+│   │   └── skew.js                 ← Skew 25-delta
 │   ├── market_structure/
-│   │   └── term_structure.js   ← Basis annualisé, contango/backwardation
+│   │   └── term_structure.js       ← Basis annualisé, contango/backwardation
+│   ├── history/
+│   │   └── metric_history.js       ← Historique snapshots options
 │   └── signals/
-│       └── signal_engine.js    ← Score composite (IV + funding + basis + IV/RV)
+│       ├── signal_engine.js        ← Score composite (IV 30% · Funding 20% · Basis 20% · IV/RV 15% · On-Chain 15%)
+│       ├── signal_interpreter.js   ← 3 blocs recommandations : Spot / Futures / Options
+│       ├── market_fingerprint.js   ← Fingerprint marché IndexedDB (pattern matching)
+│       ├── onchain_signals.js      ← Signaux on-chain : Exchange flows, Mempool, Mining
+│       ├── tone_config.js          ← 6 tons paramétrables (humor, formal, serious, pedagogical, motivational, storytelling)
+│       └── novice_generator.js     ← Génération Claude API (claude-haiku) avec fallback statique
+│
+├── components/
+│   ├── ToneSelector.jsx            ← Grille 3×2 de sélection du ton (couche Simple)
+│   └── ClockStatus.jsx             ← Indicateur drift horloges cross-exchange (invisible si OK)
 │
 ├── pages/
-│   ├── LandingPage.jsx         ← Écran d'accueil (splash)
-│   ├── MarketPage.jsx          ← Onglet Market
-│   ├── DerivativesPage.jsx     ← Onglet Dérivés
-│   ├── OptionsDataPage.jsx     ← Onglet Options
-│   ├── SignalsPage.jsx         ← Onglet Signaux
-│   └── TradePage.jsx           ← Onglet Trade
+│   ├── LandingPage.jsx             ← Écran d'accueil (splash)
+│   ├── MarketPage.jsx              ← Onglet Market
+│   ├── DerivativesPage.jsx         ← Onglet Dérivés (+ countdown funding)
+│   ├── OptionsDataPage.jsx         ← Onglet Options (Analyse · Signaux Expert/Simple · Journal)
+│   ├── SignalsPage.jsx             ← Onglet Signaux (Expert/Simple · 3 blocs · copie)
+│   ├── OnChainPage.jsx             ← Onglet On-Chain
+│   └── TradePage.jsx               ← Onglet Trade
 │
-├── App.jsx                     ← Shell : navigation bottom bar, asset selector, versioning
-└── App.css                     ← Thème dark + variables CSS
+├── App.jsx                         ← Shell : navigation, asset selector, clock sync, versioning
+└── App.css                         ← Thème dark + variables CSS
 ```
+
+---
+
+## Système de signaux
+
+### Score composite global (0–100)
+
+| Composante | Poids | Source |
+|---|---|---|
+| Volatilité IV (DVOL / IV Rank) | 30% | Deribit |
+| Funding Rate annualisé | 20% | Deribit perp |
+| Basis Futures (contango/backwardation) | 20% | Deribit futures datés |
+| Prime IV/RV | 15% | DVOL vs Realized Vol |
+| On-Chain | 15% | blockchain.info · mempool.space · Glassnode |
+
+### Interprétation 3 marchés
+
+Pour chaque niveau de score, 3 recommandations indépendantes :
+
+| Marché | Indicateurs clés |
+|---|---|
+| **Spot** | IV Rank, zones de support |
+| **Futures/Perp** | Funding rate, cash-and-carry |
+| **Options** | IV Rank, straddle/strangle, strikes ATM ±8% |
+
+### Couche Simple (Claude API)
+
+- Génération via `claude-haiku-4-5-20251001` avec nonce aléatoire (variation garantie)
+- 6 tons : 😄 Humour · 🎩 Formel · 🎯 Sérieux · 📚 Pédagogique · 🔥 Motivant · 📖 Récit
+- Fallback statique si API indisponible
+- Ton persisté par page (`selected_tone`, `options_tone`)
+
+---
+
+## Système de hashage (SmartCache)
+
+- **FNV-1a 32-bit** — hash pur JS, sans dépendance externe
+- `SmartCache.set(key, data)` → retourne `true` uniquement si les données ont changé
+- Évite les re-renders React inutiles sur polling fréquent
+- Détection d'anomalies : 3+ indicateurs changent en < 10s
+- **Market Fingerprint** (IndexedDB) : bucketise les conditions de marché et enregistre les résultats +1h/+4h/+24h
+- **Versioning signaux** (IndexedDB) : déduplication via hash du contexte
 
 ---
 
@@ -63,29 +119,23 @@ src/
 npm install
 npm run dev     # → http://localhost:5173
 npm run build   # build de production
+npm test        # 188 tests Vitest
+```
+
+Variable d'environnement optionnelle (couche Simple) :
+```bash
+VITE_ANTHROPIC_API_KEY=sk-ant-...   # clé Anthropic pour génération Claude
 ```
 
 ---
 
 ## 🚀 Déploiement GitHub Pages
 
-### Prérequis
-- Node.js 18+, Git, compte GitHub
+Le workflow `.github/workflows/deploy.yml` se déclenche automatiquement à chaque push sur `main` :
+1. `npm ci` → `npm test` → `npm run build`
+2. Upload du dossier `dist/` sur GitHub Pages
 
-### Première mise en ligne
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/TON_USERNAME/deribit-options-pwa.git
-git push -u origin main
-```
-
-Dans GitHub :
-- **Settings → Pages → Source → GitHub Actions**
-- Le workflow `.github/workflows/deploy.yml` se déclenche automatiquement à chaque push sur `main`
-- App disponible sur : `https://TON_USERNAME.github.io/deribit-options-pwa/`
+Dans **Settings → Pages → Source → GitHub Actions**.
 
 ---
 
@@ -101,19 +151,31 @@ Dans GitHub :
 
 | Source | Endpoints | Données |
 |---|---|---|
-| **Deribit API v2** | `get_index_price`, `get_volatility_index_data`, `get_funding_rate_value`, `get_funding_rate_history`, `get_book_summary_by_currency`, `get_delivery_prices` | Index, options, DVOL, funding, OI, settlement |
+| **Deribit API v2** | `get_index_price`, `get_volatility_index_data`, `get_funding_rate_value`, `get_funding_rate_history`, `get_book_summary_by_currency`, `get_delivery_prices`, `get_instruments`, `public/ticker` | Index, options, DVOL, funding, OI, settlement, term structure |
 | **Binance Spot** | `/api/v3/ticker/24hr` | Prix spot USDT |
 | **Binance Futures** | `/fapi/v1/*`, `/futures/data/*` | Perp, funding, OI, sentiment, liquidations |
-| **Binance Options** | `/eapi/v1/mark` | Mark IV options européennes (BTCUSDT) |
-| **Coinbase Exchange** | `/products/{id}/ticker` | Spot fiat USD (public, sans auth) |
+| **Binance Options** | `/eapi/v1/mark` | Mark IV options européennes |
+| **OKX** | `/api/v5/market/ticker` | Prix spot |
+| **Coinbase Exchange** | `/products/{id}/ticker` | Spot fiat USD |
+| **blockchain.info** | `/stats` | Stats réseau Bitcoin |
+| **mempool.space** | `/api/mempool`, `/api/v1/fees/recommended` | Mempool, frais |
+| **Glassnode** | `/v1/metrics/transactions/transfers_volume_to_exchanges_sum` | Exchange inflows |
+| **Anthropic API** | `/v1/messages` (claude-haiku-4-5-20251001) | Génération couche Simple |
 
-Toutes les APIs utilisées sont **publiques** — aucune clé d'authentification requise.
+Toutes les APIs exchange sont **publiques** — aucune clé requise sauf Anthropic (optionnelle).
 
 ---
 
 ## 🔧 Polling & mise à jour
 
-- Toutes les pages rafraîchissent automatiquement leurs données toutes les **10 secondes** via `setInterval`
-- `Promise.allSettled` sur chaque groupe d'appels → une source hors ligne ne bloque pas les autres
-- Bouton "Refresh" manuel disponible sur chaque onglet
-- Bouton "MAJ" dans la barre de version : désenregistre le Service Worker et recharge pour forcer la mise à jour du cache PWA
+| Page | Intervalle |
+|---|---|
+| Market | 15 s |
+| Dérivés | 30 s |
+| Options | 90 s |
+| Signaux | Manuel (Refresh) |
+| On-Chain | 60 s |
+
+- `Promise.allSettled` partout — une source hors ligne ne bloque pas les autres
+- Bouton "Refresh" manuel sur chaque onglet
+- Bouton "MAJ" dans la barre de version : force la mise à jour du cache PWA (désenregistre le Service Worker)
