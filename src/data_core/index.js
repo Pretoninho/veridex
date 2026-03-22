@@ -115,6 +115,16 @@ export {
   interpretMaxPain,
 } from '../data_processing/volatility/max_pain.js'
 
+// ── Exports : Settlement Tracker ──────────────────────────────────────────────
+export {
+  setupSettlementWatcher,
+  captureSettlement,
+  getSettlementHistory,
+  getSettlementByDate,
+  getSettlementByHash,
+  clearSettlementHistory,
+} from '../data_processing/signals/settlement_tracker.js'
+
 // ── Exports : signals & fingerprint ──────────────────────────────────────────
 export {
   detectMarketAnomaly,

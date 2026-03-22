@@ -25,6 +25,7 @@ import { DEFAULT_TONE }          from '../data_processing/signals/tone_config.js
 import ToneSelector              from '../components/ToneSelector.jsx'
 import MaxPainChart              from '../components/MaxPainChart.jsx'
 import { calculateMaxPainByExpiry, interpretMaxPain } from '../data_processing/volatility/max_pain.js'
+import { getSettlementHistory } from '../data_processing/signals/settlement_tracker.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,51 @@ function DvolSparkline({ history }) {
   )
 }
 
+// Ligne cliquable pour un settlement récent
+function SettlementRow({ settlement: s, asset, isLast }) {
+  const [expanded, setExpanded] = useState(false)
+  const price = s.settlementPrice != null
+    ? '$' + Number(s.settlementPrice).toLocaleString('en-US', { maximumFractionDigits: asset === 'ETH' ? 2 : 0 })
+    : '—'
+  const deltaColor = (s.spotDeltaPct ?? 0) > 0 ? 'var(--call)' : (s.spotDeltaPct ?? 0) < 0 ? 'var(--put)' : 'var(--text-muted)'
+  const dateLabel  = s.dateKey ? s.dateKey.slice(5).replace('-', ' ') : '—'
+
+  return (
+    <div style={{ borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,.04)' }}>
+      {/* Ligne principale */}
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 16px', cursor: 'pointer' }}
+      >
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--sans)', minWidth: 36 }}>{dateLabel}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: 'var(--text)' }}>{price}</span>
+        <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: deltaColor }}>
+          {s.spotDeltaLabel ?? '—'}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{expanded ? '▲' : '▼'}</span>
+      </div>
+      {/* Détail expansible */}
+      {expanded && (
+        <div style={{ padding: '0 16px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {[
+            ['vs Max Pain', s.maxPainDeltaLabel ? `${s.maxPainDeltaLabel}${s.maxPainStrike ? ` ($${Number(s.maxPainStrike).toLocaleString('en-US')})` : ''}` : null],
+            ['IV Rank',     s.ivRank != null ? `${s.ivRank}` : null],
+            ['Hash',        s.hash],
+            ['Capture',     s.isLate ? 'Différée ⚠' : 'À l\'heure ✓'],
+          ].map(([label, val]) => (
+            <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--sans)' }}>{label}</span>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: label === 'Capture' ? (s.isLate ? 'var(--neutral)' : 'var(--call)') : 'var(--text)', fontSize: label === 'Hash' ? 10 : 11 }}>
+                {val ?? '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Barre de signal pour l'onglet Signaux
 function SignalBar({ label, score, detail, color }) {
   const pct = Math.min(100, Math.max(0, score ?? 0))
@@ -265,6 +311,7 @@ export default function OptionsDataPage({ asset }) {
   const [bFunding,    setBFunding]    = useState(null)  // Binance funding rate
   const [deliveries,  setDeliveries]  = useState(null)  // Settlement prices
   const [selectedMaxPainExpiry, setSelectedMaxPainExpiry] = useState(null)
+  const [recentSettlements, setRecentSettlements] = useState([])
   const [loading,     setLoading]     = useState(false)
   const [lastUpdate,  setLastUpdate]  = useState(null)
   // Journal
@@ -287,6 +334,15 @@ export default function OptionsDataPage({ asset }) {
       const stored = JSON.parse(localStorage.getItem(journalKey(asset)) ?? '[]')
       setSnapshots(Array.isArray(stored) ? stored : [])
     } catch (e) { console.warn('Journal load error:', e); setSnapshots([]) }
+  }, [asset])
+
+  // Charger les settlements récents depuis IndexedDB
+  useEffect(() => {
+    let active = true
+    getSettlementHistory(asset, 7).then(history => {
+      if (active) setRecentSettlements(history)
+    }).catch(() => {})
+    return () => { active = false }
   }, [asset])
 
   useEffect(() => {
@@ -912,6 +968,68 @@ export default function OptionsDataPage({ asset }) {
                   daysToExpiry={mp.daysToExpiry}
                   mode={optionsMode}
                 />
+              </>
+            )
+          })()}
+
+          {/* ── Settlements récents ── */}
+          {recentSettlements.length > 0 && (() => {
+            const validDeltas = recentSettlements
+              .map(s => s.spotDeltaPct)
+              .filter(d => d != null)
+            const avgDelta  = validDeltas.length > 0
+              ? validDeltas.reduce((a, b) => a + b, 0) / validDeltas.length
+              : null
+            const maxDeltaEntry = validDeltas.length > 0
+              ? recentSettlements.reduce((best, s) =>
+                  s.spotDeltaPct != null &&
+                  Math.abs(s.spotDeltaPct) > Math.abs(best?.spotDeltaPct ?? 0)
+                    ? s : best
+                , recentSettlements[0])
+              : null
+
+            return (
+              <>
+                <SectionTitle badge={`Deribit · ${asset} · 7j`}>
+                  Settlements récents
+                </SectionTitle>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                  {recentSettlements.map((s, i) => (
+                    <SettlementRow key={s.dateKey ?? i} settlement={s} asset={asset} isLast={i === recentSettlements.length - 1} />
+                  ))}
+                </div>
+                {/* Statistiques */}
+                {(avgDelta != null || maxDeltaEntry) && (
+                  <div style={{
+                    marginTop: 8, padding: '10px 14px',
+                    background: 'var(--surface)', border: '1px solid var(--border)',
+                    borderRadius: 10, display: 'flex', gap: 16, flexWrap: 'wrap',
+                  }}>
+                    {avgDelta != null && (
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 2 }}>
+                          Moy. écart spot
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: avgDelta > 0 ? 'var(--call)' : avgDelta < 0 ? 'var(--put)' : 'var(--text-muted)' }}>
+                          {avgDelta > 0 ? '+' : ''}{avgDelta.toFixed(2)}%
+                        </div>
+                      </div>
+                    )}
+                    {maxDeltaEntry?.spotDeltaLabel && (
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 2 }}>
+                          Écart max
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: (maxDeltaEntry.spotDeltaPct ?? 0) > 0 ? 'var(--call)' : 'var(--put)' }}>
+                          {maxDeltaEntry.spotDeltaLabel}
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>
+                            ({maxDeltaEntry.dateKey?.slice(5)})
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )
           })()}

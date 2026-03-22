@@ -388,6 +388,126 @@ function PatternEntry({ entry }) {
   )
 }
 
+// ── Entrée Settlement ─────────────────────────────────────────────────────────
+
+function SettlementEntry({ entry }) {
+  const [expanded, setExpanded] = useState(false)
+  const raw = entry.raw ?? entry
+
+  const fmtPrice = (n, asset) => {
+    if (n == null) return '—'
+    return '$' + Number(n).toLocaleString('en-US', {
+      maximumFractionDigits: asset === 'ETH' ? 2 : 0,
+    })
+  }
+  const fmtDelta = (label) => {
+    if (!label) return '—'
+    const n = parseFloat(label)
+    return (
+      <span style={{ color: n > 0 ? 'var(--call)' : n < 0 ? 'var(--put)' : 'var(--text-muted)' }}>
+        {label}
+      </span>
+    )
+  }
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderLeft: '3px solid #A78BFA', borderRadius: 10,
+      padding: '14px 16px', marginBottom: 8,
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontFamily: 'var(--font-body)', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#A78BFA' }}>
+          🏛 Settlement
+        </span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
+          {raw.dateKey ?? '—'} · 08:00 UTC
+        </span>
+      </div>
+
+      {/* Données principales */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 10 }}>
+        {[
+          ['Hash',  entry.hash,                              'var(--font-mono)'],
+          ['Asset', raw.asset,                              null],
+          ['Prix',  fmtPrice(raw.settlementPrice, raw.asset), null],
+          ['Source', raw.source ?? 'deribit',               null],
+        ].map(([label, val, font]) => (
+          <div key={label}>
+            <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              {label}
+            </div>
+            <div style={{ fontFamily: font ?? 'var(--font-body)', fontSize: 12, color: 'var(--text)', marginTop: 2 }}>
+              {val ?? '—'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Contexte au fixing */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+          CONTEXTE AU FIXING
+        </div>
+        {[
+          ['vs Spot',     raw.spotDeltaLabel],
+          ['vs Max Pain', raw.maxPainDeltaLabel
+            ? `${raw.maxPainDeltaLabel} (${fmtPrice(raw.maxPainStrike, raw.asset)})`
+            : null],
+          ['IV Rank',     raw.ivRank != null ? `${raw.ivRank}` : null],
+        ].map(([label, val]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{label}</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {val != null ? fmtDelta(val) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Flags */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+          FLAGS
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>Capture</span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: raw.isLate ? 'var(--neutral)' : 'var(--call)' }}>
+            {raw.isLate ? 'Différée ⚠' : 'À l\'heure ✓'}
+          </span>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <CopyHash hash={entry.hash} />
+        <button
+          onClick={() => setExpanded(e => !e)}
+          style={{
+            background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+            padding: '4px 10px', cursor: 'pointer',
+            fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 500,
+            color: 'var(--text-muted)', transition: 'all 150ms ease',
+          }}
+        >
+          {expanded ? 'Masquer ▲' : 'Voir détails ▼'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div style={{
+          marginTop: 10, background: 'var(--bg-base)', borderRadius: 6,
+          padding: '10px 12px', overflowX: 'auto',
+          fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7,
+        }}>
+          <JsonNode data={raw} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Entrée Cache ──────────────────────────────────────────────────────────────
 
 function CacheEntry({ entry }) {
@@ -458,13 +578,14 @@ const EMPTY_FILTERS = {
 }
 
 const TYPE_OPTS = [
-  { id: 'signal',  label: 'Signaux' },
-  { id: 'anomaly', label: 'Anomalies' },
-  { id: 'pattern', label: 'Patterns' },
-  { id: 'cache',   label: 'Cache' },
+  { id: 'signal',     label: 'Signaux' },
+  { id: 'anomaly',    label: 'Anomalies' },
+  { id: 'pattern',    label: 'Patterns' },
+  { id: 'cache',      label: 'Cache' },
+  { id: 'settlement', label: 'Settlements' },
 ]
 
-const DEFAULT_FILTERS = { ...EMPTY_FILTERS, types: ['signal', 'anomaly', 'pattern'] }
+const DEFAULT_FILTERS = { ...EMPTY_FILTERS, types: ['signal', 'anomaly', 'pattern', 'settlement'] }
 
 const ASSET_OPTS = ['', 'BTC', 'ETH']
 
@@ -725,9 +846,10 @@ export default function HashJournal({ onRefresh }) {
 
   // Compteurs par source pour le header
   const counts = {
-    signal:  searchIndex.filter(e => e.type === 'signal').length,
-    anomaly: searchIndex.filter(e => e.type === 'anomaly').length,
-    cache:   searchIndex.filter(e => e.type === 'cache').length,
+    signal:     searchIndex.filter(e => e.type === 'signal').length,
+    anomaly:    searchIndex.filter(e => e.type === 'anomaly').length,
+    cache:      searchIndex.filter(e => e.type === 'cache').length,
+    settlement: searchIndex.filter(e => e.type === 'settlement').length,
   }
 
   return (
@@ -740,9 +862,10 @@ export default function HashJournal({ onRefresh }) {
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {[
-              { label: 'Signaux',   count: counts.signal,  color: 'var(--call)' },
-              { label: 'Anomalies', count: counts.anomaly, color: 'var(--neutral)' },
-              { label: 'Cache',     count: counts.cache,   color: 'var(--border-bright)' },
+              { label: 'Signaux',     count: counts.signal,     color: 'var(--call)' },
+              { label: 'Anomalies',   count: counts.anomaly,    color: 'var(--neutral)' },
+              { label: 'Cache',       count: counts.cache,      color: 'var(--border-bright)' },
+              { label: 'Settlements', count: counts.settlement, color: '#A78BFA' },
             ].map(({ label, count, color }) => (
               <div key={label} style={{
                 display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px',
@@ -796,10 +919,11 @@ export default function HashJournal({ onRefresh }) {
         <>
           {paginated.map((entry, i) => {
             const key = `${entry.type}-${entry.id ?? entry.hash ?? i}-${i}`
-            if (entry.type === 'signal')  return <SignalEntry  key={key} entry={entry} />
-            if (entry.type === 'anomaly') return <AnomalyEntry key={key} entry={entry} />
-            if (entry.type === 'pattern') return <PatternEntry key={key} entry={entry} />
-            if (entry.type === 'cache')   return <CacheEntry   key={key} entry={entry} />
+            if (entry.type === 'signal')     return <SignalEntry     key={key} entry={entry} />
+            if (entry.type === 'anomaly')    return <AnomalyEntry    key={key} entry={entry} />
+            if (entry.type === 'pattern')    return <PatternEntry    key={key} entry={entry} />
+            if (entry.type === 'cache')      return <CacheEntry      key={key} entry={entry} />
+            if (entry.type === 'settlement') return <SettlementEntry key={key} entry={entry} />
             return null
           })}
 

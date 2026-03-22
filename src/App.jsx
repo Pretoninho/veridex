@@ -14,8 +14,9 @@ import AuditBanner    from './components/AuditBanner.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
 import VLogo          from './components/VLogo.jsx'
 import { getSignalHistory } from './data_processing/signals/signal_engine.js'
+import { setupSettlementWatcher } from './data_processing/signals/settlement_tracker.js'
 import { syncServerClocks, SYNC_INTERVAL_MS } from './data_core/providers/clock_sync.js'
-import { setCachedClockSync } from './data_core/data_store/cache.js'
+import { setCachedClockSync, dataStore, CacheKey } from './data_core/data_store/cache.js'
 import './App.css'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
@@ -79,6 +80,26 @@ export default function App() {
     doSync()
     const timer = setInterval(doSync, SYNC_INTERVAL_MS)
     return () => clearInterval(timer)
+  }, [])
+
+  // Watcher settlement quotidien Deribit (08:00 UTC)
+  useEffect(() => {
+    const getSpot = (asset) =>
+      dataStore.get(CacheKey.spot('deribit', asset), true)?.price ?? null
+
+    const getIVRank = (asset) => {
+      const dvol = dataStore.get(CacheKey.dvol('deribit', asset), true)
+      if (!dvol) return null
+      const range = (dvol.monthMax ?? 0) - (dvol.monthMin ?? 0)
+      if (!range) return null
+      return Math.round(((dvol.current - dvol.monthMin) / range) * 100)
+    }
+
+    const getInstruments = (asset) =>
+      dataStore.get(CacheKey.instruments('deribit', asset), true)?.instruments ?? []
+
+    const cleanup = setupSettlementWatcher(getSpot, getIVRank, getInstruments)
+    return cleanup
   }, [])
 
   // Prix landing
