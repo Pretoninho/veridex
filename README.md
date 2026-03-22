@@ -13,6 +13,7 @@ options, futures, funding, IV, Greeks, signaux — données en temps réel depui
 | **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain), 3 blocs recommandations indépendants (Spot / Futures / Options), couche Expert et Simple (6 tons paramétrables, génération Claude API) |
 | **Trade** | *(en développement)* |
 | **On-Chain** | Score on-chain composite, Mempool, Exchange Flows, Mining — couche Expert/Simple |
+| **Audit** | Journal de hashage unifié (Signaux · Anomalies · Patterns · Cache), Vue générale avec stats et description des sources. Accessible via l'icône ⚙ dans le header. |
 
 Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour tous les onglets simultanément.
 
@@ -53,18 +54,21 @@ src/
 │
 ├── components/
 │   ├── ToneSelector.jsx            ← Grille 3×2 de sélection du ton (couche Simple)
-│   └── ClockStatus.jsx             ← Indicateur drift horloges cross-exchange (invisible si OK)
+│   ├── ClockStatus.jsx             ← Indicateur drift horloges cross-exchange (invisible si OK)
+│   ├── HashJournal.jsx             ← Journal unifié hashage (Signal/Anomalie/Pattern/Cache)
+│   └── AuditBanner.jsx             ← Bandeau d'alerte anomalie fixe (dismissable, poll 30s)
 │
 ├── pages/
-│   ├── LandingPage.jsx             ← Écran d'accueil (splash)
+│   ├── LandingPage.jsx             ← Écran d'accueil (splash) — prix BTC + ETH
 │   ├── MarketPage.jsx              ← Onglet Market
 │   ├── DerivativesPage.jsx         ← Onglet Dérivés (+ countdown funding)
 │   ├── OptionsDataPage.jsx         ← Onglet Options (Analyse · Signaux Expert/Simple · Journal)
 │   ├── SignalsPage.jsx             ← Onglet Signaux (Expert/Simple · 3 blocs · copie)
 │   ├── OnChainPage.jsx             ← Onglet On-Chain
-│   └── TradePage.jsx               ← Onglet Trade
+│   ├── TradePage.jsx               ← Onglet Trade
+│   └── AuditPage.jsx               ← Onglet Audit (Vue générale · Journal de hashage)
 │
-├── App.jsx                         ← Shell : navigation, asset selector, clock sync, versioning
+├── App.jsx                         ← Shell : navigation, asset selector, clock sync, AuditBanner
 └── App.css                         ← Thème dark + variables CSS
 ```
 
@@ -101,14 +105,35 @@ Pour chaque niveau de score, 3 recommandations indépendantes :
 
 ---
 
-## Système de hashage (SmartCache)
+## Système de hashage (SmartCache + Journal d'audit)
 
 - **FNV-1a 32-bit** — hash pur JS, sans dépendance externe
 - `SmartCache.set(key, data)` → retourne `true` uniquement si les données ont changé
+- `SmartCache.changeLog` — journal circulaire (max 500 entrées) `{ key, hash, ts }` des changements détectés
 - Évite les re-renders React inutiles sur polling fréquent
-- Détection d'anomalies : 3+ indicateurs changent en < 10s
-- **Market Fingerprint** (IndexedDB) : bucketise les conditions de marché et enregistre les résultats +1h/+4h/+24h
+- **Détection d'anomalies** : 3+ indicateurs changent en < 10s → persisté dans `localStorage` (`veridex_anomaly_log`, max 200 entrées, déduplication 60s)
+- **Market Fingerprint** (IndexedDB) : bucketise les conditions de marché, enregistre les résultats +1h/+4h/+24h, index des hashes connus (`mf_index`)
 - **Versioning signaux** (IndexedDB) : déduplication via hash du contexte
+
+### Journal de hashage (AuditPage)
+
+Consultable via l'icône ⚙ dans le header → onglet "Journal de hashage" :
+
+| Type | Source | Champs clés |
+|---|---|---|
+| Signal | IndexedDB `signal_history` | hash, asset, score, conditions, recommendation, marketHash |
+| Anomalie | localStorage `veridex_anomaly_log` | hash, severity (warning/critical), changedIndicators |
+| Pattern | IndexedDB `mf_*` + index `mf_index` | hash, occurrences, winRate_1h/4h, avgMove_24h, config |
+| Cache | `smartCache.changeLog` (mémoire) | key, hash, ts |
+
+Lecture seule — aucun appel API, aucun signal généré.
+
+### AuditBanner
+
+Bandeau fixe en bas d'écran (au-dessus de la nav) si anomalie < 10 min :
+- **Warning** (3–4 indicateurs) → fond ambre
+- **Critique** (5+ indicateurs) → fond rouge
+- Dismissable pour 10 min via `sessionStorage`
 
 ---
 
