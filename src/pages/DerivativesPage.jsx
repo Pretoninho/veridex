@@ -151,9 +151,10 @@ function useFundingCountdown() {
 }
 
 function countdownColor(msRemaining) {
-  if (msRemaining < 15 * 60_000)  return '#ff4d6d'  // < 15 min → rouge
-  if (msRemaining < 60 * 60_000)  return '#ffa800'  // < 1 h   → orange
-  return 'var(--call)'                               // > 1 h   → vert
+  if (msRemaining < 15 * 60_000)       return '#ff4d6d'  // < 15 min → rouge
+  if (msRemaining < 60 * 60_000)       return '#ffa800'  // < 1 h    → orange
+  if (msRemaining < 2 * 60 * 60_000)   return '#ffa800'  // < 2 h    → orange
+  return 'var(--call)'                                    // > 2 h    → vert
 }
 
 export default function DerivativesPage({ asset }) {

@@ -54,6 +54,10 @@ export {
   SYNC_INTERVAL_MS,
 } from './providers/clock_sync.js'
 
+export { getDeribitTime }  from './providers/deribit.js'
+export { getBinanceTime }  from './providers/binance.js'
+export { getCoinbaseTime } from './providers/coinbase.js'
+
 export { getCachedClockSync, setCachedClockSync } from './data_store/cache.js'
 
 // ── Exports : streams ─────────────────────────────────────────────────────────
