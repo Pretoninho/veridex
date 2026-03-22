@@ -17,23 +17,23 @@ export default defineConfig({
       registerType: "autoUpdate", version,
       includeAssets: ['favicon.ico'],
       manifest: {
-        id: '/deribit-options-pwa/',
+        id: '/veridex/',
         name: 'Veridex',
         short_name: 'Veridex',
         description: 'Analyse cross-exchange · Signaux composites · Données vérifiées',
         theme_color: '#060a0f',
         background_color: '#060a0f',
         display: 'standalone',
-        scope: '/deribit-options-pwa/',
-        start_url: '/deribit-options-pwa/',
+        scope: '/veridex/',
+        start_url: '/veridex/',
         orientation: 'portrait-primary',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
         ],
         shortcuts: [
-          { name: 'IV Live', short_name: 'IV Live', url: '/deribit-options-pwa/?view=tracker' },
-          { name: 'Chaîne Options', short_name: 'Chaîne', url: '/deribit-options-pwa/?view=chain' }
+          { name: 'IV Live', short_name: 'IV Live', url: '/veridex/?view=tracker' },
+          { name: 'Chaîne Options', short_name: 'Chaîne', url: '/veridex/?view=chain' }
         ]
       },
       workbox: {

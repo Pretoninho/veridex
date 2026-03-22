@@ -1,10 +1,10 @@
 {
-  "id": "/deribit-options-pwa/",
+  "id": "/veridex/",
   "name": "Veridex",
   "short_name": "Veridex",
   "description": "Analyse cross-exchange · Signaux composites · Données vérifiées",
-  "start_url": "/deribit-options-pwa/",
-  "scope": "/deribit-options-pwa/",
+  "start_url": "/veridex/",
+  "scope": "/veridex/",
   "display": "standalone",
   "background_color": "#060a0f",
   "theme_color": "#060a0f",
@@ -15,7 +15,7 @@
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
   "shortcuts": [
-    { "name": "IV Live", "short_name": "IV Live", "url": "/deribit-options-pwa/?view=tracker" },
-    { "name": "Chaine", "short_name": "Chaine", "url": "/deribit-options-pwa/?view=chain" }
+    { "name": "IV Live", "short_name": "IV Live", "url": "/veridex/?view=tracker" },
+    { "name": "Chaine", "short_name": "Chaine", "url": "/veridex/?view=chain" }
   ]
 }
