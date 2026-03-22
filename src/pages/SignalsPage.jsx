@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getDVOL, getFundingRate, getRealizedVol, getFutures, getFuturePrice, getSpot } from '../utils/api.js'
-import { computeSignal }         from '../data_processing/signals/signal_engine.js'
+import { computeSignal, saveSignal, hashMarketState } from '../data_processing/signals/signal_engine.js'
 import { interpretSignal }       from '../data_processing/signals/signal_interpreter.js'
 import { generateNoviceContent } from '../data_processing/signals/novice_generator.js'
 import { DEFAULT_TONE }          from '../data_processing/signals/tone_config.js'
@@ -231,6 +231,16 @@ export default function SignalsPage({ asset }) {
 
       const sig = computeSignal({ dvol, funding, rv, basisAvg, spot, asset })
       setResult(sig)
+
+      if (sig?.global != null) {
+        saveSignal({
+          asset,
+          score:          sig.global,
+          conditions:     sig.scores,
+          recommendation: sig.signal?.label ?? '—',
+          marketHash:     hashMarketState({ dvol, funding, rv, basisAvg }),
+        }).catch(() => {})
+      }
 
       const interp = interpretSignal(sig, raw)
       setInterpreted(interp)

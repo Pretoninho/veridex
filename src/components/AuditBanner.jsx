@@ -87,10 +87,10 @@ export default function AuditBanner({ onNavigateToAudit }) {
   return (
     <div style={{
       position: 'fixed',
-      bottom: 64,
+      bottom: 0,
       left: 0,
       right: 0,
-      zIndex: 100,
+      zIndex: 150,
       background: bg,
       borderTop: borderTop,
       padding: '9px 14px',
