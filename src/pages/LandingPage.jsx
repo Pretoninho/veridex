@@ -7,8 +7,7 @@
  * Props :
  *   onEnter   : () => void
  *   btcPrice  : number | null
- *   ivRank    : number | null
- *   funding   : number | null
+ *   ethPrice  : number | null
  */
 
 function fmtPrice(v) {
@@ -16,31 +15,7 @@ function fmtPrice(v) {
   return '$' + Math.round(v).toLocaleString('en-US')
 }
 
-function fmtIV(v) {
-  if (v == null) return '--'
-  return v.toFixed(1) + '%'
-}
-
-function fmtFunding(v) {
-  if (v == null) return '--'
-  return (v > 0 ? '+' : '') + v.toFixed(2) + '%/an'
-}
-
-function metricColor(v, positiveIsGreen = true) {
-  if (v == null) return 'var(--text-muted)'
-  if (v > 0) return positiveIsGreen ? 'var(--call)' : 'var(--put)'
-  if (v < 0) return positiveIsGreen ? 'var(--put)' : 'var(--call)'
-  return 'var(--text)'
-}
-
-function ivColor(v) {
-  if (v == null) return 'var(--text-muted)'
-  if (v > 70) return 'var(--put)'
-  if (v < 30) return 'var(--call)'
-  return 'var(--text)'
-}
-
-export default function LandingPage({ onEnter, btcPrice, ivRank, funding }) {
+export default function LandingPage({ onEnter, btcPrice, ethPrice }) {
   const metrics = [
     {
       label: 'BTC',
@@ -48,14 +23,9 @@ export default function LandingPage({ onEnter, btcPrice, ivRank, funding }) {
       color: btcPrice != null ? 'var(--text)' : 'var(--text-muted)',
     },
     {
-      label: 'IV Rank',
-      value: fmtIV(ivRank),
-      color: ivColor(ivRank),
-    },
-    {
-      label: 'Funding',
-      value: fmtFunding(funding),
-      color: metricColor(funding),
+      label: 'ETH',
+      value: fmtPrice(ethPrice),
+      color: ethPrice != null ? 'var(--text)' : 'var(--text-muted)',
     },
   ]
 
@@ -186,7 +156,7 @@ export default function LandingPage({ onEnter, btcPrice, ivRank, funding }) {
       {/* ── Zone métriques — 3 cards inline ────────────────────── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
+        gridTemplateColumns: 'repeat(2, 1fr)',
         gap: 10,
         width: '100%',
         opacity: 0,

@@ -64,6 +64,7 @@ export default function App() {
   const [asset,     setAsset]     = useState('BTC')
   const [clockSync, setClockSync] = useState(null)
   const [btcPrice,  setBtcPrice]  = useState(null)
+  const [ethPrice,  setEthPrice]  = useState(null)
 
   useEffect(() => {
     const doSync = async () => {
@@ -78,6 +79,7 @@ export default function App() {
 
   useEffect(() => {
     coinbase.getSpot('BTC').then(p => setBtcPrice(p)).catch(() => {})
+    coinbase.getSpot('ETH').then(p => setEthPrice(p)).catch(() => {})
   }, [])
 
   const forceUpdate = () => {
@@ -95,8 +97,7 @@ export default function App() {
     <LandingPage
       onEnter={() => setInApp(true)}
       btcPrice={btcPrice}
-      ivRank={null}
-      funding={null}
+      ethPrice={ethPrice}
     />
   )
 
