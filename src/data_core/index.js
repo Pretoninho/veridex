@@ -36,7 +36,7 @@
  */
 
 // ── Exports : store ───────────────────────────────────────────────────────────
-export { dataStore, CacheKey } from './data_store/cache.js'
+export { dataStore, CacheKey, SmartCache, smartCache, fnv1a, hashData } from './data_store/cache.js'
 
 // ── Exports : providers ───────────────────────────────────────────────────────
 export * as deribit  from './providers/deribit.js'
@@ -73,7 +73,23 @@ export {
   normalizeCoinbaseTicker,
   // Utilitaires
   mergeSpotTickers,
+  validateDataFreshness,
 } from './normalizers/format_data.js'
+
+// ── Exports : signals & fingerprint ──────────────────────────────────────────
+export {
+  detectMarketAnomaly,
+  hashMarketState,
+  saveSignal,
+  getSignalHistory,
+} from '../data_processing/signals/signal_engine.js'
+
+export {
+  createFingerprint,
+  recordPattern,
+  updateOutcomes,
+  getPatternStats,
+} from '../data_processing/signals/market_fingerprint.js'
 
 // ── Facade DataCore ───────────────────────────────────────────────────────────
 // Interface de haut niveau pour initialiser et piloter le data core.

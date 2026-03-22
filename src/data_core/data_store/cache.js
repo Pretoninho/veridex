@@ -15,6 +15,127 @@
 const DEFAULT_MAX_HISTORY = 100  // entrées par clé
 const DEFAULT_TTL_MS = 60_000   // 1 min — après ça, la donnée est "stale"
 
+// ── Hash FNV-1a 32 bits ───────────────────────────────────────────────────────
+
+/**
+ * Hash FNV-1a 32 bits — rapide, sans dépendance.
+ * @param {string} str
+ * @returns {string} hash hexadécimal 8 chars
+ */
+export function fnv1a(str) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = (h * 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}
+
+/**
+ * Sérialise une valeur de façon déterministe et la hashe.
+ * @param {any} data
+ * @returns {string} hash FNV-1a
+ */
+export function hashData(data) {
+  try {
+    return fnv1a(JSON.stringify(data, Object.keys(data ?? {}).sort()))
+  } catch {
+    return fnv1a(String(data))
+  }
+}
+
+// ── SmartCache ────────────────────────────────────────────────────────────────
+
+/**
+ * SmartCache — cache avec détection de changement par hash FNV-1a.
+ * Permet d'éviter les re-renders React inutiles en ne signalant
+ * que les données réellement modifiées.
+ */
+export class SmartCache {
+  constructor() {
+    /** @type {Map<string, { hash: string, data: any, timestamp: number }>} */
+    this._entries = new Map()
+    /** @type {Map<string, number>} — timestamp de la dernière modification par clé */
+    this._changedAt = new Map()
+  }
+
+  /**
+   * Stocke une valeur et retourne true si elle a changé.
+   * @param {string} key
+   * @param {any} data
+   * @returns {boolean} true si les données sont différentes du dernier set
+   */
+  set(key, data) {
+    const newHash = hashData(data)
+    const existing = this._entries.get(key)
+    const changed = !existing || existing.hash !== newHash
+
+    this._entries.set(key, { hash: newHash, data, timestamp: Date.now() })
+    if (changed) this._changedAt.set(key, Date.now())
+
+    return changed
+  }
+
+  /**
+   * Retourne la valeur stockée, ou null si absente.
+   * @param {string} key
+   * @returns {any|null}
+   */
+  get(key) {
+    return this._entries.get(key)?.data ?? null
+  }
+
+  /**
+   * Retourne true si la clé a changé depuis le dernier set.
+   * @param {string} key
+   * @param {string} [previousHash] — hash précédent à comparer
+   * @returns {boolean}
+   */
+  hasChanged(key, previousHash) {
+    const entry = this._entries.get(key)
+    if (!entry) return false
+    if (previousHash !== undefined) return entry.hash !== previousHash
+    return this._changedAt.get(key) === entry.timestamp
+  }
+
+  /**
+   * Retourne le hash actuel d'une clé.
+   * @param {string} key
+   * @returns {string|null}
+   */
+  getHash(key) {
+    return this._entries.get(key)?.hash ?? null
+  }
+
+  /**
+   * Retourne les clés modifiées depuis un timestamp donné.
+   * @param {number} sinceMs — timestamp unix ms
+   * @returns {string[]}
+   */
+  getChangedKeys(sinceMs) {
+    const result = []
+    for (const [key, ts] of this._changedAt) {
+      if (ts >= sinceMs) result.push(key)
+    }
+    return result
+  }
+
+  /** Supprime une clé. */
+  delete(key) {
+    this._entries.delete(key)
+    this._changedAt.delete(key)
+  }
+
+  /** Vide le cache. */
+  clear() {
+    this._entries.clear()
+    this._changedAt.clear()
+  }
+}
+
+// Instance partagée pour les composants React
+export const smartCache = new SmartCache()
+
 class DataStore {
   constructor() {
     /** @type {Map<string, { value: any, timestamp: number }>} */

@@ -598,3 +598,59 @@ export function mergeSpotTickers(tickers) {
     timestamp: Date.now(),
   }
 }
+
+// ── Intégrité cross-exchange ──────────────────────────────────────────────────
+
+const STALE_LAG_MS = 30_000  // 30 secondes
+
+/**
+ * Vérifie la cohérence temporelle de données provenant de plusieurs sources.
+ *
+ * @param {Object.<string, { timestamp?: number }|null>} dataMap
+ *   Clés = nom de source ('deribit', 'binance', 'okx', 'coinbase'),
+ *   valeurs = objets normalisés avec un champ `timestamp` (unix ms).
+ *
+ * @returns {{
+ *   isValid: boolean,
+ *   staleSource: string|null,
+ *   maxLagMs: number,
+ *   details: Object.<string, { timestamp: number|null, lagMs: number|null }>
+ * }}
+ */
+export function validateDataFreshness(dataMap) {
+  const now = Date.now()
+  const details = {}
+  const timestamps = []
+
+  for (const [source, data] of Object.entries(dataMap)) {
+    const ts = data?.timestamp ?? null
+    details[source] = { timestamp: ts, lagMs: ts != null ? now - ts : null }
+    if (ts != null) timestamps.push(ts)
+  }
+
+  if (timestamps.length === 0) {
+    return { isValid: false, staleSource: null, maxLagMs: 0, details }
+  }
+
+  // Source de référence = la plus récente
+  const maxTs = Math.max(...timestamps)
+  let staleSource = null
+  let maxLagMs = 0
+
+  for (const [source, info] of Object.entries(details)) {
+    if (info.timestamp == null) {
+      staleSource = staleSource ?? source
+      continue
+    }
+    const lag = maxTs - info.timestamp
+    if (lag > maxLagMs) maxLagMs = lag
+    if (lag > STALE_LAG_MS) staleSource = staleSource ?? source
+  }
+
+  return {
+    isValid: staleSource === null,
+    staleSource,
+    maxLagMs,
+    details,
+  }
+}

@@ -11,7 +11,14 @@
  *   - IV vs RV         : 15%
  *
  * Plus le score est élevé, meilleur est le contexte pour vendre de la vol (Sell High).
+ *
+ * Extensions hash :
+ *   - Détection d'anomalies de marché (3+ indicateurs changent en 10s)
+ *   - Versioning des signaux avec déduplication IndexedDB
  */
+
+import { get as idbGet, set as idbSet } from 'idb-keyval'
+import { fnv1a } from '../../data_core/data_store/cache.js'
 
 // ── Fonctions de score par composante ────────────────────────────────────────
 
@@ -160,4 +167,145 @@ export function computeSignal({ dvol, funding, rv, basisAvg }) {
   const s4 = scoreIVvsRV(dvol, rv)
   const global = calcGlobalScore(s1, s2, s3, s4)
   return { scores: { s1, s2, s3, s4 }, global, signal: getSignal(global) }
+}
+
+// ── Détection d'anomalies de marché ──────────────────────────────────────────
+
+/**
+ * Clés d'indicateurs surveillés et leur accesseur dans un snapshot marché.
+ * Un snapshot attendu : { spreadPct, fundingBinance, fundingOKX, ivRank, lsRatio, oiDelta }
+ */
+const MONITORED_INDICATORS = ['spreadPct', 'fundingBinance', 'fundingOKX', 'ivRank', 'lsRatio', 'oiDelta']
+const ANOMALY_THRESHOLD = 3       // nb d'indicateurs simultanés pour déclencher l'alerte
+const ANOMALY_WINDOW_MS = 10_000  // fenêtre de comparaison : 10 secondes
+
+/** Dernier snapshot + timestamp pour la détection d'anomalies */
+let _lastSnapshot = null
+let _lastSnapshotTs = 0
+
+/**
+ * Compare deux valeurs numériques et détecte un changement significatif.
+ * Un changement est significatif si la valeur diffère de > 1% (relatif) ou
+ * si l'une des deux est null/undefined et l'autre non.
+ */
+function _hasIndicatorChanged(prev, next) {
+  if (prev == null && next == null) return false
+  if (prev == null || next == null) return true
+  if (prev === 0 && next === 0) return false
+  const ref = Math.abs(prev) || 1
+  return Math.abs(next - prev) / ref > 0.01
+}
+
+/**
+ * Analyse un snapshot marché et détecte les anomalies.
+ * Doit être appelé périodiquement (toutes les 10s environ).
+ *
+ * @param {{ spreadPct?: number, fundingBinance?: number, fundingOKX?: number,
+ *            ivRank?: number, lsRatio?: number, oiDelta?: number }} snapshot
+ * @param {string} [asset]
+ * @returns {{ anomaly: boolean, changedIndicators: string[], asset: string|undefined } | null}
+ *   null si la fenêtre de comparaison n'est pas encore écoulée
+ */
+export function detectMarketAnomaly(snapshot, asset) {
+  const now = Date.now()
+
+  if (!_lastSnapshot || now - _lastSnapshotTs >= ANOMALY_WINDOW_MS) {
+    _lastSnapshot = { ...snapshot }
+    _lastSnapshotTs = now
+    return null
+  }
+
+  const changed = MONITORED_INDICATORS.filter(key =>
+    _hasIndicatorChanged(_lastSnapshot[key], snapshot[key])
+  )
+
+  // Mise à jour du snapshot de référence
+  _lastSnapshot = { ...snapshot }
+  _lastSnapshotTs = now
+
+  if (changed.length >= ANOMALY_THRESHOLD) {
+    return { anomaly: true, changedIndicators: changed, asset }
+  }
+  return { anomaly: false, changedIndicators: changed, asset }
+}
+
+// ── Versioning des signaux avec IndexedDB ─────────────────────────────────────
+
+const SIGNALS_IDB_KEY = 'signal_history'
+const MAX_SIGNALS_STORED = 500
+
+/**
+ * Génère le hash d'un signal à partir de son contexte complet.
+ * @param {{ timestamp, asset, score, conditions, recommendation, marketHash }} ctx
+ * @returns {string} hash FNV-1a
+ */
+function _hashSignal(ctx) {
+  const str = `${ctx.asset}|${ctx.score}|${ctx.recommendation}|${ctx.marketHash ?? ''}|${JSON.stringify(ctx.conditions ?? {})}`
+  return fnv1a(str)
+}
+
+/**
+ * Génère le hash représentant l'état du marché à un instant donné.
+ * @param {{ dvol?, funding?, rv?, basisAvg? }} marketInputs
+ * @returns {string}
+ */
+export function hashMarketState(marketInputs) {
+  const parts = [
+    Math.round((marketInputs?.dvol?.current ?? 0) * 10),
+    Math.round((marketInputs?.funding?.rateAnn ?? 0) * 100),
+    Math.round((marketInputs?.rv?.current ?? 0) * 10),
+    Math.round((marketInputs?.basisAvg ?? 0) * 100),
+  ].join('|')
+  return fnv1a(parts)
+}
+
+/**
+ * Sauvegarde un signal dans IndexedDB avec déduplication par hash.
+ *
+ * @param {{
+ *   asset: string,
+ *   score: number|null,
+ *   conditions: Object,
+ *   recommendation: string,
+ *   marketHash?: string
+ * }} signalCtx
+ * @returns {Promise<{ hash: string, isDuplicate: boolean }>}
+ */
+export async function saveSignal(signalCtx) {
+  const hash = _hashSignal(signalCtx)
+  const entry = {
+    hash,
+    timestamp: Date.now(),
+    asset: signalCtx.asset,
+    score: signalCtx.score,
+    conditions: signalCtx.conditions,
+    recommendation: signalCtx.recommendation,
+    marketHash: signalCtx.marketHash ?? null,
+  }
+
+  const history = (await idbGet(SIGNALS_IDB_KEY)) ?? []
+
+  // Déduplication par hash
+  if (history.some(s => s.hash === hash)) {
+    return { hash, isDuplicate: true }
+  }
+
+  history.push(entry)
+  // Garder seulement les N derniers
+  if (history.length > MAX_SIGNALS_STORED) history.splice(0, history.length - MAX_SIGNALS_STORED)
+
+  await idbSet(SIGNALS_IDB_KEY, history)
+  return { hash, isDuplicate: false }
+}
+
+/**
+ * Récupère l'historique des signaux pour un asset.
+ * @param {string} asset
+ * @param {number} [limit=50]
+ * @returns {Promise<Array>}
+ */
+export async function getSignalHistory(asset, limit = 50) {
+  const history = (await idbGet(SIGNALS_IDB_KEY)) ?? []
+  const filtered = asset ? history.filter(s => s.asset === asset) : history
+  return filtered.slice(-limit)
 }
