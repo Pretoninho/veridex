@@ -2,9 +2,10 @@
  * hash_search.js — Moteur de recherche unifié sur les hashes Veridex
  *
  * Sources indexées :
- *   1. Signaux    → IndexedDB 'signal_history'
- *   2. Cache log  → IndexedDB 'cache_changelog'
- *   3. Anomalies  → localStorage 'veridex_anomaly_log'
+ *   1. Signaux     → IndexedDB 'signal_history'
+ *   2. Cache log   → IndexedDB 'cache_changelog'
+ *   3. Anomalies   → localStorage 'veridex_anomaly_log'
+ *   4. Settlements → IndexedDB 'settlement_history_BTC' / 'settlement_history_ETH'
  *
  * Lecture seule. Aucun appel API. Aucun signal généré.
  */
@@ -28,6 +29,17 @@ async function _loadCacheLog() {
 function _loadAnomalyLog() {
   try {
     return JSON.parse(localStorage.getItem('veridex_anomaly_log') || '[]')
+  } catch (_) { return [] }
+}
+
+async function _loadSettlements() {
+  try {
+    const [btc, eth] = await Promise.all([
+      idbGet('settlement_history_BTC').catch(() => []),
+      idbGet('settlement_history_ETH').catch(() => []),
+    ])
+    return [...(btc ?? []), ...(eth ?? [])]
+      .sort((a, b) => b.capturedAt - a.capturedAt)
   } catch (_) { return [] }
 }
 
@@ -89,6 +101,27 @@ function _normalizeAnomaly(a) {
   }
 }
 
+function _normalizeSettlement(s) {
+  return {
+    id:       s.hash,
+    type:     'settlement',
+    hash:     s.hash,
+    ts:       s.capturedAt,
+    date:     s.dateKey,
+    hour:     8,   // toujours 08:00 UTC
+    asset:    s.asset,
+    label:    [
+      'settlement',
+      s.asset?.toLowerCase() ?? '',
+      `price:${s.settlementPrice}`,
+      s.isLate ? 'late' : 'ontime',
+    ].join(' '),
+    score:    null,
+    severity: null,
+    raw:      s,
+  }
+}
+
 // ── Index ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -96,16 +129,18 @@ function _normalizeAnomaly(a) {
  * @returns {Promise<Array>}
  */
 export async function buildSearchIndex() {
-  const [signals, cacheLog, anomalyLog] = await Promise.all([
+  const [signals, cacheLog, anomalyLog, settlements] = await Promise.all([
     _loadSignals(),
     _loadCacheLog(),
     Promise.resolve(_loadAnomalyLog()),
+    _loadSettlements(),
   ])
 
   const entries = [
     ...signals.map(_normalizeSignal),
     ...cacheLog.map(_normalizeCacheEntry),
     ...anomalyLog.map(_normalizeAnomaly),
+    ...settlements.map(_normalizeSettlement),
   ]
 
   entries.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))

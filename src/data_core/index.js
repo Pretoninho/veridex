@@ -107,6 +107,39 @@ export {
   normalizeOnChain,
 } from './normalizers/format_data.js'
 
+// ── Exports : Max Pain ────────────────────────────────────────────────────────
+export {
+  parseInstrument,
+  calculateMaxPain,
+  calculateMaxPainByExpiry,
+  interpretMaxPain,
+} from '../data_processing/volatility/max_pain.js'
+
+// ── Exports : Settlement Tracker ──────────────────────────────────────────────
+export {
+  setupSettlementWatcher,
+  captureSettlement,
+  getSettlementHistory,
+  getSettlementByDate,
+  getSettlementByHash,
+  clearSettlementHistory,
+} from '../data_processing/signals/settlement_tracker.js'
+
+// ── Exports : Publish Trigger ─────────────────────────────────────────────────
+export {
+  TRIGGER_TYPES,
+  TRIGGER_META,
+  detectTrigger,
+  detectSettlementTrigger,
+  markAsPublished,
+  isAlreadyPublished,
+} from '../data_processing/signals/publish_trigger.js'
+
+// ── Exports : Twitter Generator ───────────────────────────────────────────────
+export {
+  generateTwitterThread,
+} from '../data_processing/signals/twitter_generator.js'
+
 // ── Exports : signals & fingerprint ──────────────────────────────────────────
 export {
   detectMarketAnomaly,

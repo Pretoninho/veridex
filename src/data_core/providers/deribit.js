@@ -241,6 +241,65 @@ export async function getFundingRateHistory(asset, count = 90) {
   return normalized
 }
 
+// ── Parser date settlement ─────────────────────────────────────────────────
+
+/**
+ * Parse une date Deribit au format '14 Jan 2025'
+ * et reconstruit le timestamp 08:00 UTC exact.
+ * @param {string} dateStr
+ * @returns {number} timestamp ms
+ */
+function _parseSettlementDate(dateStr) {
+  if (!dateStr) return Date.now()
+
+  const MONTHS = {
+    Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+    Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+  }
+
+  const parts = dateStr.split(' ')
+  const day   = parseInt(parts[0])
+  const month = MONTHS[parts[1]]
+  const year  = parseInt(parts[2])
+
+  if (isNaN(day) || month === undefined || isNaN(year)) return Date.now()
+
+  // Settlement Deribit = 08:00:00 UTC exact
+  return new Date(Date.UTC(year, month, day, 8, 0, 0)).getTime()
+}
+
+/**
+ * Settlement quotidien Deribit (dernier prix de règlement publié).
+ * Retourne le prix le plus récent avec timestamp reconstitué à 08:00 UTC.
+ * @param {'BTC'|'ETH'} asset
+ * @returns {Promise<{ asset, settlementPrice, date, timestamp, source } | null>}
+ */
+export async function getDailySettlement(asset) {
+  const currency = asset.toUpperCase()
+  try {
+    const result = await apiFetch('get_delivery_prices', {
+      index_name: `${currency.toLowerCase()}_usd`,
+      count: 5,
+    })
+    const data = result?.data
+    if (!data?.length) return null
+
+    const latest = data[0]
+    return {
+      asset:           currency,
+      settlementPrice: Number(latest.delivery_price),
+      date:            latest.date,
+      timestamp:       _parseSettlementDate(latest.date),
+      source:          'deribit',
+    }
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      console.warn(`[getDailySettlement] ${currency} error:`, err?.message)
+    }
+    return null
+  }
+}
+
 /**
  * Prix de livraison / règlement historiques.
  * @param {'BTC'|'ETH'} asset
