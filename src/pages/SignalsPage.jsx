@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getDVOL, getFundingRate, getRealizedVol, getFutures, getFuturePrice, getSpot } from '../utils/api.js'
 import { computeSignal }         from '../data_processing/signals/signal_engine.js'
 import { interpretSignal }       from '../data_processing/signals/signal_interpreter.js'
@@ -33,7 +33,6 @@ function scoreColor(s) {
   return s >= 70 ? 'var(--call)' : s >= 40 ? 'var(--atm)' : 'var(--put)'
 }
 
-// Skeleton pour une ligne de texte
 function Skeleton({ width = '100%', height = 14, style }) {
   return (
     <div style={{
@@ -63,12 +62,101 @@ function NoviceSkeleton() {
   )
 }
 
+// Bouton copie rapide
+function CopyButton({ getText, style }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(getText())
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {}
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copier"
+      style={{
+        background: 'none', border: '1px solid var(--border)', borderRadius: 7,
+        color: copied ? 'var(--call)' : 'var(--text-muted)', fontSize: 13,
+        padding: '4px 8px', cursor: 'pointer', lineHeight: 1, transition: 'color .2s',
+        ...style,
+      }}
+    >
+      {copied ? '✓' : '📋'}
+    </button>
+  )
+}
+
+// Bloc recommandation marché
+function RecoBlock({ icon, title, signal, action, timeframe, stopLoss, accentColor }) {
+  const signalColor = {
+    'Vendre la vol': 'var(--call)', 'Actif': 'var(--call)', 'Attentif': 'var(--atm)',
+    'Spreads vendeurs': 'var(--atm)', 'Modéré': 'var(--atm)', 'Neutre': 'var(--text-muted)',
+    'Achats sélectifs': 'var(--accent)', 'Prudent': 'var(--accent2)',
+    'Acheter la vol': 'var(--accent)', 'Long vol': 'var(--accent)',
+    'Cash': 'var(--put)', 'Défavorable': 'var(--put)',
+  }[signal] ?? 'var(--text-muted)'
+
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, overflow: 'hidden', marginBottom: 10,
+    }}>
+      <div style={{
+        padding: '10px 14px', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 16 }}>{icon}</span>
+          <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: 'var(--text)' }}>
+            {title}
+          </span>
+        </div>
+        <span style={{
+          fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 10,
+          color: signalColor, background: `${signalColor}18`,
+          border: `1px solid ${signalColor}40`,
+          borderRadius: 6, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.5px',
+        }}>
+          {signal}
+        </span>
+      </div>
+      <div style={{ padding: '12px 14px' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, marginBottom: 10 }}>
+          {action}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {timeframe && timeframe !== 'N/A' && (
+            <span style={{
+              fontSize: 10, color: 'var(--text-muted)',
+              background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '3px 8px',
+            }}>
+              ⏱ {timeframe}
+            </span>
+          )}
+          {stopLoss && stopLoss !== 'N/A' && (
+            <span style={{
+              fontSize: 10, color: 'var(--accent2)',
+              background: 'rgba(255,107,53,.06)', border: '1px solid rgba(255,107,53,.2)',
+              borderRadius: 6, padding: '3px 8px',
+            }}>
+              🛡 {stopLoss}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Page principale ───────────────────────────────────────────────────────────
 
 export default function SignalsPage({ asset }) {
   // Signal data
-  const [result,      setResult]      = useState(null)    // computeSignal output
-  const [interpreted, setInterpreted] = useState(null)    // { expert, noviceData }
+  const [result,      setResult]      = useState(null)
+  const [interpreted, setInterpreted] = useState(null)
   const [rawData,     setRawData]     = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [error,       setError]       = useState(null)
@@ -76,13 +164,36 @@ export default function SignalsPage({ asset }) {
   const [history,     setHistory]     = useState([])
 
   // Novice layer
-  const [selectedTone,     setSelectedTone]     = useState(() => localStorage.getItem(LS_TONE_KEY) ?? DEFAULT_TONE)
-  const [noviceContent,    setNoviceContent]    = useState(null)
-  const [isGenerating,     setIsGenerating]     = useState(false)
-  const [generationError,  setGenerationError]  = useState(null)
+  const [selectedTone,    setSelectedTone]    = useState(() => localStorage.getItem(LS_TONE_KEY) ?? DEFAULT_TONE)
+  const [noviceContent,   setNoviceContent]   = useState(null)
+  const [isGenerating,    setIsGenerating]    = useState(false)
+  const [generationError, setGenerationError] = useState(null)
 
   // UI
-  const [mode, setMode] = useState('expert') // 'expert' | 'novice'
+  const [mode, setMode] = useState('expert')
+
+  // Refs pour éviter les stale closures
+  const noviceDataRef    = useRef(null)
+  const selectedToneRef  = useRef(selectedTone)
+  useEffect(() => { selectedToneRef.current = selectedTone }, [selectedTone])
+
+  // ── Génération couche novice ──────────────────────────────────────────────
+
+  const generateNovice = useCallback(async (noviceData, toneId) => {
+    if (!noviceData) return
+    setIsGenerating(true)
+    setGenerationError(null)
+    try {
+      const content = await generateNoviceContent(noviceData, toneId)
+      setNoviceContent(content)
+      if (content.is_fallback) {
+        setGenerationError('Version simplifiée (analyse IA indisponible)')
+      }
+    } catch {
+      setGenerationError('Génération indisponible')
+    }
+    setIsGenerating(false)
+  }, [])
 
   // ── Chargement du signal ──────────────────────────────────────────────────
 
@@ -124,6 +235,9 @@ export default function SignalsPage({ asset }) {
       const interp = interpretSignal(sig, raw)
       setInterpreted(interp)
 
+      // Stocker noviceData dans le ref pour éviter les stale closures
+      noviceDataRef.current = interp?.noviceData ?? null
+
       if (sig?.global != null) {
         setHistory(prev => [...prev.slice(-19), { score: sig.global, ts: Date.now() }])
       }
@@ -132,59 +246,55 @@ export default function SignalsPage({ asset }) {
 
       // Générer la couche novice automatiquement
       if (interp?.noviceData) {
-        generateNovice(interp.noviceData, selectedTone)
+        generateNovice(interp.noviceData, selectedToneRef.current)
       }
     } catch (e) {
       setError(e.message)
     }
     setLoading(false)
-  }, [asset, selectedTone])
-
-  // ── Génération couche novice ──────────────────────────────────────────────
-
-  const generateNovice = useCallback(async (noviceData, toneId) => {
-    if (!noviceData) return
-    setIsGenerating(true)
-    setGenerationError(null)
-    try {
-      const content = await generateNoviceContent(noviceData, toneId)
-      setNoviceContent(content)
-      if (content.is_fallback) {
-        setGenerationError('Version simplifiée (analyse IA indisponible)')
-      }
-    } catch {
-      setGenerationError('Génération indisponible')
-    }
-    setIsGenerating(false)
-  }, [])
+  }, [asset, generateNovice])
 
   // ── Changement de ton ─────────────────────────────────────────────────────
 
   const handleToneChange = useCallback((toneId) => {
     setSelectedTone(toneId)
+    selectedToneRef.current = toneId
     localStorage.setItem(LS_TONE_KEY, toneId)
-    if (interpreted?.noviceData) {
-      generateNovice(interpreted.noviceData, toneId)
-    }
-  }, [interpreted, generateNovice])
+    const nd = noviceDataRef.current
+    if (nd) generateNovice(nd, toneId)
+  }, [generateNovice])
 
-  // ── Regénération ──────────────────────────────────────────────────────────
+  // ── Regénération (correction bug stale closure) ───────────────────────────
 
   const regenerate = useCallback(() => {
-    if (interpreted?.noviceData) {
-      generateNovice(interpreted.noviceData, selectedTone)
-    }
-  }, [interpreted, selectedTone, generateNovice])
+    const nd = noviceDataRef.current
+    if (nd) generateNovice(nd, selectedToneRef.current)
+  }, [generateNovice])
 
   useEffect(() => { load() }, [asset])
 
   // ── Variables UI ──────────────────────────────────────────────────────────
 
-  const signal     = result?.signal
-  const scores     = result?.scores
-  const global     = result?.global
-  const expert     = interpreted?.expert
-  const gColor     = scoreColor(global)
+  const signal  = result?.signal
+  const scores  = result?.scores
+  const global  = result?.global
+  const expert  = interpreted?.expert
+  const recos   = expert?.recommendations
+  const gColor  = scoreColor(global)
+
+  // Texte pour copie synthesis
+  const getSynthesisText = () => {
+    if (!expert) return ''
+    const lines = [
+      `Signal ${asset} — ${expert.label} (${expert.score}/100)`,
+      `Situation : ${expert.situation}`,
+      '',
+      `📈 Spot [${recos?.spot?.signal}] : ${recos?.spot?.action}`,
+      `📊 Futures [${recos?.futures?.signal}] : ${recos?.futures?.action}`,
+      `⚡ Options [${recos?.options?.signal}] : ${recos?.options?.action}`,
+    ]
+    return lines.join('\n')
+  }
 
   // ── Rendu ─────────────────────────────────────────────────────────────────
 
@@ -223,7 +333,13 @@ export default function SignalsPage({ asset }) {
         background: signal?.bg || 'var(--surface)',
         border: `1px solid ${signal?.border || 'var(--border)'}`,
         borderRadius: 16, padding: '20px 16px', marginBottom: 14, textAlign: 'center',
+        position: 'relative',
       }}>
+        {global != null && (
+          <div style={{ position: 'absolute', top: 12, right: 12 }}>
+            <CopyButton getText={getSynthesisText} />
+          </div>
+        )}
         {global != null ? (
           <>
             <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
@@ -300,61 +416,64 @@ export default function SignalsPage({ asset }) {
                 fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
                 fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12,
               }}>
-                Décomposition
+                Décomposition du score
               </div>
-              <ScoreBar label="Volatilité IV — 30%"    score={scores.s1} color={scoreColor(scores.s1)} />
-              <ScoreBar label="Funding Rate — 20%"     score={scores.s2} color={scoreColor(scores.s2)} />
-              <ScoreBar label="Basis Futures — 20%"    score={scores.s3} color={scoreColor(scores.s3)} />
-              <ScoreBar label="Prime IV/RV — 15%"      score={scores.s4} color={scoreColor(scores.s4)} />
-              <ScoreBar label="On-Chain — 15%"         score={scores.s5} color={scoreColor(scores.s5)} />
+              <ScoreBar label="Volatilité IV — 30%"  score={scores.s1} color={scoreColor(scores.s1)} />
+              <ScoreBar label="Funding Rate — 20%"   score={scores.s2} color={scoreColor(scores.s2)} />
+              <ScoreBar label="Basis Futures — 20%"  score={scores.s3} color={scoreColor(scores.s3)} />
+              <ScoreBar label="Prime IV/RV — 15%"    score={scores.s4} color={scoreColor(scores.s4)} />
+              <ScoreBar label="On-Chain — 15%"       score={scores.s5} color={scoreColor(scores.s5)} />
             </div>
           )}
 
-          {/* Expert action */}
-          {expert && (
+          {/* Situation marché */}
+          {expert?.situation && (
             <div style={{
               background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 12, marginBottom: 14, overflow: 'hidden',
+              borderRadius: 12, padding: '14px 16px', marginBottom: 14,
             }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-                <div style={{
-                  fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
-                  fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
-                }}>
-                  Analyse Technique
-                </div>
+              <div style={{
+                fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+                fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 8,
+              }}>
+                Contexte marché
               </div>
-              <div style={{ padding: '14px 16px' }}>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7, marginBottom: 12 }}>
-                  {expert.situation}
-                </div>
-                <div style={{
-                  background: `${expert.bg}`, border: `1px solid ${expert.border}`,
-                  borderRadius: 10, padding: '12px 14px', marginBottom: 12,
-                }}>
-                  <div style={{
-                    fontSize: 10, fontFamily: 'var(--sans)', fontWeight: 700,
-                    color: expert.color, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 6,
-                  }}>
-                    Action recommandée
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.7 }}>
-                    {expert.action}
-                  </div>
-                </div>
-                {[
-                  { label: 'Durée cible',  val: expert.duration },
-                  { label: 'Stop / sortie', val: expert.stopLoss },
-                ].map(({ label, val }) => val && (
-                  <div key={label} style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                    paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid rgba(255,255,255,.04)',
-                  }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, marginRight: 10 }}>{label}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'right' }}>{val}</span>
-                  </div>
-                ))}
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.7 }}>
+                {expert.situation}
               </div>
+            </div>
+          )}
+
+          {/* 3 blocs recommandations */}
+          {recos && (
+            <div style={{ marginBottom: 4 }}>
+              <div style={{
+                fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+                fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 10,
+              }}>
+                Recommandations par marché
+              </div>
+              <RecoBlock
+                icon="📈" title="Spot"
+                signal={recos.spot.signal}
+                action={recos.spot.action}
+                timeframe={recos.spot.timeframe}
+                stopLoss={recos.spot.stopLoss}
+              />
+              <RecoBlock
+                icon="📊" title="Futures / Perp"
+                signal={recos.futures.signal}
+                action={recos.futures.action}
+                timeframe={recos.futures.timeframe}
+                stopLoss={recos.futures.stopLoss}
+              />
+              <RecoBlock
+                icon="⚡" title="Options"
+                signal={recos.options.signal}
+                action={recos.options.action}
+                timeframe={recos.options.timeframe}
+                stopLoss={recos.options.stopLoss}
+              />
             </div>
           )}
 
@@ -437,14 +556,35 @@ export default function SignalsPage({ asset }) {
           {/* Contenu novice */}
           <div style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 12, padding: '16px', marginBottom: 14,
+            borderRadius: 12, padding: '16px', marginBottom: 14, position: 'relative',
           }}>
             {isGenerating ? (
               <NoviceSkeleton />
             ) : noviceContent ? (
               <>
+                {/* Bouton copie */}
+                <div style={{ position: 'absolute', top: 12, right: 12 }}>
+                  <CopyButton getText={() => {
+                    const c = noviceContent
+                    return [
+                      `${c.emoji} ${c.headline}`,
+                      '',
+                      c.metaphor,
+                      '',
+                      c.situation,
+                      '',
+                      (c.steps ?? []).map((s, i) => `${i + 1}. ${s}`).join('\n'),
+                      '',
+                      `💰 ${c.gain}`,
+                      `⚠️ ${c.risk}`,
+                      '',
+                      `→ ${c.action}`,
+                    ].join('\n')
+                  }} />
+                </div>
+
                 {/* Headline */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingRight: 36 }}>
                   <span style={{ fontSize: 26, lineHeight: 1 }}>{noviceContent.emoji}</span>
                   <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 16, color: 'var(--text)', lineHeight: 1.2 }}>
                     {noviceContent.headline}
@@ -471,7 +611,7 @@ export default function SignalsPage({ asset }) {
                     fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
                     fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8,
                   }}>
-                    Quoi faire
+                    Opportunités
                   </div>
                   {(noviceContent.steps ?? []).map((step, i) => (
                     <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6, alignItems: 'flex-start' }}>
@@ -488,9 +628,7 @@ export default function SignalsPage({ asset }) {
                 </div>
 
                 {/* Gain + Risque */}
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14,
-                }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
                   <div style={{
                     background: 'rgba(0,229,160,.06)', border: '1px solid rgba(0,229,160,.2)',
                     borderRadius: 10, padding: '10px 12px',

@@ -150,7 +150,6 @@ export default function DerivativesPage({ asset }) {
     dOI:          null,
     bOI:          null,
     liquidations: null,
-    deliveries:   null,
     futures:      [],
   })
   const [loading,    setLoading]    = useState(false)
@@ -170,7 +169,7 @@ export default function DerivativesPage({ asset }) {
     try {
       const [
         spotRes, cSpotRes, dFundRes, bFundRes, dFundHistRes,
-        sentRes, tvRes, dOIRes, bOIRes, liqRes, delRes, instrRes,
+        sentRes, tvRes, dOIRes, bOIRes, liqRes, instrRes,
       ] = await Promise.allSettled([
         deribit.getSpot(asset),
         coinbase.getSpot(asset),
@@ -182,7 +181,6 @@ export default function DerivativesPage({ asset }) {
         deribit.getOpenInterest(asset),
         binance.getOpenInterest(asset),
         binance.getLiquidations(asset),
-        deribit.getDeliveryPrices(asset),
         deribit.getInstruments(asset, 'future'),
       ])
 
@@ -232,7 +230,6 @@ export default function DerivativesPage({ asset }) {
         dOI:          dOIRes.status       === 'fulfilled' ? dOIRes.value       : null,
         bOI:          bOIRes.status       === 'fulfilled' ? bOIRes.value       : null,
         liquidations: liqRes.status       === 'fulfilled' ? liqRes.value       : null,
-        deliveries:   delRes.status       === 'fulfilled' ? delRes.value       : null,
         futures:      futureRows,
       })
       setLastUpdate(new Date())
@@ -243,7 +240,7 @@ export default function DerivativesPage({ asset }) {
   }
 
   const { spot, cSpot, dFunding, bFunding, dFundingHist, sentiment, takerVol,
-          dOI, bOI, liquidations, deliveries, futures } = state
+          dOI, bOI, liquidations, futures } = state
 
   const avgFunding30 = dFundingHist?.history?.length
     ? dFundingHist.history.reduce((s, r) => s + (safe(r.rateAnn) ?? 0), 0) / dFundingHist.history.length
@@ -573,27 +570,6 @@ export default function DerivativesPage({ asset }) {
           </div>
         )}
       </div>
-
-      {/* ── Prix de règlement Deribit ── */}
-      {deliveries?.deliveries?.length > 0 && (
-        <>
-          <SectionTitle badge="Deribit · Options settlement">Prix de règlement</SectionTitle>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            {deliveries.deliveries.slice(-6).reverse().map((d, i, arr) => (
-              <div key={i} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '9px 16px',
-                borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-              }}>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--sans)' }}>{d.date}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
-                  {fmtPrice(d.price, asset)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
 
       {lastUpdate && (
         <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5, marginTop: 12, marginBottom: 4 }}>

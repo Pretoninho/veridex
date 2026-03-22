@@ -141,28 +141,28 @@ export function getSignal(score) {
     color:  'var(--call)',
     bg:     'rgba(0,229,160,.08)',
     border: 'rgba(0,229,160,.3)',
-    action: 'Sell High + Short Perp — conditions idéales',
+    action: 'Conditions exceptionnelles — multiples opportunités actives',
   }
   if (score >= 60) return {
     label:  '✓ Favorable',
     color:  'var(--atm)',
     bg:     'rgba(255,215,0,.06)',
     border: 'rgba(255,215,0,.3)',
-    action: 'DI recommandé — bon moment pour placer',
+    action: 'Conditions favorables — bon moment pour agir',
   }
   if (score >= 40) return {
     label:  '~ Neutre',
     color:  'var(--accent2)',
     bg:     'rgba(255,107,53,.06)',
     border: 'rgba(255,107,53,.3)',
-    action: 'DI possible mais pas optimal',
+    action: 'Marché neutre — être sélectif sur les positions',
   }
   return {
     label:  '↓ Défavorable',
     color:  'var(--put)',
     bg:     'rgba(255,77,109,.06)',
     border: 'rgba(255,77,109,.3)',
-    action: 'Attendre un meilleur contexte',
+    action: 'Attendre un meilleur contexte de marché',
   }
 }
 

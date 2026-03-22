@@ -50,42 +50,42 @@ const TIMEOUT_MS = 10_000
  */
 export async function generateNoviceContent(signal, toneId) {
   const tone = TONES[toneId] ?? TONES['serious']
+  // Nonce aléatoire pour forcer une métaphore différente à chaque appel
+  const nonce = Math.floor(Math.random() * 10000)
 
-  const dataPrompt = `Voici le signal de marché du jour :
+  const dataPrompt = `Voici le signal de marché (nonce: ${nonce}) :
 
 Actif : ${signal.asset}
 Prix actuel : ${signal.spotPrice != null ? `$${Math.round(signal.spotPrice).toLocaleString('fr-FR')}` : 'N/A'}
-Signal : ${signal.label}
-Score : ${signal.score ?? 'N/A'}/100
-IV Rank : ${signal.ivRank != null ? `${signal.ivRank.toFixed(1)}%` : 'N/A'}
-Funding : ${signal.funding != null ? `${signal.funding.toFixed(2)}%/an` : 'N/A'}
+Signal global : ${signal.label} (${signal.score ?? 'N/A'}/100)
+IV Rank : ${signal.ivRank != null ? `${Number(signal.ivRank).toFixed(1)}%` : 'N/A'}
+Funding : ${signal.funding != null ? `${Number(signal.funding).toFixed(2)}%/an` : 'N/A'}
 Situation : ${signal.situation}
 
-Action experte recommandée :
-${signal.expertAction}
+Recommandation Spot : [${signal.spotSignal ?? '—'}] ${signal.spotAction ?? 'N/A'}
+Recommandation Futures : [${signal.futuresSignal ?? '—'}] ${signal.futuresAction ?? 'N/A'}
+Recommandation Options : [${signal.optionsSignal ?? '—'}] ${signal.optionsAction ?? 'N/A'}
 
-Strike cible haussier : ${signal.strikeCall != null ? `$${Math.round(signal.strikeCall).toLocaleString('fr-FR')}` : 'N/A'}
-Strike cible baissier : ${signal.strikePut  != null ? `$${Math.round(signal.strikePut).toLocaleString('fr-FR')}`  : 'N/A'}
-Durée : ${signal.duration}
-Gain estimé sur 1000$ : ${signal.estimatedGain != null ? `${signal.estimatedGain}$` : 'N/A'}`
+Gain estimé sur 1000$ : ${signal.estimatedGain != null ? `${signal.estimatedGain}$` : 'N/A'}
+Durée cible : ${signal.duration ?? 'N/A'}`
 
-  const structurePrompt = `Génère une interprétation novice de ce signal.
+  const structurePrompt = `Génère une interprétation novice de ce signal de marché crypto.
 
 CONTRAINTES OBLIGATOIRES :
-1. Utilise une métaphore du monde réel DIFFÉRENTE à chaque génération (cuisine, sport, voyage, nature, cinéma, musique, construction, jardinage, cuisine, météo...)
-2. Mentionne la plateforme Nexo ou Binance
+1. Utilise une métaphore du monde réel UNIQUE et INATTENDUE — JAMAIS la même que d'habitude (varie entre : cuisine, sport, voyage, musique, construction, jardinage, météo, cinéma, cuisine, bricolage, pêche, danse, astronomie...)
+2. Mentionne Binance ou Deribit pour l'action concrète
 3. Donne un montant concret (exemple sur 1000$)
 4. Mentionne le risque honnêtement en 1 phrase — ne promets JAMAIS de gains garantis
-5. Termine par un appel à l'action précis
-6. Maximum 120 mots au total
+5. Résume les 3 opportunités (spot, futures, options) en langage simple
+6. Maximum 130 mots au total
 
 Réponds UNIQUEMENT en JSON valide avec cette structure exacte :
 {
   "emoji": "un seul emoji représentatif",
   "headline": "titre accrocheur maximum 10 mots",
-  "metaphor": "analogie monde réel 1-2 phrases",
+  "metaphor": "analogie monde réel 1-2 phrases (DIFFÉRENTE à chaque fois)",
   "situation": "ce qui se passe en ce moment 1 phrase simple",
-  "steps": ["étape 1 courte", "étape 2 courte", "étape 3 courte"],
+  "steps": ["opportunité spot en 1 phrase", "opportunité futures en 1 phrase", "opportunité options en 1 phrase"],
   "gain": "estimation sur 1000$ exemple non garanti",
   "risk": "risque en 1 phrase honnête",
   "action": "appel à l'action final 1 phrase",
@@ -155,9 +155,9 @@ function _fallback(signal, toneId, isFallback = true) {
     situation: signal.situation,
     steps: isPositive
       ? [
-          'Ouvrir Nexo ou Binance',
-          `Suivre l\'action : ${signal.expertAction?.slice(0, 50) ?? 'voir analyse expert'}`,
-          'Ne pas dépasser ta limite habituelle',
+          `Spot [${signal.spotSignal ?? '—'}] : ${signal.spotAction?.slice(0, 60) ?? 'voir analyse expert'}`,
+          `Futures [${signal.futuresSignal ?? '—'}] : ${signal.futuresAction?.slice(0, 60) ?? 'voir analyse expert'}`,
+          `Options [${signal.optionsSignal ?? '—'}] : ${signal.optionsAction?.slice(0, 60) ?? 'voir analyse expert'}`,
         ]
       : [
           'Surveiller l\'évolution du marché',

@@ -215,6 +215,7 @@ export default function OptionsDataPage({ asset }) {
   const [dOI,         setDOI]         = useState(null)
   const [bOI,         setBOI]         = useState(null)
   const [bFunding,    setBFunding]    = useState(null)  // Binance funding rate
+  const [deliveries,  setDeliveries]  = useState(null)  // Settlement prices
   const [loading,     setLoading]     = useState(false)
   const [lastUpdate,  setLastUpdate]  = useState(null)
   // Journal
@@ -241,7 +242,7 @@ export default function OptionsDataPage({ asset }) {
     setLoading(true)
     try {
       // ── Phase 1 : données de base ──────────────────────────────────────────
-      const [spotRes, dvolRes, rvRes, fundingRes, bOptRes, bOIRes, dOIRes, bFundRes] =
+      const [spotRes, dvolRes, rvRes, fundingRes, bOptRes, bOIRes, dOIRes, bFundRes, delivRes] =
         await Promise.allSettled([
           deribit.getSpot(asset),
           deribit.getDVOL(asset),
@@ -251,6 +252,7 @@ export default function OptionsDataPage({ asset }) {
           binance.getOpenInterest(asset),   // futures OI (fiable) — eapi options trop peu liquides
           deribit.getOpenInterest(asset),
           binance.getFundingRate(asset),
+          deribit.getDeliveryPrices(asset),
         ])
 
       if (!isMounted.current) return
@@ -271,6 +273,7 @@ export default function OptionsDataPage({ asset }) {
       setBOI(bOIRes.status === 'fulfilled' ? bOIRes.value : null)
       setDOI(dOIRes.status === 'fulfilled' ? dOIRes.value : null)
       setBFunding(bFundData)
+      setDeliveries(delivRes.status === 'fulfilled' ? delivRes.value : null)
 
       // IV Rank / Percentile
       if (dvolData) {
@@ -667,6 +670,27 @@ export default function OptionsDataPage({ asset }) {
               </div>
             ))}
           </div>
+
+          {/* ── Prix de règlement Deribit ── */}
+          {deliveries?.deliveries?.length > 0 && (
+            <>
+              <SectionTitle badge="Deribit · Settlement">Prix de règlement</SectionTitle>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                {deliveries.deliveries.slice(-10).reverse().map((d, i, arr) => (
+                  <div key={i} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '9px 16px',
+                    borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                  }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--sans)' }}>{d.date}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
+                      {'$' + Number(d.price).toLocaleString('en-US', { maximumFractionDigits: asset === 'ETH' ? 2 : 0 })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           {/* Hint si pas de données */}
           {!dvol && !dChain?.length && !loading && (
