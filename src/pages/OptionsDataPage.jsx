@@ -14,7 +14,7 @@
  *   - Signaux options dérivés des données chargées
  *   - Journal de snapshots persisté en localStorage
  */
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import * as deribit from '../data_core/providers/deribit.js'
 import * as binance from '../data_core/providers/binance.js'
 import { analyzeIV } from '../data_processing/volatility/iv_rank.js'
@@ -23,6 +23,8 @@ import { recordSnapshot as saveMetricSnapshot } from '../data_processing/history
 import { generateNoviceContent } from '../data_processing/signals/novice_generator.js'
 import { DEFAULT_TONE }          from '../data_processing/signals/tone_config.js'
 import ToneSelector              from '../components/ToneSelector.jsx'
+import MaxPainChart              from '../components/MaxPainChart.jsx'
+import { calculateMaxPainByExpiry, interpretMaxPain } from '../data_processing/volatility/max_pain.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -92,7 +94,7 @@ function calcATMIV(groups, spot) {
 
 // ── Composants ────────────────────────────────────────────────────────────────
 
-function SectionTitle({ children, badge }) {
+function SectionTitle({ children, badge, badgeColor }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, marginTop: 20 }}>
       <div style={{
@@ -104,7 +106,7 @@ function SectionTitle({ children, badge }) {
       {badge && (
         <span style={{
           fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-          background: 'rgba(255,255,255,.06)', color: 'var(--text-muted)',
+          background: 'rgba(255,255,255,.06)', color: badgeColor ?? 'var(--text-muted)',
         }}>
           {badge}
         </span>
@@ -262,6 +264,7 @@ export default function OptionsDataPage({ asset }) {
   const [bOI,         setBOI]         = useState(null)
   const [bFunding,    setBFunding]    = useState(null)  // Binance funding rate
   const [deliveries,  setDeliveries]  = useState(null)  // Settlement prices
+  const [selectedMaxPainExpiry, setSelectedMaxPainExpiry] = useState(null)
   const [loading,     setLoading]     = useState(false)
   const [lastUpdate,  setLastUpdate]  = useState(null)
   // Journal
@@ -560,6 +563,23 @@ export default function OptionsDataPage({ asset }) {
   const dPCR     = safe(dOI?.putCallRatio)
   const bPCR     = safe(bOI?.putCallRatio)
 
+  // ── Max Pain par échéance ─────────────────────────────────────────────────
+  // Calculé depuis dOI.raw (données déjà en cache, aucun appel API supplémentaire)
+  const maxPainByExpiry = useMemo(() => {
+    const rawInstruments = dOI?.raw ?? []
+    if (!rawInstruments.length || !spotPrice) return []
+    try {
+      const results = calculateMaxPainByExpiry(rawInstruments, spotPrice)
+      return results.map(mp => ({
+        ...mp,
+        interpretation: interpretMaxPain(mp, spotPrice),
+      }))
+    } catch (err) {
+      console.warn('[OptionsDataPage] Max Pain error:', err)
+      return []
+    }
+  }, [dOI, spotPrice])
+
   // ── Signaux options dérivés ────────────────────────────────────────────────
   const ivRankVal  = safe(ivAnalysis?.ivRank)
   const fundingAnn = safe(funding?.rateAnn)
@@ -833,6 +853,68 @@ export default function OptionsDataPage({ asset }) {
               </div>
             </>
           )}
+
+          {/* ── Max Pain par échéance ── */}
+          {maxPainByExpiry.length > 0 && (() => {
+            const activeExpiry = selectedMaxPainExpiry
+              ? maxPainByExpiry.find(mp => mp.expiryStr === selectedMaxPainExpiry) ?? maxPainByExpiry[0]
+              : maxPainByExpiry[0]
+            const mp = activeExpiry
+
+            const mpBadgeColor = mp.direction === 'above' ? 'var(--call)'
+              : mp.direction === 'below' ? 'var(--put)'
+              : 'var(--text-muted)'
+
+            return (
+              <>
+                <SectionTitle
+                  badge={`$${mp.maxPainStrike.toLocaleString('en-US')} · ${mp.distancePct > 0 ? '+' : ''}${mp.distancePct.toFixed(1)}%`}
+                  badgeColor={mpBadgeColor}
+                >
+                  Max Pain
+                </SectionTitle>
+
+                {/* Sélecteur d'échéance */}
+                <div style={{
+                  display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 10,
+                  scrollbarWidth: 'none',
+                }}>
+                  {maxPainByExpiry.map(entry => {
+                    const isActive   = (selectedMaxPainExpiry ?? maxPainByExpiry[0]?.expiryStr) === entry.expiryStr
+                    const tabColor   = entry.daysToExpiry < 3 ? 'var(--put)'
+                      : entry.daysToExpiry < 7 ? 'var(--atm)'
+                      : 'var(--text-muted)'
+                    return (
+                      <button
+                        key={entry.expiryStr}
+                        onClick={() => setSelectedMaxPainExpiry(entry.expiryStr)}
+                        style={{
+                          flexShrink: 0, padding: '5px 10px',
+                          border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
+                          borderRadius: 8, cursor: 'pointer',
+                          background: isActive ? 'rgba(0,200,150,0.12)' : 'var(--surface)',
+                          color: isActive ? 'var(--accent)' : tabColor,
+                          fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700,
+                          whiteSpace: 'nowrap',
+                          transition: 'all .15s',
+                        }}
+                      >
+                        {entry.expiryStr} · {Math.round(entry.daysToExpiry)}j
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <MaxPainChart
+                  data={mp}
+                  asset={asset}
+                  expiryStr={mp.expiryStr}
+                  daysToExpiry={mp.daysToExpiry}
+                  mode={optionsMode}
+                />
+              </>
+            )
+          })()}
 
           {/* Hint si pas de données */}
           {!dvol && !dChain?.length && !loading && (

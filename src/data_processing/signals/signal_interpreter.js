@@ -109,35 +109,46 @@ function _futuresReco(score, funding, basisAvg) {
 
 // ── Recommandation Options ────────────────────────────────────────────────
 
-function _optionsReco(score, dvol, rv, spot) {
+function _optionsReco(score, dvol, rv, spot, maxPain) {
   const ivRank = _ivRank(dvol)
   const strikeCall = spot != null ? Math.round(spot * 1.08) : null
   const strikePut  = spot != null ? Math.round(spot * 0.92) : null
   const ivStr = ivRank != null ? `IV Rank ${ivRank}%` : 'IV Rank N/A'
 
+  // Suffix Max Pain si disponible
+  const mpStr = maxPain?.interpretation
+    ? ` · ${maxPain.interpretation.expert}`
+    : maxPain?.maxPainStrike
+    ? ` · Max Pain $${maxPain.maxPainStrike.toLocaleString()} (strike réel Deribit ✓)`
+    : ''
+
   if (score >= 80) return {
     signal:    'Vendre la vol',
-    action:    `${ivStr} — volatilité historiquement élevée. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.`,
+    action:    `${ivStr} — volatilité historiquement élevée. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.${mpStr}`,
     timeframe: '7 à 14 jours',
     stopLoss:  'Couper si IV Rank repasse sous 50% ou perte > 1× prime encaissée',
+    maxPain,
   }
   if (score >= 60) return {
     signal:    'Spreads vendeurs',
-    action:    `${ivStr} — bon contexte pour les spreads verticaux et covered calls. Strike call cible ~${fmtPrice(strikeCall)}. Durée 7j recommandée. Risque limité vs vente nue.`,
+    action:    `${ivStr} — bon contexte pour les spreads verticaux et covered calls. Strike call cible ~${fmtPrice(strikeCall)}. Durée 7j recommandée. Risque limité vs vente nue.${mpStr}`,
     timeframe: '7 jours',
     stopLoss:  'Fermer à 50% du profit max ou si prix dépasse le strike court',
+    maxPain,
   }
   if (score >= 40) return {
     signal:    'Achats sélectifs',
-    action:    `${ivStr} neutre — éviter les ventes nues. Long calls ou puts si catalyseur identifié. Spreads débiteurs préférables pour limiter le coût. Strike put ~${fmtPrice(strikePut)}.`,
+    action:    `${ivStr} neutre — éviter les ventes nues. Long calls ou puts si catalyseur identifié. Spreads débiteurs préférables pour limiter le coût. Strike put ~${fmtPrice(strikePut)}.${mpStr}`,
     timeframe: 'Sélectif selon catalyseur',
     stopLoss:  'Limiter à la prime payée (options achetées)',
+    maxPain,
   }
   return {
     signal:    'Acheter la vol',
-    action:    `${ivStr} bas — options bon marché en achat. Long puts ~${fmtPrice(strikePut)} comme protection ou long calls spéculatifs si le support tient. Durée 14-30j pour laisser le temps à la position.`,
+    action:    `${ivStr} bas — options bon marché en achat. Long puts ~${fmtPrice(strikePut)} comme protection ou long calls spéculatifs si le support tient. Durée 14-30j pour laisser le temps à la position.${mpStr}`,
     timeframe: '14 à 30 jours',
     stopLoss:  'Limiter à la prime payée',
+    maxPain,
   }
 }
 
@@ -198,6 +209,7 @@ function _buildSituation(dvol, funding, rv, basisAvg) {
 export function interpretSignal(computedSignal, rawData) {
   const score       = computedSignal?.global ?? null
   const signalMeta  = computedSignal?.signal ?? null
+  const maxPain     = computedSignal?.maxPain ?? null
   const { dvol, funding, rv, basisAvg, spot, asset } = rawData ?? {}
 
   const ivRank     = _ivRank(dvol)
@@ -206,7 +218,7 @@ export function interpretSignal(computedSignal, rawData) {
 
   const spotReco    = _spotReco(score, dvol)
   const futuresReco = _futuresReco(score, funding, basisAvg)
-  const optionsReco = _optionsReco(score, dvol, rv, spot)
+  const optionsReco = _optionsReco(score, dvol, rv, spot, maxPain)
 
   const expert = {
     label:    signalMeta?.label ?? '—',
@@ -243,6 +255,8 @@ export function interpretSignal(computedSignal, rawData) {
     optionsSignal: optionsReco.signal,
     optionsAction: optionsReco.action,
     duration:      optionsReco.timeframe,
+    maxPain,
+    maxPainNovice: maxPain?.interpretation?.novice ?? null,
   }
 
   return { expert, noviceData }

@@ -21,6 +21,7 @@
 import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../../data_core/data_store/cache.js'
 import { calculateGainExample } from './signal_interpreter.js'
+import { calculateMaxPainByExpiry, interpretMaxPain } from '../volatility/max_pain.js'
 
 // ── Fonctions de score par composante ────────────────────────────────────────
 
@@ -195,7 +196,7 @@ export function getSignal(score) {
  *   asset?: string
  * }} inputs
  */
-export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset }) {
+export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset, instruments = [] }) {
   const s1 = scoreIV(dvol)
   const s2 = scoreFunding(funding)
   const s3 = scoreBasis(basisAvg)
@@ -216,7 +217,32 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
     strikePut:     spot != null ? Math.round(spot * 0.92) : null,
   }
 
-  return { scores: { s1, s2, s3, s4, s5 }, global, signal: getSignal(global), noviceData }
+  // Max Pain — calculé uniquement si instruments disponibles
+  let maxPainResult = null
+
+  if (instruments.length > 0 && spot) {
+    try {
+      const byExpiry = calculateMaxPainByExpiry(instruments, spot)
+      const next = byExpiry[0]   // prochaine échéance uniquement pour le signal
+      if (next) {
+        maxPainResult = {
+          ...next,
+          interpretation: interpretMaxPain(next, spot),
+        }
+      }
+    } catch (err) {
+      console.warn('[computeSignal] Max Pain error:', err)
+      // Ne jamais bloquer le signal principal
+    }
+  }
+
+  return {
+    scores:  { s1, s2, s3, s4, s5 },
+    global,
+    signal:  getSignal(global),
+    noviceData,
+    maxPain: maxPainResult,
+  }
 }
 
 // ── Persistance des anomalies ─────────────────────────────────────────────────

@@ -107,6 +107,14 @@ export {
   normalizeOnChain,
 } from './normalizers/format_data.js'
 
+// ── Exports : Max Pain ────────────────────────────────────────────────────────
+export {
+  parseInstrument,
+  calculateMaxPain,
+  calculateMaxPainByExpiry,
+  interpretMaxPain,
+} from '../data_processing/volatility/max_pain.js'
+
 // ── Exports : signals & fingerprint ──────────────────────────────────────────
 export {
   detectMarketAnomaly,
