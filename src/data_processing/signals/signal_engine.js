@@ -19,6 +19,7 @@
 
 import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../../data_core/data_store/cache.js'
+import { calculateGainExample } from './signal_interpreter.js'
 
 // ── Fonctions de score par composante ────────────────────────────────────────
 
@@ -188,17 +189,33 @@ export function getSignal(score) {
  *   funding: object|null,
  *   rv: object|null,
  *   basisAvg: number|null,
- *   onChainScore?: number|null
+ *   onChainScore?: number|null,
+ *   spot?: number|null,
+ *   asset?: string
  * }} inputs
  */
-export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore }) {
+export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset }) {
   const s1 = scoreIV(dvol)
   const s2 = scoreFunding(funding)
   const s3 = scoreBasis(basisAvg)
   const s4 = scoreIVvsRV(dvol, rv)
   const s5 = onChainScore ?? null
   const global = calcGlobalScore(s1, s2, s3, s4, s5)
-  return { scores: { s1, s2, s3, s4, s5 }, global, signal: getSignal(global) }
+
+  const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
+
+  // Données contextuelles pour la couche novice (signal_interpreter.js)
+  const noviceData = {
+    asset:         asset ?? 'BTC',
+    spotPrice:     spot ?? null,
+    score:         global,
+    funding:       fundingAnn,
+    estimatedGain: calculateGainExample({ score: global, funding: fundingAnn }),
+    strikeCall:    spot != null ? Math.round(spot * 1.08) : null,
+    strikePut:     spot != null ? Math.round(spot * 0.92) : null,
+  }
+
+  return { scores: { s1, s2, s3, s4, s5 }, global, signal: getSignal(global), noviceData }
 }
 
 // ── Détection d'anomalies de marché ──────────────────────────────────────────
