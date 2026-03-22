@@ -37,6 +37,7 @@
 
 // ── Exports : store ───────────────────────────────────────────────────────────
 export { dataStore, CacheKey, SmartCache, smartCache, fnv1a, hashData } from './data_store/cache.js'
+export { POLL, HASH_CONFIG } from './data_store/hash_config.js'
 
 // ── Exports : providers ───────────────────────────────────────────────────────
 export * as deribit  from './providers/deribit.js'

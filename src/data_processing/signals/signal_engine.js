@@ -223,9 +223,9 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
 
 /**
  * Clés d'indicateurs surveillés et leur accesseur dans un snapshot marché.
- * Un snapshot attendu : { spreadPct, fundingBinance, fundingOKX, ivRank, lsRatio, oiDelta }
+ * Un snapshot attendu : { spreadPct, fundingBinance, fundingDeribit, ivRank, lsRatio, oiDelta }
  */
-const MONITORED_INDICATORS = ['spreadPct', 'fundingBinance', 'fundingOKX', 'ivRank', 'lsRatio', 'oiDelta']
+const MONITORED_INDICATORS = ['spreadPct', 'fundingBinance', 'fundingDeribit', 'ivRank', 'lsRatio', 'oiDelta']
 const ANOMALY_THRESHOLD = 3       // nb d'indicateurs simultanés pour déclencher l'alerte
 const ANOMALY_WINDOW_MS = 10_000  // fenêtre de comparaison : 10 secondes
 
@@ -250,7 +250,7 @@ function _hasIndicatorChanged(prev, next) {
  * Analyse un snapshot marché et détecte les anomalies.
  * Doit être appelé périodiquement (toutes les 10s environ).
  *
- * @param {{ spreadPct?: number, fundingBinance?: number, fundingOKX?: number,
+ * @param {{ spreadPct?: number, fundingBinance?: number, fundingDeribit?: number,
  *            ivRank?: number, lsRatio?: number, oiDelta?: number }} snapshot
  * @param {string} [asset]
  * @returns {{ anomaly: boolean, changedIndicators: string[], asset: string|undefined } | null}

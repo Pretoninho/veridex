@@ -32,13 +32,31 @@ export function fnv1a(str) {
 }
 
 /**
- * Sérialise une valeur de façon déterministe et la hashe.
+ * Sérialise une valeur de façon déterministe et la hashe (FNV-1a).
+ * Exclut les champs temporels pour éviter les faux positifs de changement
+ * (les timestamps varient à chaque poll même si les données de marché sont identiques).
  * @param {any} data
  * @returns {string} hash FNV-1a
  */
 export function hashData(data) {
+  const EXCLUDED = [
+    'timestamp', 'ts', 'time', 'serverTime',
+    'syncedAt', 'fetchedAt', 'updatedAt', 'raw',
+  ]
+
+  function clean(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj
+    if (Array.isArray(obj)) return obj.map(clean)
+    const result = {}
+    for (const [k, v] of Object.entries(obj)) {
+      if (EXCLUDED.includes(k)) continue
+      result[k] = clean(v)
+    }
+    return result
+  }
+
   try {
-    return fnv1a(JSON.stringify(data, Object.keys(data ?? {}).sort()))
+    return fnv1a(JSON.stringify(clean(data)))
   } catch {
     return fnv1a(String(data))
   }

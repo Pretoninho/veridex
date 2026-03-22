@@ -607,7 +607,7 @@ const STALE_LAG_MS = 30_000  // 30 secondes
  * Vérifie la cohérence temporelle de données provenant de plusieurs sources.
  *
  * @param {Object.<string, { timestamp?: number }|null>} dataMap
- *   Clés = nom de source ('deribit', 'binance', 'okx', 'coinbase'),
+ *   Clés = nom de source ('deribit', 'binance', 'coinbase'),
  *   valeurs = objets normalisés avec un champ `timestamp` (unix ms).
  *
  * @returns {{
@@ -624,6 +624,15 @@ export function validateDataFreshness(dataMap) {
 
   for (const [source, data] of Object.entries(dataMap)) {
     const ts = data?.timestamp ?? null
+    // Vérification de cohérence d'unités — les timestamps doivent être en ms
+    // Coinbase retourne des secondes (epoch) → doit être × 1000 dans coinbase.js
+    if (ts != null && ts < 1_000_000_000_000) {
+      console.error(
+        `[validateDataFreshness] ${source} timestamp probable en secondes.` +
+        ` Valeur reçue : ${ts}.` +
+        ` Coinbase retourne epoch en secondes → appliquer × 1000 dans coinbase.js`
+      )
+    }
     details[source] = { timestamp: ts, lagMs: ts != null ? now - ts : null }
     if (ts != null) timestamps.push(ts)
   }
