@@ -459,9 +459,12 @@ const EMPTY_FILTERS = {
 
 const TYPE_OPTS = [
   { id: 'signal',  label: 'Signaux' },
-  { id: 'cache',   label: 'Cache' },
   { id: 'anomaly', label: 'Anomalies' },
+  { id: 'pattern', label: 'Patterns' },
+  { id: 'cache',   label: 'Cache' },
 ]
+
+const DEFAULT_FILTERS = { ...EMPTY_FILTERS, types: ['signal', 'anomaly', 'pattern'] }
 
 const ASSET_OPTS = ['', 'BTC', 'ETH']
 
@@ -477,10 +480,11 @@ function SearchBar({ filters, onChange, totalResults, isLoading }) {
     onChange({ ...filters, types: next })
   }
 
-  const clearAll = () => onChange(EMPTY_FILTERS)
+  const clearAll = () => onChange(DEFAULT_FILTERS)
 
   const hasActiveFilters =
-    hashQuery || dateFrom || dateTo || eventQuery || types.length > 0 || asset
+    hashQuery || dateFrom || dateTo || eventQuery || asset ||
+    JSON.stringify([...types].sort()) !== JSON.stringify([...DEFAULT_FILTERS.types].sort())
 
   return (
     <div style={{
@@ -684,7 +688,7 @@ function EmptyState({ filters, onClear }) {
 export default function HashJournal({ onRefresh }) {
   const [searchIndex, setSearchIndex] = useState([])
   const [isLoading,   setIsLoading]   = useState(true)
-  const [filters,     setFilters]     = useState(EMPTY_FILTERS)
+  const [filters,     setFilters]     = useState(DEFAULT_FILTERS)
   const [results,     setResults]     = useState([])
   const [page,        setPage]        = useState(1)
 
