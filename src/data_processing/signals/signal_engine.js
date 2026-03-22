@@ -1,16 +1,17 @@
 /**
  * data_processing/signals/signal_engine.js
  *
- * Moteur de score composite pour le signal DI.
+ * Moteur de score composite pour l'analyse de marché.
  * Extrait de SignalPage.jsx — logique pure, sans React.
  *
- * Score global (0 à 100) pondéré sur 4 composantes :
- *   - Volatilité DVOL  : 35%
- *   - Funding Rate     : 25%
- *   - Basis Futures    : 25%
+ * Score global (0 à 100) pondéré sur 5 composantes :
+ *   - Volatilité DVOL  : 30%
+ *   - Funding Rate     : 20%
+ *   - Basis Futures    : 20%
  *   - IV vs RV         : 15%
+ *   - On-Chain         : 15%
  *
- * Plus le score est élevé, meilleur est le contexte pour vendre de la vol (Sell High).
+ * Plus le score est élevé, plus le contexte est favorable (toutes stratégies).
  *
  * Extensions hash :
  *   - Détection d'anomalies de marché (3+ indicateurs changent en 10s)
