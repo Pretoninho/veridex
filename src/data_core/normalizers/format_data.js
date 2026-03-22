@@ -356,14 +356,13 @@ export function normalizeDeribitFundingHistory(asset, rawResult) {
 
 /**
  * Normalise les prix de livraison Deribit (règlement des options)
- * rawResult : { data: [[ts, price], ...] }
+ * rawResult : { data: [{ date: string, delivery_price: number }, ...] }
  */
 export function normalizeDeribitDeliveryPrices(asset, rawResult) {
   if (!rawResult?.data?.length) return null
   const deliveries = rawResult.data.map(r => ({
-    timestamp: r[0],
-    price:     r[1],
-    date:      new Date(r[0]).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase(),
+    price: r.delivery_price,
+    date:  r.date,
   }))
   return {
     source:    'deribit',
