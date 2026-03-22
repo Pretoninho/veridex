@@ -12,6 +12,8 @@
  *   - 'deribit:BTC:option:BTC-28MAR25-80000-C'
  */
 
+import { get as idbGet, set as idbSet } from 'idb-keyval'
+
 const DEFAULT_MAX_HISTORY = 100  // entrées par clé
 const DEFAULT_TTL_MS = 60_000   // 1 min — après ça, la donnée est "stale"
 
@@ -62,6 +64,47 @@ export function hashData(data) {
   }
 }
 
+// ── SmartCache changeLog persistence ─────────────────────────────────────────
+
+const CACHE_LOG_IDB_KEY = 'cache_changelog'
+const CACHE_LOG_MAX     = 2000
+
+/**
+ * Persiste une entrée du changeLog dans IndexedDB (fire-and-forget).
+ * @param {{ key: string, hash: string, ts: number, type: string }} entry
+ */
+async function _persistChangeLogEntry(entry) {
+  try {
+    const log = (await idbGet(CACHE_LOG_IDB_KEY)) ?? []
+    log.push(entry)
+    if (log.length > CACHE_LOG_MAX) log.splice(0, log.length - CACHE_LOG_MAX)
+    await idbSet(CACHE_LOG_IDB_KEY, log)
+  } catch (_) {}
+}
+
+/**
+ * Retourne le journal persisté des changements du SmartCache.
+ * @param {number} [limit=500]
+ * @returns {Promise<Array<{ key: string, hash: string, ts: number }>>}
+ */
+export async function getCacheChangeLog(limit = 500) {
+  try {
+    const log = (await idbGet(CACHE_LOG_IDB_KEY)) ?? []
+    return log.slice(-limit).reverse()
+  } catch (_) {
+    return []
+  }
+}
+
+/**
+ * Efface le journal persisté des changements du SmartCache.
+ */
+export async function clearCacheChangeLog() {
+  try {
+    await idbSet(CACHE_LOG_IDB_KEY, [])
+  } catch (_) {}
+}
+
 // ── SmartCache ────────────────────────────────────────────────────────────────
 
 /**
@@ -76,11 +119,22 @@ export class SmartCache {
     /** @type {Map<string, number>} — timestamp de la dernière modification par clé */
     this._changedAt = new Map()
     /**
-     * Journal circulaire des changements détectés (max 500 entrées).
+     * Journal circulaire des changements détectés (max 500 entrées en mémoire).
      * Chaque entrée : { key: string, hash: string, ts: number }
      * @type {Array<{ key: string, hash: string, ts: number }>}
      */
     this.changeLog = []
+
+    // Hydrater le changeLog depuis IndexedDB au démarrage (async, non-bloquant)
+    this._hydrateFromIDB()
+  }
+
+  /** Recharge les 500 dernières entrées persistées en mémoire. */
+  async _hydrateFromIDB() {
+    try {
+      const persisted = (await idbGet(CACHE_LOG_IDB_KEY)) ?? []
+      this.changeLog = persisted.slice(-500)
+    } catch (_) {}
   }
 
   /**
@@ -98,8 +152,11 @@ export class SmartCache {
     this._entries.set(key, { hash: newHash, data, timestamp: now })
     if (changed) {
       this._changedAt.set(key, now)
-      this.changeLog.push({ key, hash: newHash, ts: now })
+      const entry = { key, hash: newHash, ts: now, type: 'cache_change' }
+      this.changeLog.push(entry)
       if (this.changeLog.length > 500) this.changeLog.shift()
+      // Persistance async fire-and-forget — ne bloque pas set()
+      _persistChangeLogEntry(entry)
     }
 
     return changed

@@ -4,10 +4,12 @@
  * Journal unifié de hashage — 4 types d'entrées :
  *   Signal | Anomalie | Pattern | Cache
  *
+ * Utilise buildSearchIndex() + applyFilters() de hash_search.js.
  * Lecture seule. Aucun appel API. Aucun signal généré.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { buildSearchIndex, applyFilters } from '../data_core/data_store/hash_search.js'
 
 const PAGE_SIZE = 30
 
@@ -15,8 +17,9 @@ const PAGE_SIZE = 30
 
 function fmtTime(ts) {
   if (!ts) return '—'
-  const d = new Date(ts)
-  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date(ts).toLocaleTimeString('fr-FR', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
 }
 
 function fmtTimeMs(ts) {
@@ -27,7 +30,7 @@ function fmtTimeMs(ts) {
   }) + '.' + String(d.getMilliseconds()).padStart(3, '0')
 }
 
-// ── Syntaxe highlighting JSON minimal ────────────────────────────────────────
+// ── JSON highlight minimal ────────────────────────────────────────────────────
 
 function JsonValue({ value }) {
   if (value === null)             return <span style={{ color: 'var(--text-ghost)' }}>null</span>
@@ -77,7 +80,7 @@ function JsonNode({ data, indent = 0 }) {
   return <JsonValue value={data} />
 }
 
-// ── CopyButton ────────────────────────────────────────────────────────────────
+// ── CopyHash ──────────────────────────────────────────────────────────────────
 
 function CopyHash({ hash }) {
   const [copied, setCopied] = useState(false)
@@ -129,7 +132,9 @@ function JournalSkeleton() {
 
 function SignalEntry({ entry }) {
   const [expanded, setExpanded] = useState(false)
-  const c = entry.conditions ?? {}
+  const raw = entry.raw ?? entry
+  const c   = raw.conditions ?? {}
+
   return (
     <div style={{
       background: 'var(--bg-surface)', border: '1px solid var(--border)',
@@ -141,17 +146,17 @@ function SignalEntry({ entry }) {
           🟢 Signal
         </span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
-          {fmtTime(entry.timestamp)}
+          {fmtTime(entry.ts ?? raw.timestamp)}
         </span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 10 }}>
         {[
-          ['Hash',    entry.hash,           'var(--font-mono)'],
-          ['Asset',   entry.asset,          null],
-          ['Score',   entry.score != null ? `${entry.score}/100` : '—', null],
-          ['Signal',  entry.recommendation, null],
-          ['Market ⟠', entry.marketHash,   'var(--font-mono)'],
+          ['Hash',     entry.hash,                                      'var(--font-mono)'],
+          ['Asset',    raw.asset,                                       null],
+          ['Score',    raw.score != null ? `${raw.score}/100` : '—',   null],
+          ['Signal',   raw.recommendation,                              null],
+          ['Market ⟠', raw.marketHash,                                 'var(--font-mono)'],
         ].map(([label, val, font]) => (
           <div key={label}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
@@ -199,7 +204,7 @@ function SignalEntry({ entry }) {
           padding: '10px 12px', overflowX: 'auto',
           fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7,
         }}>
-          <JsonNode data={entry} />
+          <JsonNode data={raw} />
         </div>
       )}
     </div>
@@ -210,7 +215,8 @@ function SignalEntry({ entry }) {
 
 function AnomalyEntry({ entry }) {
   const [expanded, setExpanded] = useState(false)
-  const isCritical = entry.severity === 'critical'
+  const raw         = entry.raw ?? entry
+  const isCritical  = (entry.severity ?? raw.severity) === 'critical'
   const borderColor = isCritical ? 'var(--put)' : 'var(--neutral)'
   const labelColor  = isCritical ? 'var(--put)' : 'var(--neutral)'
 
@@ -225,16 +231,16 @@ function AnomalyEntry({ entry }) {
           {isCritical ? '🔴 Anomalie critique' : '⚠ Anomalie'}
         </span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
-          {fmtTime(entry.timestamp)}
+          {fmtTime(entry.ts ?? raw.timestamp)}
         </span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 10 }}>
         {[
-          ['Hash',      entry.hash],
-          ['Asset',     entry.asset],
-          ['Sévérité',  entry.severity?.toUpperCase() ?? '—'],
-          ['Indicateurs', entry.count ?? (entry.changedIndicators?.length ?? 0)],
+          ['Hash',        entry.hash],
+          ['Asset',       raw.asset],
+          ['Sévérité',    (entry.severity ?? raw.severity)?.toUpperCase() ?? '—'],
+          ['Indicateurs', raw.count ?? (raw.changedIndicators?.length ?? 0)],
         ].map(([label, val]) => (
           <div key={label}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
@@ -247,12 +253,12 @@ function AnomalyEntry({ entry }) {
         ))}
       </div>
 
-      {entry.changedIndicators?.length > 0 && (
+      {raw.changedIndicators?.length > 0 && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
             DÉTAIL
           </div>
-          {entry.changedIndicators.map(ind => (
+          {raw.changedIndicators.map(ind => (
             <div key={ind} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', marginBottom: 2 }}>
               → {ind} <span style={{ color: labelColor }}>(changé)</span>
             </div>
@@ -281,7 +287,7 @@ function AnomalyEntry({ entry }) {
           padding: '10px 12px', overflowX: 'auto',
           fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7,
         }}>
-          <JsonNode data={entry} />
+          <JsonNode data={raw} />
         </div>
       )}
     </div>
@@ -292,7 +298,8 @@ function AnomalyEntry({ entry }) {
 
 function PatternEntry({ entry }) {
   const [expanded, setExpanded] = useState(false)
-  const cfg = entry.config ?? {}
+  const raw = entry.raw ?? entry
+  const cfg = raw.config ?? {}
 
   return (
     <div style={{
@@ -309,8 +316,8 @@ function PatternEntry({ entry }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 10 }}>
         {[
-          ['Hash',         entry.hash],
-          ['Occurrences',  entry.occurrences],
+          ['Hash',        entry.hash],
+          ['Occurrences', raw.occurrences],
         ].map(([label, val]) => (
           <div key={label}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
@@ -342,9 +349,9 @@ function PatternEntry({ entry }) {
           PERFORMANCE
         </div>
         {[
-          ['Win Rate 1h',   entry.winRate_1h  != null ? `${entry.winRate_1h}%`                           : '—'],
-          ['Win Rate 4h',   entry.winRate_4h  != null ? `${entry.winRate_4h}%`                           : '—'],
-          ['Avg Move 24h',  entry.avgMove_24h != null ? `${entry.avgMove_24h > 0 ? '+' : ''}${entry.avgMove_24h}%` : '—'],
+          ['Win Rate 1h',  raw.winRate_1h  != null ? `${raw.winRate_1h}%`                                    : '—'],
+          ['Win Rate 4h',  raw.winRate_4h  != null ? `${raw.winRate_4h}%`                                    : '—'],
+          ['Avg Move 24h', raw.avgMove_24h != null ? `${raw.avgMove_24h > 0 ? '+' : ''}${raw.avgMove_24h}%` : '—'],
         ].map(([label, val]) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
             <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{label}</span>
@@ -374,7 +381,7 @@ function PatternEntry({ entry }) {
           padding: '10px 12px', overflowX: 'auto',
           fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.7,
         }}>
-          <JsonNode data={entry} />
+          <JsonNode data={raw} />
         </div>
       )}
     </div>
@@ -385,6 +392,7 @@ function PatternEntry({ entry }) {
 
 function CacheEntry({ entry }) {
   const [copied, setCopied] = useState(false)
+  const raw = entry.raw ?? entry
   const copy = () => {
     navigator.clipboard?.writeText(entry.hash).then(() => {
       setCopied(true)
@@ -403,14 +411,14 @@ function CacheEntry({ entry }) {
           ⚡ Cache
         </span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)' }}>
-          {fmtTimeMs(entry.ts)}
+          {fmtTimeMs(entry.ts ?? raw.ts)}
         </span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 10 }}>
         {[
-          ['Clé',          entry.key],
-          ['Hash',         entry.hash],
+          ['Clé',  raw.key],
+          ['Hash', entry.hash],
         ].map(([label, val]) => (
           <div key={label}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
@@ -438,82 +446,284 @@ function CacheEntry({ entry }) {
   )
 }
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── SearchBar ─────────────────────────────────────────────────────────────────
 
-const FILTER_TABS = [
-  { id: 'all',      label: 'Tous' },
-  { id: 'signal',   label: 'Signaux' },
-  { id: 'anomaly',  label: 'Anomalies' },
-  { id: 'pattern',  label: 'Patterns' },
-  { id: 'cache',    label: 'Cache' },
+const EMPTY_FILTERS = {
+  hashQuery:  '',
+  dateFrom:   '',
+  dateTo:     '',
+  eventQuery: '',
+  types:      [],
+  asset:      '',
+}
+
+const TYPE_OPTS = [
+  { id: 'signal',  label: 'Signaux' },
+  { id: 'cache',   label: 'Cache' },
+  { id: 'anomaly', label: 'Anomalies' },
 ]
 
+const ASSET_OPTS = ['', 'BTC', 'ETH']
+
+function SearchBar({ filters, onChange, totalResults, isLoading }) {
+  const { hashQuery, dateFrom, dateTo, eventQuery, types, asset } = filters
+
+  const set = (key, val) => onChange({ ...filters, [key]: val })
+
+  const toggleType = (id) => {
+    const next = types.includes(id)
+      ? types.filter(t => t !== id)
+      : [...types, id]
+    onChange({ ...filters, types: next })
+  }
+
+  const clearAll = () => onChange(EMPTY_FILTERS)
+
+  const hasActiveFilters =
+    hashQuery || dateFrom || dateTo || eventQuery || types.length > 0 || asset
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
+      borderRadius: 10, padding: '14px 16px', marginBottom: 16,
+    }}>
+      <div style={{
+        fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 700,
+        letterSpacing: '0.1em', textTransform: 'uppercase',
+        color: 'var(--text-muted)', marginBottom: 12,
+      }}>
+        RECHERCHER
+      </div>
+
+      {/* Champ Hash */}
+      <div style={{ position: 'relative', marginBottom: 8 }}>
+        <input
+          type="text"
+          value={hashQuery}
+          onChange={e => set('hashQuery', e.target.value)}
+          placeholder="Rechercher un hash..."
+          style={{
+            width: '100%', padding: '8px 32px 8px 12px',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            borderRadius: 8, color: 'var(--text)', fontSize: 12,
+            fontFamily: 'var(--font-mono)', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+        {hashQuery && (
+          <button onClick={() => set('hashQuery', '')} style={CLEAR_BTN_STYLE}>×</button>
+        )}
+      </div>
+
+      {/* Dates */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        {[['Du', 'dateFrom', dateFrom], ['Au', 'dateTo', dateTo]].map(([lbl, key, val]) => (
+          <div key={key}>
+            <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>
+              {lbl}
+            </div>
+            <input
+              type="date"
+              value={val}
+              onChange={e => set(key, e.target.value)}
+              style={{
+                width: '100%', padding: '7px 10px',
+                background: 'var(--bg-base)', border: '1px solid var(--border)',
+                borderRadius: 8, color: 'var(--text)', fontSize: 12,
+                fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
+                colorScheme: 'dark',
+              }}
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Champ événement */}
+      <div style={{ position: 'relative', marginBottom: 12 }}>
+        <input
+          type="text"
+          value={eventQuery}
+          onChange={e => set('eventQuery', e.target.value)}
+          placeholder="Type, asset, indicateur... (ex: BTC, warning, score:91)"
+          style={{
+            width: '100%', padding: '8px 32px 8px 12px',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            borderRadius: 8, color: 'var(--text)', fontSize: 12,
+            fontFamily: 'var(--font-body)', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+        {eventQuery && (
+          <button onClick={() => set('eventQuery', '')} style={CLEAR_BTN_STYLE}>×</button>
+        )}
+      </div>
+
+      {/* Filtres par type */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
+          FILTRES
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => onChange({ ...filters, types: [] })}
+            style={filterBtnStyle(types.length === 0)}
+          >
+            Tous
+          </button>
+          {TYPE_OPTS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => toggleType(t.id)}
+              style={filterBtnStyle(types.includes(t.id))}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Asset */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, color: 'var(--text-muted)', marginBottom: 6 }}>
+          ASSET
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {ASSET_OPTS.map(opt => (
+            <button
+              key={opt || 'all'}
+              onClick={() => set('asset', opt)}
+              style={filterBtnStyle(asset === opt)}
+            >
+              {opt || 'Tous'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Résultats + clear */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--text-muted)' }}>
+          {isLoading ? 'Chargement…' : `${totalResults} résultat${totalResults !== 1 ? 's' : ''} trouvé${totalResults !== 1 ? 's' : ''}`}
+        </span>
+        {hasActiveFilters && (
+          <button
+            onClick={clearAll}
+            style={{
+              background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+              padding: '4px 10px', cursor: 'pointer',
+              fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 500,
+              color: 'var(--text-muted)', transition: 'all 150ms ease',
+            }}
+          >
+            Effacer les filtres
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const CLEAR_BTN_STYLE = {
+  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+  background: 'none', border: 'none', cursor: 'pointer',
+  color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, padding: 0,
+}
+
+function filterBtnStyle(active) {
+  return {
+    padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+    fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
+    border: '1px solid',
+    borderColor: active ? 'var(--accent-border, var(--accent))' : 'var(--border)',
+    background:  active ? 'var(--accent-dim)'                   : 'transparent',
+    color:       active ? 'var(--accent)'                       : 'var(--text-muted)',
+    transition: 'all 150ms ease',
+  }
+}
+
+// ── État vide ─────────────────────────────────────────────────────────────────
+
+function EmptyState({ filters, onClear }) {
+  const q = filters.hashQuery || filters.eventQuery || ''
+  return (
+    <div style={{ textAlign: 'center', padding: '40px 0' }}>
+      <div style={{ fontSize: 28, marginBottom: 10 }}>◻</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
+        Aucun résultat
+      </div>
+      {q && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+          "{q}" introuvable
+        </div>
+      )}
+      <div style={{ fontFamily: 'var(--font-body)', fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+        Vérifier le hash ou élargir la plage de dates
+      </div>
+      <button
+        onClick={onClear}
+        style={{
+          background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+          padding: '8px 16px', cursor: 'pointer',
+          fontFamily: 'var(--font-body)', fontSize: 12, fontWeight: 600,
+          color: 'var(--text-muted)', transition: 'all 150ms ease',
+        }}
+      >
+        Effacer les filtres
+      </button>
+    </div>
+  )
+}
+
+// ── Composant principal ───────────────────────────────────────────────────────
+
 /**
- * @param {{
- *   signalHistory : array,
- *   anomalyLog    : array,
- *   patterns      : array,
- *   cacheChanges  : array,
- *   loading       : boolean,
- *   onRefresh     : () => void,
- * }} props
+ * HashJournal — journal de hashage avec moteur de recherche.
+ *
+ * Props (rétro-compat avec AuditPage — ignorées si présentes,
+ * les données viennent maintenant de buildSearchIndex()) :
+ *   onRefresh? : () => void   — bouton Actualiser
  */
-export default function HashJournal({
-  signalHistory  = [],
-  anomalyLog     = [],
-  patterns       = [],
-  cacheChanges   = [],
-  loading        = false,
-  onRefresh,
-}) {
-  const [filter, setFilter]   = useState('all')
-  const [search, setSearch]   = useState('')
-  const [page,   setPage]     = useState(1)
+export default function HashJournal({ onRefresh }) {
+  const [searchIndex, setSearchIndex] = useState([])
+  const [isLoading,   setIsLoading]   = useState(true)
+  const [filters,     setFilters]     = useState(EMPTY_FILTERS)
+  const [results,     setResults]     = useState([])
+  const [page,        setPage]        = useState(1)
 
-  // Fusion + tri chronologique descendant
-  const allEntries = useMemo(() => {
-    const signals  = signalHistory.map(e => ({ ...e, _type: 'signal'  }))
-    const anomalies = anomalyLog.map(e => ({ ...e, _type: 'anomaly' }))
-    const pats      = patterns.map(e => ({ ...e, _type: 'pattern', timestamp: null }))
-    const cache     = cacheChanges.map(e => ({ ...e, _type: 'cache', timestamp: e.ts }))
+  // Charger l'index au montage et au refresh
+  const loadIndex = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const index = await buildSearchIndex()
+      setSearchIndex(index)
+      setResults(applyFilters(index, filters))
+    } catch (_) {}
+    setIsLoading(false)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-    const merged = [...signals, ...anomalies, ...pats, ...cache]
-    merged.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-    return merged
-  }, [signalHistory, anomalyLog, patterns, cacheChanges])
+  useEffect(() => { loadIndex() }, [loadIndex])
 
-  const filtered = useMemo(() => {
-    let list = filter === 'all' ? allEntries : allEntries.filter(e => e._type === filter.replace('s', '').replace('anomaly', 'anomaly').replace('pattern', 'pattern'))
+  // Recalculer les résultats à chaque changement de filtre
+  useEffect(() => {
+    setResults(applyFilters(searchIndex, filters))
+    setPage(1)
+  }, [searchIndex, filters])
 
-    // Correction du filtre pour les pluriels
-    if (filter === 'signal')  list = allEntries.filter(e => e._type === 'signal')
-    if (filter === 'anomaly') list = allEntries.filter(e => e._type === 'anomaly')
-    if (filter === 'pattern') list = allEntries.filter(e => e._type === 'pattern')
-    if (filter === 'cache')   list = allEntries.filter(e => e._type === 'cache')
+  const handleFiltersChange = (next) => {
+    setFilters(next)
+  }
 
-    if (search.trim()) {
-      const q = search.trim().toLowerCase()
-      list = list.filter(e =>
-        e.hash?.toLowerCase().includes(q) ||
-        e.key?.toLowerCase().includes(q) ||
-        e.asset?.toLowerCase().includes(q)
-      )
-    }
-    return list
-  }, [allEntries, filter, search])
+  const handleRefresh = async () => {
+    await loadIndex()
+    if (onRefresh) onRefresh()
+  }
 
-  const paginated = filtered.slice(0, page * PAGE_SIZE)
-  const hasMore   = paginated.length < filtered.length
+  const paginated = results.slice(0, page * PAGE_SIZE)
+  const hasMore   = paginated.length < results.length
 
-  // Reset page quand filtre/search change
-  const handleFilter = (f) => { setFilter(f); setPage(1) }
-  const handleSearch = (v) => { setSearch(v);  setPage(1) }
-
+  // Compteurs par source pour le header
   const counts = {
-    signal:  signalHistory.length,
-    anomaly: anomalyLog.length,
-    pattern: patterns.length,
-    cache:   cacheChanges.length,
+    signal:  searchIndex.filter(e => e.type === 'signal').length,
+    anomaly: searchIndex.filter(e => e.type === 'anomaly').length,
+    cache:   searchIndex.filter(e => e.type === 'cache').length,
   }
 
   return (
@@ -528,7 +738,6 @@ export default function HashJournal({
             {[
               { label: 'Signaux',   count: counts.signal,  color: 'var(--call)' },
               { label: 'Anomalies', count: counts.anomaly, color: 'var(--neutral)' },
-              { label: 'Patterns',  count: counts.pattern, color: 'var(--accent)' },
               { label: 'Cache',     count: counts.cache,   color: 'var(--border-bright)' },
             ].map(({ label, count, color }) => (
               <div key={label} style={{
@@ -548,13 +757,14 @@ export default function HashJournal({
           </div>
         </div>
         <button
-          onClick={onRefresh}
+          onClick={handleRefresh}
+          disabled={isLoading}
           style={{
             background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 12px', cursor: 'pointer',
+            padding: '7px 12px', cursor: isLoading ? 'default' : 'pointer',
             fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
             color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5,
-            transition: 'all 150ms ease', flexShrink: 0,
+            transition: 'all 150ms ease', flexShrink: 0, opacity: isLoading ? 0.5 : 1,
           }}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -565,73 +775,27 @@ export default function HashJournal({
         </button>
       </div>
 
-      {/* Onglets filtre */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
-        {FILTER_TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => handleFilter(t.id)}
-            style={{
-              padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
-              fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 600,
-              border: '1px solid',
-              borderColor: filter === t.id ? 'var(--accent)' : 'var(--border)',
-              background:  filter === t.id ? 'var(--accent-dim)' : 'transparent',
-              color:        filter === t.id ? 'var(--accent)' : 'var(--text-muted)',
-              transition: 'all 150ms ease',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Barre de recherche */}
-      <div style={{ position: 'relative', marginBottom: 14 }}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          placeholder="Rechercher un hash..."
-          style={{
-            width: '100%', padding: '8px 32px 8px 12px',
-            background: 'var(--bg-surface)', border: '1px solid var(--border)',
-            borderRadius: 8, color: 'var(--text)', fontSize: 12,
-            fontFamily: 'var(--font-mono)', outline: 'none',
-          }}
-        />
-        {search && (
-          <button
-            onClick={() => handleSearch('')}
-            style={{
-              position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--text-muted)', fontSize: 14, lineHeight: 1,
-            }}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      {/* Moteur de recherche */}
+      <SearchBar
+        filters={filters}
+        onChange={handleFiltersChange}
+        totalResults={results.length}
+        isLoading={isLoading}
+      />
 
       {/* Liste */}
-      {loading ? (
+      {isLoading ? (
         <JournalSkeleton />
       ) : paginated.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: 28, marginBottom: 10 }}>◻</div>
-          <div style={{ fontFamily: 'var(--font-body)', fontSize: 13 }}>
-            Aucune entrée dans ce journal
-          </div>
-        </div>
+        <EmptyState filters={filters} onClear={() => setFilters(EMPTY_FILTERS)} />
       ) : (
         <>
           {paginated.map((entry, i) => {
-            const key = `${entry._type}-${entry.hash ?? i}-${i}`
-            if (entry._type === 'signal')  return <SignalEntry  key={key} entry={entry} />
-            if (entry._type === 'anomaly') return <AnomalyEntry key={key} entry={entry} />
-            if (entry._type === 'pattern') return <PatternEntry key={key} entry={entry} />
-            if (entry._type === 'cache')   return <CacheEntry   key={key} entry={entry} />
+            const key = `${entry.type}-${entry.id ?? entry.hash ?? i}-${i}`
+            if (entry.type === 'signal')  return <SignalEntry  key={key} entry={entry} />
+            if (entry.type === 'anomaly') return <AnomalyEntry key={key} entry={entry} />
+            if (entry.type === 'pattern') return <PatternEntry key={key} entry={entry} />
+            if (entry.type === 'cache')   return <CacheEntry   key={key} entry={entry} />
             return null
           })}
 
@@ -646,7 +810,7 @@ export default function HashJournal({
                 color: 'var(--text-muted)', transition: 'all 150ms ease',
               }}
             >
-              Charger plus ({filtered.length - paginated.length} restants)
+              Charger 30 de plus ({results.length - paginated.length} restants)
             </button>
           )}
         </>
