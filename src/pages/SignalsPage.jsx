@@ -4,7 +4,10 @@ import { computeSignal, saveSignal, hashMarketState } from '../data_processing/s
 import { interpretSignal }       from '../data_processing/signals/signal_interpreter.js'
 import { generateNoviceContent } from '../data_processing/signals/novice_generator.js'
 import { DEFAULT_TONE }          from '../data_processing/signals/tone_config.js'
+import { detectTrigger, detectSettlementTrigger, markAsPublished } from '../data_processing/signals/publish_trigger.js'
+import { generateTwitterThread } from '../data_processing/signals/twitter_generator.js'
 import ToneSelector              from '../components/ToneSelector.jsx'
+import PublishPanel              from '../components/PublishPanel.jsx'
 
 const LS_TONE_KEY = 'selected_tone'
 
@@ -172,6 +175,11 @@ export default function SignalsPage({ asset }) {
   // UI
   const [mode, setMode] = useState('expert')
 
+  // Publication Twitter
+  const [publishTrigger,    setPublishTrigger]    = useState(null)
+  const [tweets,            setTweets]            = useState(null)
+  const [isGeneratingThread, setIsGeneratingThread] = useState(false)
+
   // Refs pour éviter les stale closures
   const noviceDataRef    = useRef(null)
   const selectedToneRef  = useRef(selectedTone)
@@ -258,6 +266,17 @@ export default function SignalsPage({ asset }) {
       if (interp?.noviceData) {
         generateNovice(interp.noviceData, selectedToneRef.current)
       }
+
+      // Détecter un trigger de publication Twitter
+      const trigger = detectTrigger(sig, interp, raw, asset)
+      if (trigger && !publishTrigger) {
+        setPublishTrigger(trigger)
+        setTweets(null)
+        setIsGeneratingThread(true)
+        generateTwitterThread(trigger, trigger.marketContext)
+          .then(t => { setTweets(t); setIsGeneratingThread(false) })
+          .catch(() => setIsGeneratingThread(false))
+      }
     } catch (e) {
       setError(e.message)
     }
@@ -281,7 +300,39 @@ export default function SignalsPage({ asset }) {
     if (nd) generateNovice(nd, selectedToneRef.current)
   }, [generateNovice])
 
+  // ── Regénération thread Twitter ───────────────────────────────────────────
+
+  const regenerateThread = useCallback(() => {
+    if (!publishTrigger) return
+    setTweets(null)
+    setIsGeneratingThread(true)
+    generateTwitterThread(publishTrigger, publishTrigger.marketContext)
+      .then(t => { setTweets(t); setIsGeneratingThread(false) })
+      .catch(() => setIsGeneratingThread(false))
+  }, [publishTrigger])
+
+  const dismissPanel = useCallback(() => {
+    if (publishTrigger?.hash) markAsPublished(publishTrigger.hash)
+    setPublishTrigger(null)
+    setTweets(null)
+  }, [publishTrigger])
+
   useEffect(() => { load() }, [asset])
+
+  // Détecter un trigger settlement au montage et à chaque changement d'asset
+  useEffect(() => {
+    let active = true
+    detectSettlementTrigger(asset).then(trigger => {
+      if (!active || !trigger) return
+      setPublishTrigger(trigger)
+      setTweets(null)
+      setIsGeneratingThread(true)
+      generateTwitterThread(trigger, trigger.marketContext)
+        .then(t => { if (active) { setTweets(t); setIsGeneratingThread(false) } })
+        .catch(() => { if (active) setIsGeneratingThread(false) })
+    }).catch(() => {})
+    return () => { active = false }
+  }, [asset])
 
   // ── Variables UI ──────────────────────────────────────────────────────────
 
@@ -711,6 +762,17 @@ export default function SignalsPage({ asset }) {
         <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5, marginTop: 4, marginBottom: 8 }}>
           Mis à jour {lastUpdate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </div>
+      )}
+
+      {/* Panel publication Twitter */}
+      {publishTrigger && (
+        <PublishPanel
+          trigger={publishTrigger}
+          tweets={tweets}
+          isGenerating={isGeneratingThread}
+          onRegenerate={regenerateThread}
+          onDismiss={dismissPanel}
+        />
       )}
     </div>
   )
