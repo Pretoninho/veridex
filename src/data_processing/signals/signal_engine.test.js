@@ -145,7 +145,7 @@ describe('getSignal', () => {
   it('≥ 80 → Exceptionnel', () => {
     const s = getSignal(80)
     expect(s.label).toContain('Exceptionnel')
-    expect(s.action).toContain('Sell High')
+    expect(s.action).toContain('exceptionnelles')
   })
 
   it('60-79 → Favorable', () => {
