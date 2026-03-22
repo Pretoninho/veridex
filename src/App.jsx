@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { version } from '../package.json'
+import * as coinbase from './data_core/providers/coinbase.js'
 import LandingPage    from './pages/LandingPage.jsx'
 import MarketPage     from './pages/MarketPage.jsx'
 import DerivativesPage from './pages/DerivativesPage.jsx'
@@ -59,6 +60,7 @@ export default function App() {
   const [tab, setTab] = useState('market')
   const [asset, setAsset] = useState('BTC')
   const [clockSync, setClockSync] = useState(null)
+  const [btcPrice, setBtcPrice] = useState(null)
 
   useEffect(() => {
     const doSync = async () => {
@@ -69,6 +71,10 @@ export default function App() {
     doSync()
     const timer = setInterval(doSync, SYNC_INTERVAL_MS)
     return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    coinbase.getSpot('BTC').then(p => setBtcPrice(p)).catch(() => {})
   }, [])
 
   const forceUpdate = () => {
@@ -82,7 +88,14 @@ export default function App() {
     }
   }
 
-  if (!inApp) return <LandingPage onEnter={() => setInApp(true)} version={version} />
+  if (!inApp) return (
+    <LandingPage
+      onEnter={() => setInApp(true)}
+      btcPrice={btcPrice}
+      ivRank={null}
+      funding={null}
+    />
+  )
 
   return (
     <div className="app-shell">
@@ -105,20 +118,20 @@ function AppHeader({ asset, setAsset, clockSync, onClockSync }) {
   return (
     <header style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '10px 16px', background: 'var(--surface)',
+      padding: '10px 16px', background: 'var(--bg-surface)',
       borderBottom: '1px solid var(--border)', flexShrink: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{
           width: 28, height: 28, borderRadius: 8,
-          background: 'rgba(0,212,255,.15)', border: '1px solid rgba(0,212,255,.3)',
+          background: 'var(--accent-dim)', border: '1px solid var(--accent-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
           </svg>
         </div>
-        <span style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>
+        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>
           Veri<span style={{ color: 'var(--accent)' }}>dex</span>
         </span>
       </div>

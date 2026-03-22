@@ -1,20 +1,53 @@
 :root {
-  --bg: #060a0f;
-  --surface: #0d1520;
-  --surface2: #111d2e;
-  --border: #1e3a5f;
-  --border-bright: #2a5490;
-  --accent: #00d4ff;
-  --accent2: #ff6b35;
-  --call: #00e5a0;
-  --put: #ff4d6d;
-  --text: #e8f4ff;
-  --text-dim: #6a8aaa;
-  --text-muted: #3a5570;
-  --atm: #ffd700;
-  --mono: 'Space Mono', monospace;
-  --sans: 'Syne', sans-serif;
-  --nav-h: 60px;
+  /* ── Backgrounds ─────────────────────────────────────── */
+  --bg-base:      #0F1117;
+  --bg-surface:   #1C1F26;
+  --bg-surface-2: #252932;
+  --bg-surface-3: #2E3340;
+
+  /* ── Borders ─────────────────────────────────────────── */
+  --border:        #2E3340;
+  --border-bright: #3D4559;
+
+  /* ── Accent émeraude ─────────────────────────────────── */
+  --accent:        #00C896;
+  --accent-hover:  #00E5A8;
+  --accent-dim:    rgba(0,200,150,0.08);
+  --accent-border: rgba(0,200,150,0.25);
+
+  /* ── Texte ───────────────────────────────────────────── */
+  --text:       #F0F2F5;
+  --text-dim:   #C2C8D6;
+  --text-muted: #8B92A5;
+  --text-ghost: #4A5163;
+
+  /* ── Signaux marché ──────────────────────────────────── */
+  --call:        #00C896;
+  --put:         #F0476B;
+  --neutral:     #F5A623;
+  --neutral-dim: rgba(245,166,35,0.12);
+
+  /* ── Ombres ──────────────────────────────────────────── */
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:     0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:     0 8px 32px rgba(0,0,0,0.6);
+  --shadow-accent: 0 4px 24px rgba(0,200,150,0.15);
+
+  /* ── Typographie ─────────────────────────────────────── */
+  --font-display: 'Sora', sans-serif;
+  --font-body:    'Plus Jakarta Sans', sans-serif;
+  --font-mono:    'IBM Plex Mono', monospace;
+
+  /* ── Aliases rétrocompatibilité ──────────────────────── */
+  --bg:       #0F1117;
+  --surface:  #1C1F26;
+  --surface2: #252932;
+  --sans:     'Sora', sans-serif;
+  --mono:     'IBM Plex Mono', monospace;
+  --atm:      #F5A623;
+  --accent2:  #F5A623;
+
+  --nav-h:       60px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
@@ -27,9 +60,9 @@ html, body, #root {
 }
 
 body {
-  background: var(--bg);
+  background: var(--bg-base);
   color: var(--text);
-  font-family: var(--mono);
+  font-family: var(--font-body);
   font-size: 13px;
   overscroll-behavior: none;
 }
@@ -39,22 +72,26 @@ body::before {
   position: fixed;
   inset: 0;
   background-image:
-    linear-gradient(rgba(0,212,255,.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0,212,255,.025) 1px, transparent 1px);
+    linear-gradient(rgba(0,200,150,.012) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,200,150,.012) 1px, transparent 1px);
   background-size: 40px 40px;
   pointer-events: none;
   z-index: 0;
 }
 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-track { background: var(--bg-surface); }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
 
-@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
-@keyframes spin { to { transform: rotate(360deg) } }
-@keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
-@keyframes fadeIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
+@keyframes pulse    { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+@keyframes spin     { to { transform: rotate(360deg) } }
+@keyframes shimmer  { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+@keyframes fadeIn   { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
+@keyframes landingFadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
 
 .fade-in { animation: fadeIn .25s ease forwards; }
 
-input, select, button { font-family: var(--mono); }
+input, select, button { font-family: var(--font-body); }
