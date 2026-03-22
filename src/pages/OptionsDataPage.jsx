@@ -14,12 +14,15 @@
  *   - Signaux options dérivés des données chargées
  *   - Journal de snapshots persisté en localStorage
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import * as deribit from '../data_core/providers/deribit.js'
 import * as binance from '../data_core/providers/binance.js'
 import { analyzeIV } from '../data_processing/volatility/iv_rank.js'
 import { calcOptionGreeks } from '../data_processing/volatility/greeks.js'
 import { recordSnapshot as saveMetricSnapshot } from '../data_processing/history/metric_history.js'
+import { generateNoviceContent } from '../data_processing/signals/novice_generator.js'
+import { DEFAULT_TONE }          from '../data_processing/signals/tone_config.js'
+import ToneSelector              from '../components/ToneSelector.jsx'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -149,6 +152,49 @@ function TableHead({ cols }) {
   )
 }
 
+// ── Micro-composants pour la couche novice ────────────────────────────────────
+
+function Skeleton({ width = '100%', height = 14, style }) {
+  return (
+    <div style={{
+      width, height, borderRadius: 6,
+      background: 'linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.1) 50%, rgba(255,255,255,.05) 75%)',
+      backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite', ...style,
+    }} />
+  )
+}
+
+function NoviceSkeleton() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
+      <Skeleton width="60%" height={20} />
+      <Skeleton width="90%" /><Skeleton width="80%" />
+      <div style={{ marginTop: 6 }}>
+        <Skeleton width="40%" height={11} style={{ marginBottom: 6 }} />
+        {[1, 2, 3].map(i => <Skeleton key={i} width={`${70 + i * 5}%`} height={13} style={{ marginBottom: 5 }} />)}
+      </div>
+      <Skeleton width="85%" height={13} /><Skeleton width="75%" height={13} />
+      <Skeleton width="50%" height={34} style={{ borderRadius: 10, marginTop: 4 }} />
+    </div>
+  )
+}
+
+function CopyButton({ getText, style }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try { await navigator.clipboard.writeText(getText()); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch {}
+  }
+  return (
+    <button onClick={handleCopy} title="Copier" style={{
+      background: 'none', border: '1px solid var(--border)', borderRadius: 7,
+      color: copied ? 'var(--call)' : 'var(--text-muted)', fontSize: 13,
+      padding: '4px 8px', cursor: 'pointer', lineHeight: 1, transition: 'color .2s', ...style,
+    }}>
+      {copied ? '✓' : '📋'}
+    </button>
+  )
+}
+
 // Clé localStorage pour le journal des snapshots
 const journalKey = (asset) => `options_journal_${asset}`
 
@@ -220,7 +266,17 @@ export default function OptionsDataPage({ asset }) {
   const [lastUpdate,  setLastUpdate]  = useState(null)
   // Journal
   const [snapshots,   setSnapshots]   = useState([])
-  const isMounted = useRef(true)
+  // Couche novice options
+  const [optionsMode,     setOptionsMode]     = useState('expert')
+  const [selectedTone,    setSelectedTone]    = useState(() => localStorage.getItem('options_tone') ?? DEFAULT_TONE)
+  const [noviceContent,   setNoviceContent]   = useState(null)
+  const [isGenerating,    setIsGenerating]    = useState(false)
+  const [generationError, setGenerationError] = useState(null)
+
+  const isMounted     = useRef(true)
+  const noviceDataRef   = useRef(null)
+  const selectedToneRef = useRef(selectedTone)
+  useEffect(() => { selectedToneRef.current = selectedTone }, [selectedTone])
 
   // Charger le journal depuis localStorage quand l'asset change
   useEffect(() => {
@@ -236,6 +292,37 @@ export default function OptionsDataPage({ asset }) {
     const timer = setInterval(() => { if (isMounted.current) load() }, 90_000)
     return () => { isMounted.current = false; clearInterval(timer) }
   }, [asset])
+
+  // ── Couche novice ─────────────────────────────────────────────────────────
+
+  const generateNovice = useCallback(async (noviceData, toneId) => {
+    if (!noviceData) return
+    setIsGenerating(true)
+    setGenerationError(null)
+    try {
+      const content = await generateNoviceContent(noviceData, toneId)
+      setNoviceContent(content)
+      if (content.is_fallback) setGenerationError('Version simplifiée (analyse IA indisponible)')
+    } catch {
+      setGenerationError('Génération indisponible')
+    }
+    setIsGenerating(false)
+  }, [])
+
+  const handleToneChange = useCallback((toneId) => {
+    setSelectedTone(toneId)
+    selectedToneRef.current = toneId
+    localStorage.setItem('options_tone', toneId)
+    const nd = noviceDataRef.current
+    if (nd) generateNovice(nd, toneId)
+  }, [generateNovice])
+
+  const regenerateOptions = useCallback(() => {
+    const nd = noviceDataRef.current
+    if (nd) generateNovice(nd, selectedToneRef.current)
+  }, [generateNovice])
+
+  // ── Chargement ────────────────────────────────────────────────────────────
 
   const load = async () => {
     if (!isMounted.current) return
@@ -274,6 +361,61 @@ export default function OptionsDataPage({ asset }) {
       setDOI(dOIRes.status === 'fulfilled' ? dOIRes.value : null)
       setBFunding(bFundData)
       setDeliveries(delivRes.status === 'fulfilled' ? delivRes.value : null)
+
+      // ── Novice options data ────────────────────────────────────────────────
+      if (isMounted.current) {
+        const ivRankLocal   = dvolData
+          ? Math.round(((dvolData.current - dvolData.monthMin) / (dvolData.monthMax - dvolData.monthMin || 1)) * 100)
+          : null
+        const fundingLocal  = dFundData?.rateAnn ?? null
+        const rvLocal       = rvData?.current ?? null
+        const ivPremLocal   = (dvolData?.current != null && rvLocal != null) ? dvolData.current - rvLocal : null
+        const pcrLocal      = safe(dOIRes.status === 'fulfilled' ? dOIRes.value?.putCallRatio : null)
+        const spotPriceL    = safe(spotData?.price)
+        const strikeCall    = spotPriceL ? Math.round(spotPriceL * 1.08) : null
+        const strikePut     = spotPriceL ? Math.round(spotPriceL * 0.92) : null
+        const fmtS          = (n) => n ? '$' + n.toLocaleString('en-US') : '—'
+
+        const situation = [
+          ivRankLocal != null
+            ? (ivRankLocal > 70 ? `IV Rank élevé (${ivRankLocal}%) — volatilité chère`
+              : ivRankLocal < 30 ? `IV Rank faible (${ivRankLocal}%) — volatilité bon marché`
+              : `IV Rank neutre (${ivRankLocal}%)`)
+            : null,
+          ivPremLocal != null ? `Prime IV/RV ${ivPremLocal > 0 ? '+' : ''}${ivPremLocal.toFixed(1)} pts` : null,
+          pcrLocal != null ? `PCR ${pcrLocal.toFixed(2)}` : null,
+          fundingLocal != null ? `Funding ${fundingLocal.toFixed(2)}%/an` : null,
+        ].filter(Boolean).join(' · ') || 'Données partielles'
+
+        const optionsSignal = ivRankLocal != null
+          ? (ivRankLocal > 70 ? 'Vendre la vol' : ivRankLocal < 30 ? 'Acheter la vol' : 'Neutre') : '—'
+
+        const nd = {
+          asset,
+          spotPrice:     spotPriceL,
+          label:         ivRankLocal > 70 ? '🔥 Vol élevée' : ivRankLocal < 30 ? '📉 Vol basse' : '~ Neutre',
+          score:         ivRankLocal ?? 50,
+          ivRank:        ivRankLocal,
+          funding:       fundingLocal,
+          situation,
+          strikeCall,
+          strikePut,
+          spotSignal:    null,
+          spotAction:    'Consulter l\'onglet Signaux pour les recommandations spot et futures détaillées.',
+          futuresSignal: fundingLocal > 50 ? 'Suracheté' : fundingLocal < 0 ? 'Baissier' : 'Neutre',
+          futuresAction: `Funding ${fundingLocal?.toFixed(2) ?? '—'}%/an. ${fundingLocal > 50 ? 'Longs paient fort — risque de long squeeze.' : fundingLocal < 0 ? 'Pression baissière.' : 'Funding modéré.'}`,
+          optionsSignal,
+          optionsAction: ivRankLocal > 70
+            ? `IV Rank ${ivRankLocal}% — vendre straddle/strangle Deribit (${fmtS(strikeCall)} / ${fmtS(strikePut)}), durée 7-14j. Prime IV/RV : ${ivPremLocal?.toFixed(1) ?? '—'} pts.`
+            : ivRankLocal < 30
+            ? `IV Rank ${ivRankLocal}% — options bon marché. Long puts ${fmtS(strikePut)} ou spreads débiteurs. Durée 14-30j.`
+            : `IV Rank ${ivRankLocal}% — neutre. Stratégies calendrier envisageables. PCR : ${pcrLocal?.toFixed(2) ?? '—'}.`,
+          estimatedGain: null,
+          duration:      '7 à 14 jours',
+        }
+        noviceDataRef.current = nd
+        generateNovice(nd, selectedToneRef.current)
+      }
 
       // IV Rank / Percentile
       if (dvolData) {
@@ -704,48 +846,165 @@ export default function OptionsDataPage({ asset }) {
       {/* ═══════════════════════════ ONGLET SIGNAUX ═══════════════════════════ */}
       {activeTab === 'signaux' && (
         <>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', marginBottom: 16 }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 16 }}>
-              Signaux options — données chargées
-            </div>
-            {signalItems.map(s => (
-              <SignalBar
-                key={s.label}
-                label={s.label}
-                score={s.score}
-                detail={`${s.value} · ${s.detail}`}
-                color={s.color}
-              />
-            ))}
-            {signalItems.every(s => s.score == null) && !loading && (
-              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
-                Appuie sur Refresh pour charger les signaux
-              </div>
-            )}
-          </div>
-
+          {/* Toggle Expert / Novice */}
           {signalItems.some(s => s.score != null) && (
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12 }}>
-                Interprétation
-              </div>
-              {[
-                { label: 'IV Rank > 70', note: 'Vol chère → Vendre des options (straddle, strangle, covered call)' },
-                { label: 'IV Rank < 30', note: 'Vol bon marché → Acheter des spreads ou calendrier' },
-                { label: 'Prime IV/RV > 15 pts', note: 'Sell vega : le marché sur-évalue la volatilité future' },
-                { label: 'PCR > 1.2', note: 'Hedging actif → possible support sur une baisse' },
-                { label: 'Funding > 50%/an', note: 'Longs paient cher → risque de long squeeze' },
-              ].map((r, i, arr) => (
-                <div key={r.label} style={{
-                  paddingBottom: i < arr.length - 1 ? 10 : 0,
-                  marginBottom: i < arr.length - 1 ? 10 : 0,
-                  borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+            <div style={{
+              display: 'flex', gap: 0, marginBottom: 14,
+              background: 'rgba(255,255,255,.04)', borderRadius: 12, padding: 3,
+            }}>
+              {[{ id: 'expert', label: '⚡ Expert' }, { id: 'novice', label: '👤 Simple' }].map(({ id, label }) => (
+                <button key={id} onClick={() => setOptionsMode(id)} style={{
+                  flex: 1, padding: '8px 0', border: 'none', borderRadius: 10,
+                  fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                  background: optionsMode === id ? 'var(--accent)' : 'transparent',
+                  color: optionsMode === id ? 'var(--bg)' : 'var(--text-muted)',
+                  transition: 'background .18s, color .18s',
                 }}>
-                  <div style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{r.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{r.note}</div>
-                </div>
+                  {label}
+                </button>
               ))}
             </div>
+          )}
+
+          {/* ── MODE EXPERT ── */}
+          {optionsMode === 'expert' && (
+            <>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 16 }}>
+                  Signaux options — données chargées
+                </div>
+                {signalItems.map(s => (
+                  <SignalBar key={s.label} label={s.label} score={s.score} detail={`${s.value} · ${s.detail}`} color={s.color} />
+                ))}
+                {signalItems.every(s => s.score == null) && !loading && (
+                  <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                    Appuie sur Refresh pour charger les signaux
+                  </div>
+                )}
+              </div>
+
+              {signalItems.some(s => s.score != null) && (
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12 }}>
+                    Interprétation
+                  </div>
+                  {[
+                    { label: 'IV Rank > 70', note: 'Vol chère → Vendre des options (straddle, strangle, covered call)' },
+                    { label: 'IV Rank < 30', note: 'Vol bon marché → Acheter des spreads ou calendrier' },
+                    { label: 'Prime IV/RV > 15 pts', note: 'Sell vega : le marché sur-évalue la volatilité future' },
+                    { label: 'PCR > 1.2', note: 'Hedging actif → possible support sur une baisse' },
+                    { label: 'Funding > 50%/an', note: 'Longs paient cher → risque de long squeeze' },
+                  ].map((r, i, arr) => (
+                    <div key={r.label} style={{
+                      paddingBottom: i < arr.length - 1 ? 10 : 0,
+                      marginBottom: i < arr.length - 1 ? 10 : 0,
+                      borderBottom: i < arr.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+                    }}>
+                      <div style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text-dim)', marginBottom: 2 }}>{r.label}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>{r.note}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── MODE NOVICE ── */}
+          {optionsMode === 'novice' && (
+            <>
+              {/* Sélecteur de ton */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginBottom: 14 }}>
+                <ToneSelector selectedTone={selectedTone} onToneChange={handleToneChange} isGenerating={isGenerating} />
+              </div>
+
+              {/* Contenu généré */}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', marginBottom: 14, position: 'relative' }}>
+                {isGenerating ? (
+                  <NoviceSkeleton />
+                ) : noviceContent ? (
+                  <>
+                    {/* Bouton copie */}
+                    <div style={{ position: 'absolute', top: 12, right: 12 }}>
+                      <CopyButton getText={() => {
+                        const c = noviceContent
+                        return [`${c.emoji} ${c.headline}`, '', c.metaphor, '', c.situation, '',
+                          (c.steps ?? []).map((s, i) => `${i + 1}. ${s}`).join('\n'),
+                          '', `💰 ${c.gain}`, `⚠️ ${c.risk}`, '', `→ ${c.action}`].join('\n')
+                      }} />
+                    </div>
+
+                    {/* Headline */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, paddingRight: 36 }}>
+                      <span style={{ fontSize: 26, lineHeight: 1 }}>{noviceContent.emoji}</span>
+                      <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 16, color: 'var(--text)', lineHeight: 1.2 }}>
+                        {noviceContent.headline}
+                      </div>
+                    </div>
+
+                    {/* Métaphore */}
+                    <div style={{ fontSize: 13, color: 'var(--text-dim)', fontStyle: 'italic', lineHeight: 1.6, marginBottom: 14, paddingLeft: 12, borderLeft: '2px solid var(--border-bright)' }}>
+                      {noviceContent.metaphor}
+                    </div>
+
+                    {/* Situation */}
+                    <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 14 }}>
+                      {noviceContent.situation}
+                    </div>
+
+                    {/* Étapes */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: 8 }}>
+                        Opportunités
+                      </div>
+                      {(noviceContent.steps ?? []).map((step, i) => (
+                        <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6, alignItems: 'flex-start' }}>
+                          <div style={{ width: 20, height: 20, borderRadius: 6, background: 'rgba(0,212,255,.12)', color: 'var(--accent)', fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            {i + 1}
+                          </div>
+                          <span style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.5 }}>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Gain + Risque */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
+                      <div style={{ background: 'rgba(0,229,160,.06)', border: '1px solid rgba(0,229,160,.2)', borderRadius: 10, padding: '10px 12px' }}>
+                        <div style={{ fontSize: 10, color: 'var(--call)', fontFamily: 'var(--sans)', fontWeight: 700, marginBottom: 4 }}>💰 Potentiel</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>{noviceContent.gain}</div>
+                      </div>
+                      <div style={{ background: 'rgba(255,107,53,.06)', border: '1px solid rgba(255,107,53,.2)', borderRadius: 10, padding: '10px 12px' }}>
+                        <div style={{ fontSize: 10, color: 'var(--accent2)', fontFamily: 'var(--sans)', fontWeight: 700, marginBottom: 4 }}>⚠️ Risque</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>{noviceContent.risk}</div>
+                      </div>
+                    </div>
+
+                    {/* Action */}
+                    <div style={{ background: 'rgba(0,212,255,.07)', border: '1px solid rgba(0,212,255,.25)', borderRadius: 10, padding: '12px 14px', marginBottom: 14, fontSize: 13, color: 'var(--accent)', lineHeight: 1.6, fontFamily: 'var(--sans)', fontWeight: 600 }}>
+                      {noviceContent.action} →
+                    </div>
+
+                    {noviceContent.is_fallback && generationError && (
+                      <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5 }}>{generationError}</div>
+                    )}
+
+                    {/* Regénérer */}
+                    <button onClick={regenerateOptions} disabled={isGenerating} style={{
+                      width: '100%', padding: '10px 0', border: '1px solid var(--border)',
+                      borderRadius: 10, background: 'none', cursor: 'pointer',
+                      fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12,
+                      color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    }}>
+                      <span style={{ display: 'inline-block', animation: isGenerating ? 'spin .7s linear infinite' : 'none' }}>🔄</span>
+                      Regénérer (nouvelle métaphore)
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: '20px 0' }}>
+                    {generationError ?? (loading ? 'Chargement...' : 'Charge les données (Refresh) pour générer l\'analyse')}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </>
       )}
