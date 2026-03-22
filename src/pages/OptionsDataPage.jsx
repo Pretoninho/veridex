@@ -215,7 +215,6 @@ export default function OptionsDataPage({ asset }) {
   const [dOI,         setDOI]         = useState(null)
   const [bOI,         setBOI]         = useState(null)
   const [bFunding,    setBFunding]    = useState(null)  // Binance funding rate
-  const [activeTab,   setActiveTab]   = useState('analyse')
   const [loading,     setLoading]     = useState(false)
   const [lastUpdate,  setLastUpdate]  = useState(null)
   // Journal
