@@ -58,6 +58,17 @@ export * as binance  from './providers/binance.js'
 export * as coinbase from './providers/coinbase.js'
 export * as onchain  from './providers/onchain.js'
 
+export {
+  getOnChainSnapshot,
+  getBlockchainStats,
+  getMempoolData,
+  getGlassnodeExchangeFlow,
+  getCryptoQuantFlow,
+  getHashRateHistory,
+  getFearGreedIndex,
+  getWhaleTransactions,
+} from './providers/onchain.js'
+
 // ── Exports : clock sync ──────────────────────────────────────────────────────
 export {
   syncServerClocks,
@@ -105,6 +116,7 @@ export {
   mergeSpotTickers,
   validateDataFreshness,
   normalizeOnChain,
+  getHistoricalContext,
 } from './normalizers/format_data.js'
 
 // ── Exports : Max Pain ────────────────────────────────────────────────────────
@@ -174,6 +186,10 @@ export {
   detectMempoolSignal,
   detectMinerSignal,
   compositeOnChainSignal,
+  interpretMempoolExpert,
+  interpretFearGreedExpert,
+  interpretWhalesExpert,
+  interpretHashRateExpert,
 } from '../data_processing/signals/onchain_signals.js'
 
 export {
