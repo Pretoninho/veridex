@@ -138,6 +138,17 @@ const NOTIFICATION_TESTS = {
     },
     context: { asset: 'BTC', settlementPrice: 71234, spotDelta: -0.12, priority: 'Hebdomadaire' },
   },
+  settlement_monthly: {
+    label: 'Settlement Mensuel BTC',
+    level: 'alert',
+    asset: 'BTC',
+    icon:  '🟡',
+    default: {
+      title: '◈ Settlement Mensuel · BTC',
+      body:  '$71,234 · +0.34% vs spot · Écart anormal',
+    },
+    context: { asset: 'BTC', settlementPrice: 71234, spotDelta: 0.34, priority: 'Mensuel', isAbnormal: true },
+  },
   anomaly_warning: {
     label: 'Anomalie Warning',
     level: 'alert',
@@ -205,7 +216,7 @@ const GROUPS = [
       'iv_spike_btc', 'iv_spike_eth',
       'funding_change_btc', 'funding_change_eth',
       'signal_change_btc', 'signal_change_eth',
-      'settlement_weekly', 'anomaly_warning', 'expiry_1h',
+      'settlement_weekly', 'settlement_monthly', 'anomaly_warning', 'expiry_1h',
     ],
   },
   {
