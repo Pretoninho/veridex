@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { version } from '../package.json'
-import * as coinbase from './data_core/providers/coinbase.js'
 import LandingPage    from './pages/LandingPage.jsx'
 import MarketPage     from './pages/MarketPage.jsx'
 import DerivativesPage from './pages/DerivativesPage.jsx'
@@ -69,8 +68,6 @@ export default function App() {
   const [asset,       setAsset]       = useState('BTC')
   const [drawerOpen,  setDrawerOpen]  = useState(false)
   const [clockSync,   setClockSync]   = useState(null)
-  const [btcPrice,    setBtcPrice]    = useState(null)
-  const [ethPrice,    setEthPrice]    = useState(null)
   const [signalScore, setSignalScore] = useState(null)
   const [auditAlerts, setAuditAlerts] = useState(0)
   const [nextFunding, setNextFunding] = useState(() => getNextFundingCountdown())
@@ -153,12 +150,6 @@ export default function App() {
     return () => clearInterval(timer)
   }, [inApp])
 
-  // Prix landing
-  useEffect(() => {
-    coinbase.getSpot('BTC').then(p => setBtcPrice(p?.price ?? null)).catch(() => {})
-    coinbase.getSpot('ETH').then(p => setEthPrice(p?.price ?? null)).catch(() => {})
-  }, [])
-
   // Dernier score signal (badge drawer)
   useEffect(() => {
     getSignalHistory(null, 10).then(h => {
@@ -194,8 +185,8 @@ export default function App() {
   if (!inApp) return (
     <LandingPage
       onEnter={() => setInApp(true)}
-      btcPrice={btcPrice}
-      ethPrice={ethPrice}
+      asset={asset}
+      onAssetChange={setAsset}
     />
   )
 

@@ -604,3 +604,136 @@
   color: var(--accent);
   background: var(--accent-dim);
 }
+
+/* ── Landing Page ────────────────────────────────────────────────────────── */
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+@keyframes landingFadeUp {
+  from { opacity: 0; transform: translateY(20px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+@keyframes priceIn {
+  from { opacity: 0; transform: translateY(6px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+@keyframes scanH {
+  0%   { transform: translateY(-2px) }
+  100% { transform: translateY(680px) }
+}
+@keyframes tickerScroll {
+  0%   { transform: translateX(0) }
+  100% { transform: translateX(-50%) }
+}
+@keyframes orbFloat {
+  0%, 100% { transform: translate(0, 0) }
+  33%      { transform: translate(15px, -10px) }
+  66%      { transform: translate(-8px, 18px) }
+}
+
+.landing-wrap {
+  position: relative;
+  overflow: hidden;
+  background: #0a0e14;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.landing-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+}
+.orb-1 {
+  position: absolute;
+  width: 300px; height: 300px;
+  border-radius: 50%;
+  background: rgba(29,158,117,0.07);
+  top: -80px; left: -60px;
+  filter: blur(60px);
+  animation: orbFloat 18s ease-in-out infinite alternate;
+}
+.orb-2 {
+  position: absolute;
+  width: 200px; height: 200px;
+  border-radius: 50%;
+  background: rgba(29,158,117,0.04);
+  bottom: -40px; right: -40px;
+  filter: blur(50px);
+  animation: orbFloat 22s ease-in-out infinite alternate-reverse;
+}
+.canvas-net {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0.22;
+}
+.canvas-rad {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0.18;
+}
+.scan-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #1D9E75, transparent);
+  opacity: 0.12;
+  animation: scanH 4s linear infinite;
+}
+.landing-header {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(10,14,20,0.85);
+}
+.landing-hero {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 20px 20px;
+}
+.landing-footer {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 20px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.ticker-strip {
+  position: relative;
+  z-index: 10;
+  overflow: hidden;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  height: 36px;
+  flex-shrink: 0;
+}
+.ticker-track {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  animation: tickerScroll 28s linear infinite;
+  width: max-content;
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-net, .canvas-rad { display: none; }
+  .scan-line, .orb-1, .orb-2 { animation: none; }
+  .ticker-track { animation: none; }
+}
