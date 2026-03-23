@@ -2,11 +2,11 @@
   "meta": {
     "version": 1,
     "asset": "BTC",
-    "generatedAt": 0,
+    "generatedAt": 1774244202776,
     "patternCount": 0,
-    "hash": "00000000",
     "prevHash": "00000000",
-    "chainLength": 0
+    "chainLength": 1,
+    "hash": "1f7d410e"
   },
   "patterns": []
 }
