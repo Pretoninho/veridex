@@ -153,6 +153,211 @@ export async function getCryptoQuantFlow() {
   }
 }
 
+// ── Source 5 : Mempool.space — Hash Rate historique ───────────────────────────
+
+const HR_CACHE_KEY    = 'veridex_hashrate_history'
+const HR_CACHE_TTL_MS = 5 * 60 * 1000      // 5 min
+
+/**
+ * Historique du hash rate Bitcoin sur 1 mois depuis mempool.space.
+ * Résultat mis en cache localStorage (TTL 5 min).
+ * @returns {Promise<{
+ *   hashrates: Array<{ timestamp: number, hashrate_ehs: number }>,
+ *   difficulties: Array<{ timestamp: number, difficulty: number }>,
+ *   currentHashrate: number,
+ *   currentDifficulty: number,
+ *   timestamp: number
+ * }|null>}
+ */
+export async function getHashRateHistory() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(HR_CACHE_KEY) || 'null')
+    if (cached && Date.now() - cached.ts < HR_CACHE_TTL_MS) return cached.data
+  } catch (_) {}
+
+  try {
+    const data = await fetchWithTimeout(
+      'https://mempool.space/api/v1/mining/hashrate/1m',
+      8_000,
+    )
+
+    const hashrates = (data.hashrates ?? []).map(h => ({
+      timestamp:    h.timestamp * 1000,
+      hashrate_ehs: h.avgHashrate / 1e18,
+    }))
+    const difficulties = (data.difficulty ?? []).map(d => ({
+      timestamp:  d.timestamp * 1000,
+      difficulty: d.difficulty,
+    }))
+
+    const result = {
+      hashrates,
+      difficulties,
+      currentHashrate:   (data.currentHashrate ?? 0) / 1e18,
+      currentDifficulty: data.currentDifficulty ?? 0,
+      timestamp: Date.now(),
+    }
+
+    try { localStorage.setItem(HR_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: result })) } catch (_) {}
+    return result
+  } catch (_) { return null }
+}
+
+// ── Source 6 : Fear & Greed Index (alternative.me) ────────────────────────────
+
+const FG_CACHE_KEY    = 'veridex_fear_greed'
+const FG_CACHE_TTL_MS = 60 * 60 * 1000     // 1 heure (màj quotidienne)
+
+/**
+ * Fear & Greed Index depuis alternative.me (2 derniers jours).
+ * Résultat mis en cache localStorage (TTL 1 h).
+ * @returns {Promise<{
+ *   value: number,
+ *   label: string,
+ *   delta: number|null,
+ *   deltaLabel: string|null,
+ *   timestamp: number,
+ *   timeUntilUpdate: string,
+ *   source: string
+ * }|null>}
+ */
+export async function getFearGreedIndex() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(FG_CACHE_KEY) || 'null')
+    if (cached && Date.now() - cached.ts < FG_CACHE_TTL_MS) return cached.data
+  } catch (_) {}
+
+  try {
+    const data = await fetchWithTimeout(
+      'https://api.alternative.me/fng/?limit=2&format=json',
+      5_000,
+    )
+    const today     = data?.data?.[0]
+    const yesterday = data?.data?.[1]
+    if (!today) return null
+
+    const value     = parseInt(today.value, 10)
+    const valuePrev = yesterday ? parseInt(yesterday.value, 10) : null
+    const delta     = valuePrev != null ? value - valuePrev : null
+
+    const result = {
+      value,
+      label:          today.value_classification,
+      delta,
+      deltaLabel:     delta != null ? `${delta > 0 ? '+' : ''}${delta} pts` : null,
+      timestamp:      parseInt(today.timestamp, 10) * 1000,
+      timeUntilUpdate: today.time_until_update,
+      source:         'alternative.me',
+    }
+
+    try { localStorage.setItem(FG_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: result })) } catch (_) {}
+    return result
+  } catch (_) { return null }
+}
+
+// ── Source 7 : Mempool.space — Whale Transactions ─────────────────────────────
+
+/**
+ * Détecte la direction probable d'une transaction à partir du nombre d'outputs.
+ * @param {Object} tx
+ * @returns {'consolidation'|'transfer'|'distribution'|'unknown'}
+ */
+function _detectDirection(tx) {
+  const outputCount = (tx.vout ?? []).length
+  if (outputCount === 1)  return 'consolidation'
+  if (outputCount === 2)  return 'transfer'
+  if (outputCount > 10)   return 'distribution'
+  return 'unknown'
+}
+
+/**
+ * Interprète la direction d'une transaction whale.
+ * @param {'consolidation'|'transfer'|'distribution'|'unknown'} direction
+ * @param {number} btc
+ */
+function _interpretWhaleDirection(direction, btc) {
+  const size = btc >= 1000 ? 'massive' : btc >= 500 ? 'large' : 'significant'
+
+  const signals = {
+    consolidation: {
+      label:  'Consolidation',
+      bias:   'neutral',
+      expert: `${size} consolidation ${btc.toFixed(0)} BTC — wallet management ou cold storage`,
+    },
+    distribution: {
+      label:  'Distribution',
+      bias:   'bearish',
+      expert: `${size} distribution ${btc.toFixed(0)} BTC — fragmentation suspecte, possible préparation vente OTC`,
+    },
+    transfer: {
+      label:  'Transfert',
+      bias:   'neutral',
+      expert: `Transfert ${btc.toFixed(0)} BTC — direction indéterminée`,
+    },
+    unknown: {
+      label:  'Inconnu',
+      bias:   'neutral',
+      expert: `Transaction ${btc.toFixed(0)} BTC — pattern non identifié`,
+    },
+  }
+
+  return signals[direction] ?? signals.unknown
+}
+
+/**
+ * Transactions Bitcoin > minBTC en attente dans le mempool.
+ * @param {number} [minBTC=100]
+ * @returns {Promise<{
+ *   transactions: Array,
+ *   count: number,
+ *   totalBTC: number,
+ *   timestamp: number
+ * }|null>}
+ */
+export async function getWhaleTransactions(minBTC = 100) {
+  try {
+    const txs = await fetchWithTimeout(
+      'https://mempool.space/api/mempool/recent',
+      8_000,
+    )
+    if (!Array.isArray(txs)) return null
+
+    const minSats  = minBTC * 1e8
+    const whaleTxs = txs.filter(tx => {
+      const totalOut = (tx.vout ?? []).reduce((s, o) => s + (o.value ?? 0), 0)
+      return totalOut >= minSats
+    })
+
+    const enriched = whaleTxs.slice(0, 20).map(tx => {
+      const totalOut    = (tx.vout ?? []).reduce((s, o) => s + (o.value ?? 0), 0)
+      const totalOutBTC = totalOut / 1e8
+      const direction   = _detectDirection(tx)
+
+      return {
+        txid:      tx.txid,
+        totalBTC:  totalOutBTC,
+        totalUSD:  null,    // enrichi côté UI avec le spot
+        fee:       tx.fee ?? 0,
+        feeSats:   tx.fee ?? 0,
+        size:      tx.size ?? 0,
+        outputs:   tx.vout?.length ?? 0,
+        direction,
+        signal:    _interpretWhaleDirection(direction, totalOutBTC),
+        timestamp: Date.now(),
+      }
+    })
+
+    enriched.sort((a, b) => b.totalBTC - a.totalBTC)
+
+    return {
+      transactions: enriched,
+      count:        enriched.length,
+      totalBTC:     enriched.reduce((s, t) => s + t.totalBTC, 0),
+      timestamp:    Date.now(),
+    }
+  } catch (_) { return null }
+}
+
 // ── Snapshot combiné ──────────────────────────────────────────────────────────
 
 /**

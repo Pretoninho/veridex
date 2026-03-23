@@ -227,6 +227,197 @@ export function detectMinerSignal(miningData, previousHashRate) {
   return { signal, trend, description_novice: descriptionNovice }
 }
 
+// ── Interprétations Expert ────────────────────────────────────────────────────
+
+/**
+ * Interprétation actionnable du mempool pour la couche Expert.
+ * @param {{ txCount: number|null, congestion: string, fastFee: number|null }} mempool
+ * @returns {{ action: string, contextLabel: string, isAnormal: boolean }|null}
+ */
+export function interpretMempoolExpert(mempool) {
+  if (!mempool) return null
+
+  const { txCount, congestion, fastFee } = mempool
+
+  let action = null
+
+  if (txCount != null && txCount < 5_000) {
+    action =
+      `Mempool vide (${txCount.toLocaleString('fr-FR')} tx) ` +
+      `— activité anormalement basse. ` +
+      `Précède souvent un mouvement de prix. ` +
+      `Fees < 2 sat/vB suffisants.`
+  } else if (txCount != null && txCount > 100_000) {
+    action =
+      `Mempool congestionné ` +
+      `(${txCount.toLocaleString('fr-FR')} tx · ` +
+      `${fastFee} sat/vB urgent). ` +
+      `Activité on-chain intense — whale ou retail en mouvement.`
+  } else {
+    const txFmt  = txCount != null ? txCount.toLocaleString('fr-FR') : '—'
+    const feeFmt = fastFee != null ? `${fastFee}` : '—'
+    action =
+      `Mempool normal ` +
+      `(${txFmt} tx · fees ${feeFmt} sat/vB). ` +
+      `Réseau sous charge standard.`
+  }
+
+  const isAnormal = txCount != null && (txCount < 5_000 || txCount > 100_000)
+
+  const contextLabel = txCount == null ? 'Inconnu'
+    : txCount < 5_000   ? 'Anormalement vide'
+    : txCount > 100_000 ? 'Congestionné'
+    : 'Normal'
+
+  return { action, contextLabel, isAnormal, bias: isAnormal && txCount > 100_000 ? 'bullish' : 'neutral' }
+}
+
+/**
+ * Interprétation actionnable du Fear & Greed Index pour la couche Expert.
+ * @param {{ value: number, label: string, delta: number|null, deltaLabel: string|null }} fg
+ * @returns {{ action: string, bias: string, value: number, label: string, delta: number|null }|null}
+ */
+export function interpretFearGreedExpert(fg) {
+  if (!fg) return null
+
+  const { value, label, delta } = fg
+
+  let action = null
+  let bias   = 'neutral'
+
+  if (value <= 25) {
+    bias   = 'bullish'
+    action =
+      `Fear & Greed ${value} (${label}). ` +
+      `Zone d'accumulation historique. ` +
+      `Long spot ou long calls OTM avec stop -8% sous support.`
+  } else if (value <= 45) {
+    bias   = 'bullish'
+    action =
+      `Fear & Greed ${value} (${label}). ` +
+      `Sentiment négatif — biais haussier contrarian. ` +
+      `Puts OTM bon marché pour protection.`
+  } else if (value <= 55) {
+    bias   = 'neutral'
+    action =
+      `Fear & Greed ${value} (${label}). ` +
+      `Pas d'edge directionnel. ` +
+      `Se concentrer sur IV et Funding.`
+  } else if (value <= 75) {
+    bias   = 'bearish'
+    action =
+      `Fear & Greed ${value} (${label}). ` +
+      `Zone de prudence — réduire exposition longue. ` +
+      `Vendre calls OTM ou short perp léger.`
+  } else {
+    bias   = 'bearish'
+    action =
+      `Fear & Greed ${value} (Extreme Greed). ` +
+      `Zone de distribution historique. ` +
+      `Short perp ou achat puts ATM contre le sentiment euphorique.`
+  }
+
+  if (delta != null && Math.abs(delta) >= 5) {
+    action +=
+      ` Variation 24h : ${fg.deltaLabel} ` +
+      `— momentum ${delta > 0 ? 'haussier' : 'baissier'}.`
+  }
+
+  return { action, bias, value, label, delta }
+}
+
+/**
+ * Interprétation actionnable des transactions whales pour la couche Expert.
+ * @param {{ transactions: Array, count: number, totalBTC: number }|null} whales
+ * @param {number|null} [spotPrice]
+ * @returns {{ action: string, bias: string, count: number, totalBTC: number }}
+ */
+export function interpretWhalesExpert(whales, spotPrice) {
+  if (!whales?.transactions?.length) {
+    return {
+      action:   'Aucune transaction whale > 100 BTC dans le mempool actuellement.',
+      bias:     'neutral',
+      count:    0,
+      totalBTC: 0,
+    }
+  }
+
+  const txs      = whales.transactions
+  const topTx    = txs[0]
+  const totalBTC = whales.totalBTC
+  const bearish  = txs.filter(t => t.signal?.bias === 'bearish').length
+  const bias     = bearish > txs.length * 0.6 ? 'bearish' : 'neutral'
+
+  const totalUSD = spotPrice
+    ? `$${(totalBTC * spotPrice / 1_000_000).toFixed(0)}M`
+    : `${totalBTC.toFixed(0)} BTC`
+
+  let action =
+    `${txs.length} whale tx en attente · ` +
+    `Total : ${totalUSD}. `
+
+  if (topTx) {
+    action += `Plus grosse : ${topTx.totalBTC.toFixed(0)} BTC — ${topTx.signal.expert}. `
+  }
+
+  if (bias === 'bearish') {
+    action +=
+      `Pattern de distribution dominant — ` +
+      `surveiller pour short ou réduction long.`
+  } else {
+    action += `Pas de signal directionnel clair.`
+  }
+
+  return { action, bias, count: txs.length, totalBTC }
+}
+
+/**
+ * Interprétation actionnable du hash rate pour la couche Expert.
+ * @param {{ currentHashrate: number }|null} hashRate
+ * @param {{ hashrates: Array<{ hashrate_ehs: number }> }|null} history
+ * @returns {{ action: string, bias: string, current: number|null, variation7d: number|null }}
+ */
+export function interpretHashRateExpert(hashRate, history) {
+  if (!hashRate?.currentHashrate) {
+    return { action: 'Hash rate non disponible.', bias: 'neutral', current: null, variation7d: null }
+  }
+
+  const current = hashRate.currentHashrate
+  let variation7d = null
+
+  if (history?.hashrates?.length >= 7) {
+    const week7ago = history.hashrates[history.hashrates.length - 7]?.hashrate_ehs
+    if (week7ago && week7ago > 0) {
+      variation7d = ((current - week7ago) / week7ago) * 100
+    }
+  }
+
+  let action = `Hash Rate : ${current.toFixed(0)} EH/s`
+
+  if (variation7d != null) {
+    const sign = variation7d > 0 ? '+' : ''
+    action += ` (${sign}${variation7d.toFixed(1)}% sur 7j)`
+  }
+
+  let bias = 'neutral'
+  if (variation7d != null && variation7d > 5) {
+    bias    = 'bullish'
+    action +=
+      `. Mineurs en expansion — confiance long terme dans le prix. ` +
+      `Signal haussier structurel.`
+  } else if (variation7d != null && variation7d < -5) {
+    bias    = 'bearish'
+    action +=
+      `. Hash rate en baisse — mineurs sous pression. ` +
+      `Surveiller capitulation possible.`
+  } else {
+    action +=
+      `. Hash rate stable — réseau sécurisé, pas de signal directionnel.`
+  }
+
+  return { action, bias, current, variation7d }
+}
+
 // ── Signal composite ──────────────────────────────────────────────────────────
 
 /**

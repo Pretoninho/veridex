@@ -698,24 +698,130 @@ function _exchangeFlowSignal(netflow) {
   return { signal: dir, strength }
 }
 
+// ── Score composite pondéré (min 2 composantes) ───────────────────────────────
+
+/** Convertit la congestion mempool en score 0-100. */
+function _mempoolScore(congestion) {
+  const map = { low: 40, medium: 50, high: 60, critical: 70 }
+  return map[congestion] ?? null
+}
+
+/**
+ * Convertit le Fear & Greed en score 0-100 contrarian.
+ * FG 0 (extreme fear) → 80 (bullish), FG 100 (extreme greed) → 20 (bearish).
+ */
+function _fearGreedScore(fgValue) {
+  if (fgValue == null) return null
+  return Math.round(80 - (fgValue / 100) * 60)
+}
+
+/** Calcule le score 0-100 du hash rate à partir de la variation 7j. */
+function _hashRateScore(history) {
+  if (!history?.hashrates?.length) return null
+  const rates   = history.hashrates
+  const current = history.currentHashrate ?? rates[rates.length - 1]?.hashrate_ehs
+  if (!current) return null
+  if (rates.length >= 7) {
+    const week7ago = rates[rates.length - 7]?.hashrate_ehs
+    if (week7ago && week7ago > 0) {
+      const var7d = ((current - week7ago) / week7ago) * 100
+      if (var7d >  5) return 75
+      if (var7d < -5) return 30
+    }
+  }
+  return 50    // données présentes mais pas assez d'historique → neutre
+}
+
+/** Convertit le signal exchange flow en score 0-100. */
+function _exchangeFlowScore(flowSignal, flowStrength) {
+  if (flowSignal === 'accumulation') {
+    return flowStrength === 'strong' ? 80 : flowStrength === 'moderate' ? 70 : 60
+  }
+  if (flowSignal === 'distribution') {
+    return flowStrength === 'strong' ? 20 : flowStrength === 'moderate' ? 30 : 40
+  }
+  return null   // neutre = pas de signal
+}
+
+/** Score minier : simple présence de données = 55 (légèrement positif). */
+function _miningScore(hashRate) {
+  return (hashRate != null && hashRate > 0) ? 55 : null
+}
+
+/**
+ * Calcule le score composite pondéré.
+ * Retourne null si moins de 2 composantes disponibles.
+ */
+function _calcOnChainScore(components) {
+  const weights = {
+    mempool:      0.25,
+    fearGreed:    0.30,
+    hashRate:     0.20,
+    exchangeFlow: 0.15,
+    mining:       0.10,
+  }
+
+  let totalWeight = 0
+  let totalScore  = 0
+  let available   = 0
+
+  for (const [key, weight] of Object.entries(weights)) {
+    const value = components[key]
+    if (value != null) {
+      totalScore  += value * weight
+      totalWeight += weight
+      available++
+    }
+  }
+
+  if (available < 2) return null
+  return Math.round(totalScore / totalWeight)
+}
+
+/**
+ * Compare une valeur à un historique pour déterminer son contexte percentile.
+ * @param {number|null} value
+ * @param {number[]} history
+ * @returns {{ context: string, percentile: number|null }}
+ */
+export function getHistoricalContext(value, history) {
+  if (!history?.length || value == null) return { context: 'unknown', percentile: null }
+  const sorted = [...history].sort((a, b) => a - b)
+  const rank   = sorted.filter(v => v <= value).length
+  const pct    = Math.round((rank / sorted.length) * 100)
+
+  let context = 'normal'
+  if      (pct >= 90) context = 'historically_high'
+  else if (pct <= 10) context = 'historically_low'
+  else if (pct >= 75) context = 'above_average'
+  else if (pct <= 25) context = 'below_average'
+
+  return { context, percentile: pct }
+}
+
 /**
  * Normalise toutes les données on-chain en une structure canonique.
  *
  * @param {{
- *   blockchain: Object|null,
- *   mempool:    Object|null,
- *   glassnodeFlow:   Object|null,
- *   cryptoQuantFlow: Object|null,
+ *   blockchain:       Object|null,
+ *   mempool:          Object|null,
+ *   glassnodeFlow:    Object|null,
+ *   cryptoQuantFlow:  Object|null,
+ *   fearGreed?:       Object|null,    — données alternative.me
+ *   hashRateHistory?: Object|null,    — données mempool.space hashrate
  * }} raw
  * @returns {{
- *   mempool: { txCount, congestion, fastFee, hourFee, timestamp },
+ *   mempool:      { txCount, congestion, fastFee, hourFee, timestamp },
  *   exchangeFlow: { netflow, signal, strength, timestamp },
- *   mining: { hashRate, difficulty, trend, timestamp },
- *   composite: { onChainScore, bias, confidence }
+ *   mining:       { hashRate, difficulty, trend, timestamp },
+ *   composite:    { onChainScore, bias, confidence }
  * }}
  */
 export function normalizeOnChain(raw) {
-  const { blockchain, mempool, glassnodeFlow, cryptoQuantFlow } = raw ?? {}
+  const {
+    blockchain, mempool, glassnodeFlow, cryptoQuantFlow,
+    fearGreed, hashRateHistory,
+  } = raw ?? {}
 
   // ── Mempool ────────────────────────────────────────────────────────────────
   const txCount    = mempool?.count      ?? null
@@ -723,53 +829,37 @@ export function normalizeOnChain(raw) {
   const hourFee    = mempool?.hourFee    ?? null
   const congestion = _mempoolCongestion(txCount)
 
-  // ── Exchange flow (priorité CryptoQuant, fallback Glassnode) ──────────────
+  // ── Exchange flow ──────────────────────────────────────────────────────────
   const netflow = cryptoQuantFlow?.netflow ?? glassnodeFlow?.netflow ?? null
   const { signal: flowSignal, strength: flowStrength } = _exchangeFlowSignal(netflow)
 
-  // ── Mining ─────────────────────────────────────────────────────────────────
-  const hashRate   = blockchain?.hash_rate  ?? null
-  const difficulty = blockchain?.difficulty ?? null
-  // Trend = stable par défaut (pas de données historiques dans ce snapshot)
+  // ── Mining (blockchain.info) ───────────────────────────────────────────────
+  const hashRate    = blockchain?.hash_rate  ?? null
+  const difficulty  = blockchain?.difficulty ?? null
   const miningTrend = 'stable'
 
-  // ── Score composite 0-100 ─────────────────────────────────────────────────
-  let score = 50  // base neutre
-
-  // Exchange flow
-  if (netflow != null) {
-    if (flowSignal === 'accumulation') {
-      score += flowStrength === 'strong' ? 30 : flowStrength === 'moderate' ? 18 : 8
-    } else if (flowSignal === 'distribution') {
-      score -= flowStrength === 'strong' ? 30 : flowStrength === 'moderate' ? 18 : 8
-    }
+  // ── Score composite pondéré (min 2 composantes) ───────────────────────────
+  const components = {
+    mempool:      _mempoolScore(congestion),
+    fearGreed:    _fearGreedScore(fearGreed?.value ?? null),
+    hashRate:     _hashRateScore(hashRateHistory ?? null),
+    exchangeFlow: _exchangeFlowScore(flowSignal, flowStrength),
+    mining:       _miningScore(hashRate),
   }
 
-  // Mempool congestion → activité intense = +20
-  if (congestion === 'critical') score += 20
-  else if (congestion === 'high') score += 12
-  else if (congestion === 'medium') score += 5
+  const onChainScore = _calcOnChainScore(components)
 
-  // Hash rate proxy : +20 si disponible et non nul (signe de réseau actif)
-  if (hashRate != null && hashRate > 0) score += 20
+  const bias = onChainScore == null
+    ? 'neutral'
+    : onChainScore >= 60 ? 'bullish'
+    : onChainScore >= 40 ? 'neutral'
+    : 'bearish'
 
-  // Fees élevés → urgence transactions → +15
-  if (fastFee != null) {
-    if (fastFee > 100) score += 15
-    else if (fastFee > 50) score += 8
-    else if (fastFee > 20) score += 3
-  }
-
-  // Inflow fort → distribution → -30 (déjà pris en compte dans flowSignal)
-
-  const onChainScore = Math.max(0, Math.min(100, Math.round(score)))
-
-  const bias = onChainScore >= 60 ? 'bullish' : onChainScore >= 40 ? 'neutral' : 'bearish'
-  const confidence = (netflow != null && hashRate != null && fastFee != null)
-    ? 'high'
-    : (netflow != null || fastFee != null)
-      ? 'medium'
-      : 'low'
+  // Nombre de sources fiables disponibles
+  const availableCount = Object.values(components).filter(v => v != null).length
+  const confidence = availableCount >= 4 ? 'high'
+    : availableCount >= 2 ? 'medium'
+    : 'low'
 
   return {
     mempool: {
@@ -792,7 +882,7 @@ export function normalizeOnChain(raw) {
       timestamp: blockchain?.timestamp ?? Date.now(),
     },
     composite: {
-      onChainScore,
+      onChainScore,   // null si < 2 composantes disponibles
       bias,
       confidence,
     },
