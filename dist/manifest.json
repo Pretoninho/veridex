@@ -6,8 +6,8 @@
   "start_url": "/veridex/",
   "scope": "/veridex/",
   "display": "standalone",
-  "background_color": "#060a0f",
-  "theme_color": "#060a0f",
+  "background_color": "#0F1117",
+  "theme_color": "#00C896",
   "categories": ["finance", "productivity"],
   "orientation": "portrait-primary",
   "icons": [
