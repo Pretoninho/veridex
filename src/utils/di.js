@@ -18,4 +18,4 @@ export {
   fmtStrike,
   fmtExpiry,
   fmtDuration,
-} from '../strategy_engine/strategies/dual_investment.js'
+} from '../strategy/dual_investment.js'
