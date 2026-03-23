@@ -76,32 +76,40 @@ function _spotReco(score, dvol) {
 
 // ── Recommandation Futures ────────────────────────────────────────────────
 
-function _futuresReco(score, funding, basisAvg) {
+function _futuresReco(score, funding, basisAvg, positioning) {
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
   const fStr = fundingAnn != null ? ` (${fmt(fundingAnn)}%/an)` : ''
   const bStr = basisAvg != null ? ` — basis ${fmt(basisAvg)}%/an` : ''
 
+  // Contexte positionnement croisé à appendre si divergence significative
+  let posCtx = ''
+  if (positioning?.divergenceType &&
+      positioning.divergenceType !== 'neutral' &&
+      positioning.lsRatio != null && positioning.pcRatio != null) {
+    posCtx = ` · Retail L/S ${fmt(positioning.lsRatio, 2)} vs Instit P/C ${fmt(positioning.pcRatio, 2)} — divergence contrarian ${positioning.signal === 'bearish' ? 'baissière' : positioning.signal === 'bullish' ? 'haussière' : 'neutre'} confirme le biais.`
+  }
+
   if (score >= 80) return {
     signal:    'Actif',
-    action:    `Funding élevé${fStr}${bStr}. Short perp rémunérateur ou cash-and-carry (long spot + short perp) pour capturer le basis sans risque directionnel. Surveiller le funding quotidiennement.`,
+    action:    `Funding élevé${fStr}${bStr}. Short perp rémunérateur ou cash-and-carry (long spot + short perp) pour capturer le basis sans risque directionnel. Surveiller le funding quotidiennement.${posCtx}`,
     timeframe: '7 à 14 jours',
     stopLoss:  'Fermer si funding tombe sous 5%/an',
   }
   if (score >= 60) return {
     signal:    'Modéré',
-    action:    `Funding correct${fStr}. Short perp avec taille réduite envisageable. Cash-and-carry si basis > 8%/an${bStr}.`,
+    action:    `Funding correct${fStr}. Short perp avec taille réduite envisageable. Cash-and-carry si basis > 8%/an${bStr}.${posCtx}`,
     timeframe: '7 jours',
     stopLoss:  'Surveiller le funding',
   }
   if (score >= 40) return {
     signal:    'Neutre',
-    action:    `Funding insuffisant${fStr} pour justifier un short perp. Positions directionnelles uniquement si conviction forte${bStr}.`,
+    action:    `Funding insuffisant${fStr} pour justifier un short perp. Positions directionnelles uniquement si conviction forte${bStr}.${posCtx}`,
     timeframe: 'Surveillance uniquement',
     stopLoss:  'N/A',
   }
   return {
     signal:    'Défavorable',
-    action:    `Funding faible ou négatif${fStr}${bStr}. Éviter les positions futures non hedgées. Backwardation possible — prudence sur les longs futures datés.`,
+    action:    `Funding faible ou négatif${fStr}${bStr}. Éviter les positions futures non hedgées. Backwardation possible — prudence sur les longs futures datés.${posCtx}`,
     timeframe: 'Aucune action futures',
     stopLoss:  'N/A',
   }
@@ -210,6 +218,7 @@ export function interpretSignal(computedSignal, rawData) {
   const score       = computedSignal?.global ?? null
   const signalMeta  = computedSignal?.signal ?? null
   const maxPain     = computedSignal?.maxPain ?? null
+  const positioning = computedSignal?.positioning ?? null
   const { dvol, funding, rv, basisAvg, spot, asset } = rawData ?? {}
 
   const ivRank     = _ivRank(dvol)
@@ -217,7 +226,7 @@ export function interpretSignal(computedSignal, rawData) {
   const situation  = _buildSituation(dvol, funding, rv, basisAvg)
 
   const spotReco    = _spotReco(score, dvol)
-  const futuresReco = _futuresReco(score, funding, basisAvg)
+  const futuresReco = _futuresReco(score, funding, basisAvg, positioning)
   const optionsReco = _optionsReco(score, dvol, rv, spot, maxPain)
 
   const expert = {

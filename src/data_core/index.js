@@ -193,6 +193,13 @@ export {
 } from '../data_processing/signals/onchain_signals.js'
 
 export {
+  calcPositioningScore,
+  calcDivergenceScore,
+  calcCombinedRatioScore,
+  interpretPositioning,
+} from '../data_processing/signals/positioning_score.js'
+
+export {
   createFingerprint,
   recordPattern,
   updateOutcomes,

@@ -4,12 +4,13 @@
  * Moteur de score composite pour l'analyse de marché.
  * Extrait de SignalPage.jsx — logique pure, sans React.
  *
- * Score global (0 à 100) pondéré sur 5 composantes :
- *   - Volatilité DVOL  : 30%
- *   - Funding Rate     : 20%
- *   - Basis Futures    : 20%
- *   - IV vs RV         : 15%
- *   - On-Chain         : 15%
+ * Score global (0 à 100) pondéré sur 6 composantes :
+ *   - Volatilité DVOL       : 30%
+ *   - Funding Rate          : 20%
+ *   - Basis Futures         : 20%
+ *   - IV vs RV              : 15%
+ *   - On-Chain              : 10% (15% si s6 absent)
+ *   - Positionnement (s6)   : 15% (optionnel)
  *
  * Plus le score est élevé, plus le contexte est favorable (toutes stratégies).
  *
@@ -22,6 +23,7 @@ import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../../data_core/data_store/cache.js'
 import { calculateGainExample } from './signal_interpreter.js'
 import { calculateMaxPainByExpiry, interpretMaxPain } from '../volatility/max_pain.js'
+import { calcPositioningScore, interpretPositioning } from './positioning_score.js'
 
 // ── Fonctions de score par composante ────────────────────────────────────────
 
@@ -92,14 +94,15 @@ export function scoreIVvsRV(dvol, rv) {
  * Calcule le score composite pondéré.
  * Les composantes null sont exclues et les poids redistribués.
  *
- * Pondération avec on-chain (s5) :
- *   s1 IV       30%
- *   s2 Funding  20%
- *   s3 Basis    20%
- *   s4 IV/RV    15%
- *   s5 OnChain  15%
+ * Pondération avec s5 + s6 :
+ *   s1 IV            30%
+ *   s2 Funding       20%
+ *   s3 Basis         20%
+ *   s4 IV/RV         15%
+ *   s5 OnChain       10% (15% si s6 absent)
+ *   s6 Positioning   15% (optionnel — si absent, s5 récupère les 15%)
  *
- * Sans s5 (rétro-compat) :
+ * Sans s5 ni s6 (rétro-compat) :
  *   s1 IV       35%
  *   s2 Funding  25%
  *   s3 Basis    25%
@@ -110,15 +113,19 @@ export function scoreIVvsRV(dvol, rv) {
  * @param {number|null} s3 — score basis
  * @param {number|null} s4 — score IV/RV
  * @param {number|null} [s5] — score on-chain (optionnel)
+ * @param {number|null} [s6] — score positionnement croisé (optionnel)
  * @returns {number|null}  — 0 à 100
  */
-export function calcGlobalScore(s1, s2, s3, s4, s5) {
-  const hasOnChain = s5 != null
-  const w1 = hasOnChain ? 30 : 35
-  const w2 = hasOnChain ? 20 : 25
-  const w3 = hasOnChain ? 20 : 25
+export function calcGlobalScore(s1, s2, s3, s4, s5, s6) {
+  const hasS5 = s5 != null
+  const hasS6 = s6 != null
+
+  const w1 = hasS5 ? 30 : 35
+  const w2 = hasS5 ? 20 : 25
+  const w3 = hasS5 ? 20 : 25
   const w4 = 15
-  const w5 = 15
+  const w5 = hasS6 ? 10 : 15   // réduit si s6 disponible
+  const w6 = hasS6 ? 15 : 0
 
   let total = 0, weights = 0
   if (s1 != null) { total += s1 * w1; weights += w1 }
@@ -126,6 +133,7 @@ export function calcGlobalScore(s1, s2, s3, s4, s5) {
   if (s3 != null) { total += s3 * w3; weights += w3 }
   if (s4 != null) { total += s4 * w4; weights += w4 }
   if (s5 != null) { total += s5 * w5; weights += w5 }
+  if (s6 != null) { total += s6 * w6; weights += w6 }
   return weights > 0 ? Math.round(total / weights) : null
 }
 
@@ -196,13 +204,16 @@ export function getSignal(score) {
  *   asset?: string
  * }} inputs
  */
-export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset, instruments = [] }) {
+export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset, instruments = [],
+  lsRatio = null, pcRatio = null }) {
   const s1 = scoreIV(dvol)
   const s2 = scoreFunding(funding)
   const s3 = scoreBasis(basisAvg)
   const s4 = scoreIVvsRV(dvol, rv)
   const s5 = onChainScore ?? null
-  const global = calcGlobalScore(s1, s2, s3, s4, s5)
+  const s6 = calcPositioningScore(lsRatio, pcRatio)
+  const global = calcGlobalScore(s1, s2, s3, s4, s5, s6)
+  const positioning = interpretPositioning(lsRatio, pcRatio, s6)
 
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
 
@@ -237,11 +248,12 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
   }
 
   return {
-    scores:  { s1, s2, s3, s4, s5 },
+    scores:     { s1, s2, s3, s4, s5, s6 },
     global,
-    signal:  getSignal(global),
+    signal:     getSignal(global),
     noviceData,
-    maxPain: maxPainResult,
+    maxPain:    maxPainResult,
+    positioning,
   }
 }
 

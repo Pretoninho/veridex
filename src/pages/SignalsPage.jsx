@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getDVOL, getFundingRate, getRealizedVol, getFutures, getFuturePrice, getSpot } from '../utils/api.js'
 import { computeSignal, saveSignal, hashMarketState } from '../data_processing/signals/signal_engine.js'
 import { interpretSignal }       from '../data_processing/signals/signal_interpreter.js'
+import { getOnChainSnapshot }    from '../data_core/providers/onchain.js'
+import { normalizeOnChain }      from '../data_core/normalizers/format_data.js'
+import * as binanceProvider      from '../data_core/providers/binance.js'
+import * as deribitProvider      from '../data_core/providers/deribit.js'
 import { generateNoviceContent } from '../data_processing/signals/novice_generator.js'
 import { DEFAULT_TONE }          from '../data_processing/signals/tone_config.js'
 import { detectTrigger, detectSettlementTrigger, markAsPublished } from '../data_processing/signals/publish_trigger.js'
@@ -172,6 +176,9 @@ export default function SignalsPage({ asset }) {
   const [isGenerating,    setIsGenerating]    = useState(false)
   const [generationError, setGenerationError] = useState(null)
 
+  // Positioning
+  const [positioning, setPositioning] = useState(null)
+
   // UI
   const [mode, setMode] = useState('expert')
 
@@ -209,13 +216,20 @@ export default function SignalsPage({ asset }) {
     setLoading(true)
     setError(null)
     try {
-      const [dvol, funding, rv, spot, futures] = await Promise.all([
+      const [dvol, funding, rv, spot, futures, onchainRaw, sentiment, dOI] = await Promise.all([
         getDVOL(asset).catch(() => null),
         getFundingRate(asset).catch(() => null),
         getRealizedVol(asset).catch(() => null),
         getSpot(asset).catch(() => null),
         getFutures(asset).catch(() => []),
+        getOnChainSnapshot(asset).catch(() => null),
+        binanceProvider.getLongShortRatio(asset).catch(() => null),
+        deribitProvider.getOpenInterest(asset).catch(() => null),
       ])
+
+      const onChainScore = onchainRaw ? (normalizeOnChain(onchainRaw)?.composite?.onChainScore ?? null) : null
+      const lsRatio      = sentiment?.ratio ?? null
+      const pcRatio      = dOI?.putCallRatio ?? null
 
       let basisAvg = null
       if (spot && futures.length) {
@@ -237,8 +251,9 @@ export default function SignalsPage({ asset }) {
       const raw = { dvol, funding, rv, basisAvg, spot, asset }
       setRawData(raw)
 
-      const sig = computeSignal({ dvol, funding, rv, basisAvg, spot, asset })
+      const sig = computeSignal({ dvol, funding, rv, basisAvg, spot, asset, onChainScore, lsRatio, pcRatio })
       setResult(sig)
+      setPositioning(sig?.positioning ?? null)
 
       if (sig?.global != null) {
         saveSignal({
@@ -479,11 +494,135 @@ export default function SignalsPage({ asset }) {
               }}>
                 Décomposition du score
               </div>
-              <ScoreBar label="Volatilité IV — 30%"  score={scores.s1} color={scoreColor(scores.s1)} />
-              <ScoreBar label="Funding Rate — 20%"   score={scores.s2} color={scoreColor(scores.s2)} />
-              <ScoreBar label="Basis Futures — 20%"  score={scores.s3} color={scoreColor(scores.s3)} />
-              <ScoreBar label="Prime IV/RV — 15%"    score={scores.s4} color={scoreColor(scores.s4)} />
-              <ScoreBar label="On-Chain — 15%"       score={scores.s5} color={scoreColor(scores.s5)} />
+              <ScoreBar label="Volatilité IV — 30%"        score={scores.s1} color={scoreColor(scores.s1)} />
+              <ScoreBar label="Funding Rate — 20%"         score={scores.s2} color={scoreColor(scores.s2)} />
+              <ScoreBar label="Basis Futures — 20%"        score={scores.s3} color={scoreColor(scores.s3)} />
+              <ScoreBar label="Prime IV/RV — 15%"          score={scores.s4} color={scoreColor(scores.s4)} />
+              <ScoreBar label={`On-Chain — ${scores.s6 != null ? '10' : '15'}%`} score={scores.s5} color={scoreColor(scores.s5)} />
+              {scores.s6 != null && (
+                <ScoreBar label="Positionnement — 15%" score={scores.s6} color={scoreColor(scores.s6)} />
+              )}
+              {scores.s6 == null && scores.s5 == null && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                  On-Chain &amp; Positionnement : données non disponibles
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tableau positionnement croisé — Expert uniquement */}
+          {positioning && (positioning.lsRatio != null || positioning.pcRatio != null) && (
+            <div style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+            }}>
+              <div style={{
+                fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+                fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12,
+              }}>
+                Positionnement croisé
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Source', 'Ratio', 'Signal'].map((h, i) => (
+                      <th key={h} style={{
+                        fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+                        fontWeight: 600, textAlign: i === 0 ? 'left' : i === 1 ? 'center' : 'right',
+                        paddingBottom: 8, width: i === 0 ? '40%' : '30%',
+                      }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Retail */}
+                  <tr style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px 0', fontSize: 12, color: 'var(--text)' }}>
+                      Retail <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>(Binance)</span>
+                    </td>
+                    <td style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)' }}>
+                      {positioning.lsRatio != null ? positioning.lsRatio.toFixed(2) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {positioning.lsRatio != null ? (
+                        <span style={{
+                          fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700,
+                          borderRadius: 6, padding: '2px 8px',
+                          background: positioning.lsRatio > 1.2 ? 'rgba(240,71,107,.12)'
+                            : positioning.lsRatio < 0.8 ? 'rgba(0,200,150,.12)'
+                            : 'rgba(255,255,255,.06)',
+                          color: positioning.lsRatio > 1.2 ? 'var(--put)'
+                            : positioning.lsRatio < 0.8 ? 'var(--call)'
+                            : 'var(--text-muted)',
+                        }}>
+                          {positioning.lsRatio > 1.2 ? 'Long 🔴'
+                            : positioning.lsRatio < 0.8 ? 'Short 🟢'
+                            : 'Neutre'}
+                        </span>
+                      ) : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>N/A</span>}
+                    </td>
+                  </tr>
+                  {/* Institutionnels */}
+                  <tr style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px 0', fontSize: 12, color: 'var(--text)' }}>
+                      Instit. <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>(Deribit)</span>
+                    </td>
+                    <td style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)' }}>
+                      {positioning.pcRatio != null ? `${positioning.pcRatio.toFixed(2)} P/C` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {positioning.pcRatio != null ? (
+                        <span style={{
+                          fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700,
+                          borderRadius: 6, padding: '2px 8px',
+                          background: positioning.pcRatio > 1.15 ? 'rgba(240,71,107,.12)'
+                            : positioning.pcRatio < 0.85 ? 'rgba(0,200,150,.12)'
+                            : 'rgba(255,255,255,.06)',
+                          color: positioning.pcRatio > 1.15 ? 'var(--put)'
+                            : positioning.pcRatio < 0.85 ? 'var(--call)'
+                            : 'var(--text-muted)',
+                        }}>
+                          {positioning.pcRatio > 1.15 ? 'Défensif 🔴'
+                            : positioning.pcRatio < 0.85 ? 'Offensif 🟢'
+                            : 'Neutre'}
+                        </span>
+                      ) : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>N/A</span>}
+                    </td>
+                  </tr>
+                  {/* Divergence */}
+                  <tr style={{ borderTop: '2px solid var(--border)' }}>
+                    <td style={{ padding: '8px 0', fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: 'var(--text)' }}>
+                      Divergence
+                    </td>
+                    <td />
+                    <td style={{ textAlign: 'right' }}>
+                      <span style={{
+                        fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12,
+                        color: positioning.signal === 'bearish' ? 'var(--put)'
+                          : positioning.signal === 'bullish' ? 'var(--call)'
+                          : 'var(--text-muted)',
+                      }}>
+                        {positioning.divergenceType === 'retail_bullish_instit_bearish' ? 'Contrarian ⚠'
+                          : positioning.divergenceType === 'retail_bearish_instit_bullish' ? 'Contrarian ✓'
+                          : positioning.divergenceType === 'consensus_bullish' ? 'Haussier ✓'
+                          : positioning.divergenceType === 'consensus_bearish' ? 'Baissier ⚠'
+                          : 'Neutre'}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              {positioning.expertAction && (
+                <div style={{
+                  marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)',
+                  fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6,
+                }}>
+                  <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.5px' }}>Action </span>
+                  {positioning.expertAction}
+                </div>
+              )}
             </div>
           )}
 
