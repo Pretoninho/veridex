@@ -166,10 +166,13 @@ npm run build   # build de production
 npm test        # 188 tests Vitest
 ```
 
-Variable d'environnement optionnelle (couche Simple) :
+Variables d'environnement optionnelles :
 ```bash
-VITE_ANTHROPIC_API_KEY=sk-ant-...   # clé Anthropic pour génération Claude
+VITE_ANTHROPIC_API_KEY=sk-ant-...   # Optionnel — commentaires experts Claude
+VITE_CRYPTOQUANT_API_KEY=           # Optionnel — exchange flows on-chain (tier gratuit sur cryptoquant.com)
 ```
+
+> **Note :** Si `VITE_CRYPTOQUANT_API_KEY` est absent, la section Exchange Flows affiche un message explicatif et le score on-chain est calculé sans cette composante (comportement identique à l'ancienne version Glassnode N/A).
 
 ---
 
@@ -202,11 +205,12 @@ Dans **Settings → Pages → Source → GitHub Actions**.
 | **Binance Futures** | `/futures/data/globalLongShortAccountRatio` | Long/Short ratio (s6) |
 | **Coinbase Exchange** | `/products/{id}/ticker` | Spot fiat USD |
 | **blockchain.info** | `/stats` | Stats réseau Bitcoin |
-| **mempool.space** | `/api/mempool`, `/api/v1/fees/recommended` | Mempool, frais |
-| **Glassnode** | `/v1/metrics/transactions/transfers_volume_to_exchanges_sum` | Exchange inflows |
-| **Anthropic API** | `/v1/messages` (claude-haiku-4-5-20251001) | Génération couche Simple |
+| **mempool.space** | `/api/mempool`, `/api/v1/fees/recommended`, `/api/v1/mining/hashrate/1m`, `/api/mempool/recent` | Mempool, frais, hash rate, whale tx |
+| **CryptoQuant** | `/v1/btc/exchange-flows/netflow`, `/v1/eth/exchange-flows/netflow` | Exchange netflow BTC/ETH (clé API gratuite requise) |
+| **alternative.me** | `/fng/?limit=2` | Fear & Greed Index |
+| **Anthropic API** | `/v1/messages` (claude-haiku-4-5-20251001) | Commentaires experts courts |
 
-Toutes les APIs exchange sont **publiques** — aucune clé requise sauf Anthropic (optionnelle).
+Toutes les APIs exchange sont **publiques** — aucune clé requise sauf Anthropic (optionnelle) et CryptoQuant (optionnelle, tier gratuit).
 
 ---
 

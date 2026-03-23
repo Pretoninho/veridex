@@ -227,6 +227,66 @@ export function detectMinerSignal(miningData, previousHashRate) {
   return { signal, trend, description_novice: descriptionNovice }
 }
 
+// ── Interprétation Expert : Exchange Flows CryptoQuant ───────────────────────
+
+/**
+ * Interprétation actionnable des exchange flows CryptoQuant pour la couche Expert.
+ * Retourne un message explicatif si la clé API est absente (flow === null).
+ *
+ * @param {{
+ *   netflow: number,
+ *   netflow24h: number,
+ *   direction: string,
+ *   signal: 'bullish'|'bearish'|'neutral',
+ *   asset: string
+ * }|null} flow — résultat de getExchangeFlows()
+ * @returns {{ action: string, bias: string, netflow?: number, netflow24h?: number, direction?: string, available: boolean }}
+ */
+export function interpretExchangeFlowsExpert(flow) {
+  if (!flow) {
+    return {
+      action:    'Exchange flows non disponibles. ' +
+                 'Ajouter VITE_CRYPTOQUANT_API_KEY dans .env pour activer.',
+      bias:      'neutral',
+      available: false,
+    }
+  }
+
+  const { netflow, netflow24h, direction, signal, asset } = flow
+  const absNetflow = Math.abs(netflow24h)
+  const sign = netflow24h < 0 ? '-' : '+'
+  let action = ''
+
+  if (signal === 'bullish') {
+    action =
+      `Outflow net ${sign}${absNetflow.toFixed(0)} ` +
+      `${asset} sur 24h — actifs quittent les exchanges. ` +
+      `Accumulation en cours. ` +
+      `Signal haussier structurel — ` +
+      `réduire les shorts ou renforcer les longs.`
+  } else if (signal === 'bearish') {
+    action =
+      `Inflow net ${sign}${absNetflow.toFixed(0)} ` +
+      `${asset} sur 24h — actifs arrivent sur les exchanges. ` +
+      `Pression de vente potentielle. ` +
+      `Surveiller pour réduction des longs.`
+  } else {
+    action =
+      `Exchange flows équilibrés ` +
+      `(${netflow > 0 ? '+' : ''}${netflow.toFixed(0)} ${asset}/h). ` +
+      `Pas de signal directionnel.`
+  }
+
+  return {
+    action,
+    bias:      signal,
+    netflow,
+    netflow24h,
+    direction,
+    available: true,
+  }
+}
+
 // ── Interprétations Expert ────────────────────────────────────────────────────
 
 /**

@@ -1,11 +1,13 @@
 /**
  * providers/onchain.js — Données on-chain Bitcoin/Ethereum
  *
- * Sources publiques gratuites, sans clé API :
+ * Sources :
  *   1. Blockchain.info  — statistiques réseau BTC
  *   2. Mempool.space    — mempool + fees recommandés
- *   3. Glassnode public — exchange flows (net)
- *   4. CryptoQuant      — netflow BTC exchanges
+ *   3. CryptoQuant      — exchange netflow BTC/ETH (clé API gratuite)
+ *   4. Alternative.me   — Fear & Greed Index
+ *   5. Mempool.space    — Hash Rate historique
+ *   6. Mempool.space    — Whale Transactions
  *
  * Chaque fonction retourne null en cas d'erreur.
  * Promise.allSettled est utilisé pour que les autres sources continuent
@@ -100,55 +102,106 @@ export async function getMempoolData() {
   }
 }
 
-// ── Source 3 : Glassnode public ───────────────────────────────────────────────
+// ── Source 3 : CryptoQuant — Exchange Flows (authentifié) ────────────────────
 
 /**
- * Exchange net flow depuis Glassnode (endpoint public limité).
+ * Exchange netflow BTC/ETH depuis CryptoQuant (clé API gratuite requise).
+ * Retourne null silencieusement si la clé est absente.
+ *
  * @param {'BTC'|'ETH'} [asset]
- * @returns {Promise<{ netflow: number|null, asset: string, timestamp: number }|null>}
- */
-export async function getGlassnodeExchangeFlow(asset = 'BTC') {
-  try {
-    const url = `https://api.glassnode.com/v1/metrics/transactions/transfers_volume_exchanges_net?a=${asset}&api_key=anonymous`
-    const data = await fetchWithTimeout(url)
-
-    // Glassnode retourne un array [{t, v}], on prend la dernière valeur
-    const latest = Array.isArray(data) ? data[data.length - 1] : null
-    return {
-      netflow:   latest?.v   ?? null,
-      asset:     asset.toUpperCase(),
-      timestamp: latest?.t ? latest.t * 1000 : Date.now(),
-    }
-  } catch {
-    return null
-  }
-}
-
-// ── Source 4 : CryptoQuant public ────────────────────────────────────────────
-
-/**
- * Exchange netflow BTC depuis CryptoQuant.
  * @returns {Promise<{
- *   inflow: number|null,
- *   outflow: number|null,
- *   netflow: number|null,
- *   timestamp: number
+ *   asset: string,
+ *   netflow: number,
+ *   netflow24h: number,
+ *   direction: 'inflow'|'outflow',
+ *   signal: 'bullish'|'bearish'|'neutral',
+ *   label: string,
+ *   history: Array<{ date: string, netflow: number }>,
+ *   source: 'cryptoquant',
+ *   fetchedAt: number
  * }|null>}
  */
-export async function getCryptoQuantFlow() {
-  try {
-    const url = 'https://api.cryptoquant.com/v1/btc/exchange-flows/netflow?window=day&limit=1'
-    const data = await fetchWithTimeout(url)
+export async function getExchangeFlows(asset = 'BTC') {
+  const apiKey = import.meta.env.VITE_CRYPTOQUANT_API_KEY
+  if (!apiKey || apiKey.trim() === '') {
+    console.info(
+      '[getExchangeFlows] Clé CryptoQuant absente — exchange flows désactivés'
+    )
+    return null
+  }
 
-    // CryptoQuant : { data: { result: [{ inflow_total, outflow_total, netflow_total, ... }] } }
-    const row = data?.data?.result?.[0]
-    return {
-      inflow:    row?.inflow_total  ?? null,
-      outflow:   row?.outflow_total ?? null,
-      netflow:   row?.netflow_total ?? null,
-      timestamp: Date.now(),
+  const currency = asset.toLowerCase()
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8000)
+    const url =
+      `https://api.cryptoquant.com/v1/` +
+      `${currency}/exchange-flows/netflow` +
+      `?window=hour&limit=24`
+    const res = await fetch(url, {
+      signal:  controller.signal,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type':  'application/json',
+      },
+    })
+    clearTimeout(timeout)
+
+    if (res.status === 401) {
+      console.error('[getExchangeFlows] Clé API invalide — vérifier VITE_CRYPTOQUANT_API_KEY')
+      return null
     }
-  } catch {
+    if (res.status === 429) {
+      console.warn('[getExchangeFlows] Rate limit atteint — réessayer dans quelques minutes')
+      return null
+    }
+    if (!res.ok) {
+      console.warn(`[getExchangeFlows] HTTP ${res.status}`)
+      return null
+    }
+
+    const json = await res.json()
+    const data = json?.result?.data ?? []
+    if (!data.length) return null
+
+    // Trier par date décroissante (plus récent en premier)
+    const sorted = [...data].sort(
+      (a, b) => new Date(b.date) - new Date(a.date)
+    )
+    const latest    = sorted[0]
+    const netflow   = latest?.netflow_total ?? 0
+
+    // Cumul sur les 24 dernières heures
+    const netflow24h = sorted
+      .slice(0, 24)
+      .reduce((s, d) => s + (d.netflow_total ?? 0), 0)
+
+    // Signal directionnel : seuils BTC ±1000 BTC/24h, ETH ±10000 ETH/24h
+    const threshold = asset.toUpperCase() === 'BTC' ? 1000 : 10000
+    let signal = 'neutral'
+    if (netflow24h < -threshold) signal = 'bullish'
+    if (netflow24h >  threshold) signal = 'bearish'
+
+    return {
+      asset:     asset.toUpperCase(),
+      netflow,
+      netflow24h,
+      direction: netflow < 0 ? 'outflow' : 'inflow',
+      signal,
+      label: netflow < 0
+        ? `Outflow ${Math.abs(netflow).toFixed(0)} ${asset.toUpperCase()}`
+        : `Inflow ${netflow.toFixed(0)} ${asset.toUpperCase()}`,
+      history: sorted.slice(0, 24).map(d => ({
+        date:    d.date,
+        netflow: d.netflow_total ?? 0,
+      })),
+      source:    'cryptoquant',
+      fetchedAt: Date.now(),
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.warn(`[getExchangeFlows] ${asset} error:`, err.message)
+    }
     return null
   }
 }
@@ -361,23 +414,20 @@ export async function getWhaleTransactions(minBTC = 100) {
 // ── Snapshot combiné ──────────────────────────────────────────────────────────
 
 /**
- * Récupère toutes les données on-chain en parallèle.
+ * Récupère les données on-chain de base en parallèle (sans exchange flows).
+ * Les exchange flows sont fetchés séparément via getExchangeFlows() à 5 min.
  * Une source hors ligne ne bloque pas les autres.
  * @param {'BTC'|'ETH'} [asset]
- * @returns {Promise<{ blockchain, mempool, glassnodeFlow, cryptoQuantFlow }>}
+ * @returns {Promise<{ blockchain, mempool }>}
  */
 export async function getOnChainSnapshot(asset = 'BTC') {
-  const [blockchain, mempool, glassnodeFlow, cryptoQuantFlow] = await Promise.allSettled([
+  const [blockchain, mempool] = await Promise.allSettled([
     getBlockchainStats(),
     getMempoolData(),
-    getGlassnodeExchangeFlow(asset),
-    getCryptoQuantFlow(),
   ])
 
   return {
-    blockchain:     blockchain.status     === 'fulfilled' ? blockchain.value     : null,
-    mempool:        mempool.status        === 'fulfilled' ? mempool.value        : null,
-    glassnodeFlow:  glassnodeFlow.status  === 'fulfilled' ? glassnodeFlow.value  : null,
-    cryptoQuantFlow: cryptoQuantFlow.status === 'fulfilled' ? cryptoQuantFlow.value : null,
+    blockchain: blockchain.status === 'fulfilled' ? blockchain.value : null,
+    mempool:    mempool.status    === 'fulfilled' ? mempool.value    : null,
   }
 }

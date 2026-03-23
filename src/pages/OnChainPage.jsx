@@ -4,6 +4,7 @@ import {
   getFearGreedIndex,
   getHashRateHistory,
   getWhaleTransactions,
+  getExchangeFlows,
 } from '../data_core/providers/onchain.js'
 import { normalizeOnChain } from '../data_core/normalizers/format_data.js'
 import {
@@ -15,10 +16,12 @@ import {
   interpretFearGreedExpert,
   interpretWhalesExpert,
   interpretHashRateExpert,
+  interpretExchangeFlowsExpert,
 } from '../data_processing/signals/onchain_signals.js'
 
-const POLL_MAIN_MS = 60_000
+const POLL_MAIN_MS   = 60_000
 const POLL_WHALES_MS = 300_000
+const POLL_FLOW_MS   = 300_000
 
 function fmt(v, decimals = 0) {
   if (v == null) return '—'
@@ -201,14 +204,26 @@ export default function OnChainPage({ asset }) {
   const [fgRaw, setFgRaw] = useState(null)
   const [hrRaw, setHrRaw] = useState(null)
   const [whalesRaw, setWhalesRaw] = useState(null)
+  const [flowRaw, setFlowRaw] = useState(undefined)   // undefined = pas encore chargé
   const [signals, setSignals] = useState(null)
   const [expertSignals, setExpertSignals] = useState(null)
   const [composite, setComposite] = useState(null)
   const [loading, setLoading] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(null)
   const [error, setError] = useState(null)
-  const mainTimerRef = useRef(null)
+  const mainTimerRef   = useRef(null)
   const whalesTimerRef = useRef(null)
+  const flowTimerRef   = useRef(null)
+
+  // ── Exchange Flows (CryptoQuant, 5 min) ──────────────────────────────────
+  // flowRaw est partagé avec loadMain via ref pour éviter les stale closures
+  const flowRawRef = useRef(null)
+
+  const loadFlow = useCallback(async () => {
+    const flow = await getExchangeFlows(asset).catch(() => null)
+    flowRawRef.current = flow
+    setFlowRaw(flow)
+  }, [asset])
 
   const loadWhales = useCallback(async () => {
     try {
@@ -227,16 +242,22 @@ export default function OnChainPage({ asset }) {
         getHashRateHistory(),
       ])
 
-      const normalized = normalizeOnChain({ ...raw, fearGreed: fg, hashRateHistory: hr })
+      // Injecter les exchange flows disponibles dans la normalisation
+      const normalized = normalizeOnChain({
+        ...raw,
+        fearGreed:      fg,
+        hashRateHistory: hr,
+        exchangeFlows:  flowRawRef.current,
+      })
 
-      const flowSig = detectExchangeFlowSignal(normalized.exchangeFlow)
+      const flowSig    = detectExchangeFlowSignal(normalized.exchangeFlow)
       const mempoolSig = detectMempoolSignal(normalized.mempool)
-      const minerSig = detectMinerSignal(normalized.mining)
+      const minerSig   = detectMinerSignal(normalized.mining)
       const comp = compositeOnChainSignal(flowSig, mempoolSig, minerSig, normalized.composite.onChainScore)
 
       const mempoolExp = interpretMempoolExpert(normalized.mempool)
-      const fgExp = interpretFearGreedExpert(fg)
-      const hrExp = interpretHashRateExpert(hr, hr)
+      const fgExp      = interpretFearGreedExpert(fg)
+      const hrExp      = interpretHashRateExpert(hr, hr)
 
       setData(normalized)
       setFgRaw(fg)
@@ -252,15 +273,19 @@ export default function OnChainPage({ asset }) {
   }, [asset])
 
   useEffect(() => {
+    // Charger les exchange flows en premier (clé absente → null immédiat)
+    loadFlow()
     loadMain()
     loadWhales()
-    mainTimerRef.current = setInterval(loadMain, POLL_MAIN_MS)
+    mainTimerRef.current   = setInterval(loadMain,   POLL_MAIN_MS)
     whalesTimerRef.current = setInterval(loadWhales, POLL_WHALES_MS)
+    flowTimerRef.current   = setInterval(loadFlow,   POLL_FLOW_MS)
     return () => {
       clearInterval(mainTimerRef.current)
       clearInterval(whalesTimerRef.current)
+      clearInterval(flowTimerRef.current)
     }
-  }, [asset, loadMain, loadWhales])
+  }, [asset, loadMain, loadWhales, loadFlow])
 
   const whalesExp = interpretWhalesExpert(whalesRaw, null)
 
@@ -405,33 +430,87 @@ export default function OnChainPage({ asset }) {
       <SectionTitle style={{ marginTop: 4 }}>Flux & Positions</SectionTitle>
 
       {/* Exchange Flows */}
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-          <div>
-            <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 3 }}>
-              Flux Exchange
+      {flowRaw === null ? (
+        /* Clé absente — card explicative grisée */
+        <Card style={{ opacity: 0.7 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13, color: 'var(--text-muted)', marginBottom: 3 }}>
+                Exchange Flows · {asset}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Source : CryptoQuant</div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Netflow net {asset}</div>
           </div>
-          <Badge label={signals?.flow?.signal ? FLOW_LABEL[signals.flow.signal.toLowerCase()] : '—'} color={signals?.flow?.signal ? FLOW_COLOR[signals.flow.signal.toLowerCase()] : 'var(--border)'} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: signals?.flow?.signal === 'ACCUMULATION' ? 'rgba(0,229,160,.1)' : signals?.flow?.signal === 'DISTRIBUTION' ? 'rgba(255,77,109,.1)' : 'rgba(255,255,255,.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={signals?.flow?.signal === 'ACCUMULATION' ? 'var(--call)' : signals?.flow?.signal === 'DISTRIBUTION' ? 'var(--put)' : 'var(--text-muted)'} strokeWidth="2.5">
-              {signals?.flow?.signal === 'ACCUMULATION' ? <path d="M12 19V5M5 12l7-7 7 7" /> : signals?.flow?.signal === 'DISTRIBUTION' ? <path d="M12 5v14M5 12l7 7 7-7" /> : <path d="M5 12h14" />}
-            </svg>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7, marginBottom: 10 }}>
+            Fonctionnalité désactivée.
           </div>
-          <div>
-            <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>
-              {data?.exchangeFlow?.netflow != null ? `${data.exchangeFlow.netflow > 0 ? '+' : ''}${fmt(data.exchangeFlow.netflow)} BTC` : '—'}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Intensité : {signals?.flow?.strength ?? '—'}</div>
+          <div style={{ background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7, fontFamily: 'var(--mono, monospace)' }}>
+            Ajouter dans .env :<br />
+            VITE_CRYPTOQUANT_API_KEY=ta_clé
           </div>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-          {signals?.flow?.description_expert?.slice(0, 120)}…
-        </div>
-      </Card>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+            Clé gratuite sur{' '}
+            <span style={{ color: 'var(--accent)' }}>cryptoquant.com</span>
+          </div>
+        </Card>
+      ) : flowRaw !== undefined ? (
+        /* Données disponibles */
+        (() => {
+          const flowExp = interpretExchangeFlowsExpert(flowRaw)
+          const flowColor = flowRaw.signal === 'bullish' ? 'var(--call)'
+            : flowRaw.signal === 'bearish' ? 'var(--put)'
+            : 'var(--text-muted)'
+          const signalLabel = flowRaw.signal === 'bullish' ? 'Haussier'
+            : flowRaw.signal === 'bearish' ? 'Baissier'
+            : 'Neutre'
+          return (
+            <Card>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 13, color: 'var(--text)', marginBottom: 3 }}>
+                    Exchange Flows · {asset}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Source : CryptoQuant</div>
+                </div>
+                <Badge label={signalLabel} color={flowColor} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Dernière heure</div>
+                  <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 16, color: flowColor }}>
+                    {flowRaw.netflow != null ? `${flowRaw.netflow > 0 ? '+' : ''}${Number(flowRaw.netflow).toLocaleString('fr-FR', { maximumFractionDigits: 0 })}` : '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: flowColor, marginTop: 2 }}>
+                    {flowRaw.direction === 'outflow' ? 'Outflow ↓' : flowRaw.direction === 'inflow' ? 'Inflow ↑' : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 3 }}>Cumul 24h</div>
+                  <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 16, color: flowColor }}>
+                    {flowRaw.netflow24h != null ? `${flowRaw.netflow24h > 0 ? '+' : ''}${Number(flowRaw.netflow24h).toLocaleString('fr-FR', { maximumFractionDigits: 0 })}` : '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: flowColor, marginTop: 2 }}>
+                    {flowRaw.netflow24h != null && flowRaw.netflow24h < 0 ? 'Outflow ↓' : flowRaw.netflow24h != null && flowRaw.netflow24h > 0 ? 'Inflow ↑' : '—'}
+                  </div>
+                </div>
+              </div>
+              {flowExp.available && (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.6, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                  <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.8px', display: 'block', marginBottom: 4 }}>Action Expert</span>
+                  {flowExp.action}
+                </div>
+              )}
+            </Card>
+          )
+        })()
+      ) : (
+        /* Chargement initial */
+        <Card>
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, padding: '10px 0' }}>
+            Exchange Flows · {asset} — chargement…
+          </div>
+        </Card>
+      )}
 
       {/* Whale Transactions */}
       <Card>

@@ -732,15 +732,16 @@ function _hashRateScore(history) {
   return 50    // données présentes mais pas assez d'historique → neutre
 }
 
-/** Convertit le signal exchange flow en score 0-100. */
-function _exchangeFlowScore(flowSignal, flowStrength) {
-  if (flowSignal === 'accumulation') {
-    return flowStrength === 'strong' ? 80 : flowStrength === 'moderate' ? 70 : 60
-  }
-  if (flowSignal === 'distribution') {
-    return flowStrength === 'strong' ? 20 : flowStrength === 'moderate' ? 30 : 40
-  }
-  return null   // neutre = pas de signal
+/**
+ * Convertit le signal CryptoQuant exchange flow en score 0-100.
+ * Utilise le signal pré-calculé par getExchangeFlows().
+ * Retourne null si flow absent (clé API manquante) → score calculé sans cette composante.
+ */
+function _flowToScore(flow) {
+  if (!flow) return null
+  if (flow.signal === 'bullish') return 70
+  if (flow.signal === 'bearish') return 30
+  return 50
 }
 
 /** Score minier : simple présence de données = 55 (légèrement positif). */
@@ -805,21 +806,20 @@ export function getHistoricalContext(value, history) {
  * @param {{
  *   blockchain:       Object|null,
  *   mempool:          Object|null,
- *   glassnodeFlow:    Object|null,
- *   cryptoQuantFlow:  Object|null,
+ *   exchangeFlows?:   Object|null,    — résultat de getExchangeFlows() (CryptoQuant)
  *   fearGreed?:       Object|null,    — données alternative.me
  *   hashRateHistory?: Object|null,    — données mempool.space hashrate
  * }} raw
  * @returns {{
  *   mempool:      { txCount, congestion, fastFee, hourFee, timestamp },
- *   exchangeFlow: { netflow, signal, strength, timestamp },
+ *   exchangeFlow: { netflow, netflow24h, direction, signal, source, timestamp },
  *   mining:       { hashRate, difficulty, trend, timestamp },
  *   composite:    { onChainScore, bias, confidence }
  * }}
  */
 export function normalizeOnChain(raw) {
   const {
-    blockchain, mempool, glassnodeFlow, cryptoQuantFlow,
+    blockchain, mempool, exchangeFlows,
     fearGreed, hashRateHistory,
   } = raw ?? {}
 
@@ -829,9 +829,12 @@ export function normalizeOnChain(raw) {
   const hourFee    = mempool?.hourFee    ?? null
   const congestion = _mempoolCongestion(txCount)
 
-  // ── Exchange flow ──────────────────────────────────────────────────────────
-  const netflow = cryptoQuantFlow?.netflow ?? glassnodeFlow?.netflow ?? null
-  const { signal: flowSignal, strength: flowStrength } = _exchangeFlowSignal(netflow)
+  // ── Exchange flow (CryptoQuant) ────────────────────────────────────────────
+  // exchangeFlows est null si clé absente → composante ignorée dans le score
+  const netflow    = exchangeFlows?.netflow    ?? null
+  const netflow24h = exchangeFlows?.netflow24h ?? null
+  const direction  = exchangeFlows?.direction  ?? null
+  const flowSignal = exchangeFlows?.signal     ?? 'neutral'
 
   // ── Mining (blockchain.info) ───────────────────────────────────────────────
   const hashRate    = blockchain?.hash_rate  ?? null
@@ -843,7 +846,7 @@ export function normalizeOnChain(raw) {
     mempool:      _mempoolScore(congestion),
     fearGreed:    _fearGreedScore(fearGreed?.value ?? null),
     hashRate:     _hashRateScore(hashRateHistory ?? null),
-    exchangeFlow: _exchangeFlowScore(flowSignal, flowStrength),
+    exchangeFlow: _flowToScore(exchangeFlows),   // null si clé absente
     mining:       _miningScore(hashRate),
   }
 
@@ -871,9 +874,11 @@ export function normalizeOnChain(raw) {
     },
     exchangeFlow: {
       netflow,
+      netflow24h,
+      direction,
       signal:    flowSignal,
-      strength:  flowStrength,
-      timestamp: cryptoQuantFlow?.timestamp ?? glassnodeFlow?.timestamp ?? Date.now(),
+      source:    exchangeFlows?.source ?? null,
+      timestamp: exchangeFlows?.fetchedAt ?? Date.now(),
     },
     mining: {
       hashRate,
