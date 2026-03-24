@@ -214,12 +214,18 @@ describe('SmartCache', () => {
 
   // ── hasChanged() ──
   it('detects recent change', () => {
+    // Use fake timers to ensure T1 ≠ T2 regardless of execution speed
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    cache.set('key1', { value: 100 })  // T1 = 1000, _changedAt = 1000, entry.timestamp = 1000
+    expect(cache.hasChanged('key1')).toBe(true)  // _changedAt matches entry.timestamp → true
+    // Advance time so the next set() gets a different timestamp
+    vi.setSystemTime(2000)
+    // Same data → changed = false, entry.timestamp = 2000, _changedAt stays at 1000
     cache.set('key1', { value: 100 })
-    expect(cache.hasChanged('key1')).toBe(true)
-    // Note: hasChanged() checks if _changedAt timestamp matches entry.timestamp
-    // So setting with same data advances timestamp but not _changedAt, making it true again
-    cache.set('key1', { value: 100 }) // Same data = no change recorded
-    expect(cache.hasChanged('key1')).toBe(true) // But timestamp advanced, so they don't match
+    // _changedAt(1000) !== entry.timestamp(2000) → hasChanged returns false (no real data change)
+    expect(cache.hasChanged('key1')).toBe(false)
+    vi.useRealTimers()
   })
 
   it('returns false for missing key', () => {

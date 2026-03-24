@@ -203,7 +203,8 @@ export default function OnChainPage({ asset }) {
   const [data, setData] = useState(null)
   const [fgRaw, setFgRaw] = useState(null)
   const [hrRaw, setHrRaw] = useState(null)
-  const [whalesRaw, setWhalesRaw] = useState(null)
+  // undefined = pas encore chargé, null = erreur API, objet = données disponibles
+  const [whalesRaw, setWhalesRaw] = useState(undefined)
   const [flowRaw, setFlowRaw] = useState(undefined)   // undefined = pas encore chargé
   const [signals, setSignals] = useState(null)
   const [expertSignals, setExpertSignals] = useState(null)
@@ -548,7 +549,12 @@ export default function OnChainPage({ asset }) {
           </>
         ) : (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '10px 0' }}>
-            {whalesRaw === null ? 'Chargement...' : 'Aucune whale tx détectée'}
+            {/* undefined = chargement en cours, null = erreur réseau, objet vide = aucune tx */}
+            {whalesRaw === undefined
+              ? 'Chargement...'
+              : whalesRaw === null
+              ? 'Données indisponibles'
+              : 'Aucune whale tx détectée'}
           </div>
         )}
       </Card>
