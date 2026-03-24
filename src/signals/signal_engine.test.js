@@ -7,7 +7,9 @@ import {
   calcGlobalScore,
   getSignal,
   computeSignal,
+  hashMarketState,
 } from './signal_engine.js'
+import { vi } from 'vitest'
 
 // ── scoreIV ───────────────────────────────────────────────────────────────────
 
@@ -193,5 +195,29 @@ describe('computeSignal', () => {
     const result = computeSignal({ dvol: null, funding: null, rv: null, basisAvg: null })
     expect(result.global).toBeNull()
     expect(result.signal).toBeNull()
+  })
+})
+
+// ── _hashSignal — payload étendu ──────────────────────────────────────────────
+
+// saveSignal n'est pas testé directement (IndexedDB), mais on teste la cohérence
+// du hashMarketState et on vérifie que les champs de contexte n'introduisent pas
+// de régression dans hashMarketState.
+
+describe('hashMarketState — déterminisme', () => {
+  it('mêmes inputs → même hash', () => {
+    const inputs = { dvol: { current: 72, monthMin: 40, monthMax: 80 }, funding: { rateAnn: 15 }, rv: { current: 45 }, basisAvg: 10 }
+    expect(hashMarketState(inputs)).toBe(hashMarketState(inputs))
+  })
+
+  it('inputs différents → hashes différents', () => {
+    const a = { dvol: { current: 72, monthMin: 40, monthMax: 80 }, funding: { rateAnn: 15 }, rv: { current: 45 }, basisAvg: 10 }
+    const b = { dvol: { current: 50, monthMin: 40, monthMax: 80 }, funding: { rateAnn: 5  }, rv: { current: 45 }, basisAvg: 5  }
+    expect(hashMarketState(a)).not.toBe(hashMarketState(b))
+  })
+
+  it('retourne une chaîne non vide', () => {
+    expect(typeof hashMarketState({})).toBe('string')
+    expect(hashMarketState({}).length).toBeGreaterThan(0)
   })
 })

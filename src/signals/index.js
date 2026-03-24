@@ -21,7 +21,7 @@ export {
 } from './signal_engine.js'
 
 export { buildCriteria, computeConvergence } from './convergence.js'
-export { interpretSignal } from './signal_interpreter.js'
+export { interpretSignal, buildStrategySignature, buildMarketRegime } from './signal_interpreter.js'
 export { calcPositioningScore, calcDivergenceScore, calcCombinedRatioScore, interpretPositioning } from './positioning_score.js'
 export { generateInsight, clearInsightCache } from './insight_generator.js'
 export { createFingerprint, recordPattern, updateOutcomes, getPatternStats, getAllPatterns } from './market_fingerprint.js'

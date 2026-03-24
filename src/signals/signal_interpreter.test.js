@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { interpretSignal, strategyEngine } from './signal_interpreter.js'
+import { interpretSignal, strategyEngine, buildStrategySignature, buildMarketRegime } from './signal_interpreter.js'
 
 // Helper : construit un dvol tel que ivRank = valeur voulue (0-100)
 const dvolForRank = (rank) => ({
@@ -303,6 +303,143 @@ describe('interpretSignal — intégration dynamicStrategies dans options.action
     expect(opts).toHaveProperty('timeframe')
     expect(opts).toHaveProperty('stopLoss')
     expect(opts).toHaveProperty('maxPain')
+  })
+})
+
+// ── buildStrategySignature ───────────────────────────────────────────────────
+
+describe('buildStrategySignature', () => {
+  it('retourne "NO_STRATEGY" si tableau vide', () => {
+    expect(buildStrategySignature([])).toBe('NO_STRATEGY')
+  })
+
+  it('retourne "NO_STRATEGY" si argument absent ou non-tableau', () => {
+    expect(buildStrategySignature(null)).toBe('NO_STRATEGY')
+    expect(buildStrategySignature(undefined)).toBe('NO_STRATEGY')
+  })
+
+  it('retourne les types triés alphabétiquement, séparés par |', () => {
+    const strategies = [
+      { type: 'VOL_CARRY',      strength: 'medium', context: '' },
+      { type: 'CASH_AND_CARRY', strength: 'high',   context: '' },
+      { type: 'VOL_EXPANSION',  strength: 'medium', context: '' },
+    ]
+    expect(buildStrategySignature(strategies)).toBe('CASH_AND_CARRY|VOL_CARRY|VOL_EXPANSION')
+  })
+
+  it('fonctionne avec un seul élément', () => {
+    expect(buildStrategySignature([{ type: 'FUNDING_REVERSAL' }])).toBe('FUNDING_REVERSAL')
+  })
+
+  it('le tri est stable et déterministe', () => {
+    const a = [{ type: 'B' }, { type: 'A' }]
+    const b = [{ type: 'A' }, { type: 'B' }]
+    expect(buildStrategySignature(a)).toBe(buildStrategySignature(b))
+  })
+})
+
+// ── buildMarketRegime ────────────────────────────────────────────────────────
+
+describe('buildMarketRegime', () => {
+  it('ivRank > 70 → HIGH_VOL', () => {
+    expect(buildMarketRegime(71, 0, 0)).toContain('HIGH_VOL')
+    expect(buildMarketRegime(100, 0, 0)).toContain('HIGH_VOL')
+  })
+
+  it('ivRank < 30 → LOW_VOL', () => {
+    expect(buildMarketRegime(29, 0, 0)).toContain('LOW_VOL')
+    expect(buildMarketRegime(0, 0, 0)).toContain('LOW_VOL')
+  })
+
+  it('30 ≤ ivRank ≤ 70 → MID_VOL', () => {
+    expect(buildMarketRegime(50, 0, 0)).toContain('MID_VOL')
+    expect(buildMarketRegime(30, 0, 0)).toContain('MID_VOL')
+    expect(buildMarketRegime(70, 0, 0)).toContain('MID_VOL')
+  })
+
+  it('funding > 15 → EXTREME_LONGS', () => {
+    expect(buildMarketRegime(50, 16, 0)).toContain('EXTREME_LONGS')
+  })
+
+  it('funding < -10 → EXTREME_SHORTS', () => {
+    expect(buildMarketRegime(50, -11, 0)).toContain('EXTREME_SHORTS')
+  })
+
+  it('-10 ≤ funding ≤ 15 → NEUTRAL_FUNDING', () => {
+    expect(buildMarketRegime(50, 0, 0)).toContain('NEUTRAL_FUNDING')
+    expect(buildMarketRegime(50, 15, 0)).toContain('NEUTRAL_FUNDING')
+    expect(buildMarketRegime(50, -10, 0)).toContain('NEUTRAL_FUNDING')
+  })
+
+  it('basisAvg > 8 → CONTANGO', () => {
+    expect(buildMarketRegime(50, 0, 9)).toContain('CONTANGO')
+  })
+
+  it('basisAvg < -2 → BACKWARDATION', () => {
+    expect(buildMarketRegime(50, 0, -3)).toContain('BACKWARDATION')
+  })
+
+  it('-2 ≤ basisAvg ≤ 8 → FLAT', () => {
+    expect(buildMarketRegime(50, 0, 0)).toContain('FLAT')
+    expect(buildMarketRegime(50, 0, 8)).toContain('FLAT')
+    expect(buildMarketRegime(50, 0, -2)).toContain('FLAT')
+  })
+
+  it('retourne une chaîne au format "VOL|FUNDING|BASIS"', () => {
+    expect(buildMarketRegime(80, 20, 10)).toBe('HIGH_VOL|EXTREME_LONGS|CONTANGO')
+    expect(buildMarketRegime(20, -15, -5)).toBe('LOW_VOL|EXTREME_SHORTS|BACKWARDATION')
+    expect(buildMarketRegime(50, 5, 3)).toBe('MID_VOL|NEUTRAL_FUNDING|FLAT')
+  })
+
+  it('null ivRank → UNKNOWN_VOL', () => {
+    expect(buildMarketRegime(null, 0, 0)).toContain('UNKNOWN_VOL')
+  })
+
+  it('null funding → UNKNOWN_FUNDING', () => {
+    expect(buildMarketRegime(50, null, 0)).toContain('UNKNOWN_FUNDING')
+  })
+
+  it('null basisAvg → UNKNOWN_BASIS', () => {
+    expect(buildMarketRegime(50, 0, null)).toContain('UNKNOWN_BASIS')
+  })
+})
+
+// ── interpretSignal — strategySignature et marketRegime exposés ──────────────
+
+describe('interpretSignal — strategySignature et marketRegime dans expert', () => {
+  it('expert contient strategySignature et marketRegime', () => {
+    const result = interpretSignal(
+      { global: 50 },
+      { dvol: dvolForRank(50), funding: { rateAnn: 7 }, basisAvg: 3 },
+    )
+    expect(result.expert).toHaveProperty('strategySignature')
+    expect(result.expert).toHaveProperty('marketRegime')
+  })
+
+  it('strategySignature = "NO_STRATEGY" quand aucune stratégie active', () => {
+    const result = interpretSignal(
+      { global: 50 },
+      { dvol: dvolForRank(50), funding: { rateAnn: 7 }, basisAvg: 3 },
+    )
+    expect(result.expert.strategySignature).toBe('NO_STRATEGY')
+  })
+
+  it('strategySignature contient les types triés quand des stratégies sont actives', () => {
+    const result = interpretSignal(
+      { global: 50 },
+      { dvol: dvolForRank(20), funding: { rateAnn: 20 }, basisAvg: 10 },
+    )
+    expect(result.expert.strategySignature).toContain('VOL_EXPANSION')
+    expect(result.expert.strategySignature).toContain('FUNDING_REVERSAL')
+    expect(result.expert.strategySignature).toContain('CASH_AND_CARRY')
+  })
+
+  it('marketRegime est au format "VOL|FUNDING|BASIS"', () => {
+    const result = interpretSignal(
+      { global: 50 },
+      { dvol: dvolForRank(80), funding: { rateAnn: 20 }, basisAvg: 10 },
+    )
+    expect(result.expert.marketRegime).toBe('HIGH_VOL|EXTREME_LONGS|CONTANGO')
   })
 })
 

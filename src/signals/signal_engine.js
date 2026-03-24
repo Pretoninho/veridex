@@ -396,7 +396,15 @@ const MAX_SIGNALS_STORED = 500
  * @returns {string} hash FNV-1a
  */
 function _hashSignal(ctx) {
-  const str = `${ctx.asset}|${ctx.score}|${ctx.recommendation}|${ctx.marketHash ?? ''}|${JSON.stringify(ctx.conditions ?? {})}`
+  const str = [
+    ctx.asset,
+    ctx.score,
+    ctx.recommendation,
+    ctx.marketHash ?? '',
+    JSON.stringify(ctx.conditions ?? {}),
+    ctx.strategySignature ?? 'NO_STRATEGY',
+    ctx.marketRegime ?? '',
+  ].join('|')
   return fnv1a(str)
 }
 

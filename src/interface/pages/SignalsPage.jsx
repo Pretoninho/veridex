@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getDVOL, getFundingRate, getRealizedVol, getFutures, getFuturePrice, getSpot } from '../../utils/api.js'
 import { computeSignal, saveSignal, hashMarketState } from '../../signals/signal_engine.js'
-import { interpretSignal }    from '../../signals/signal_interpreter.js'
+import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
 import { getOnChainSnapshot } from '../../data/providers/onchain.js'
 import { normalizeOnChain }   from '../../data/normalizers/format_data.js'
 import * as binanceProvider   from '../../data/providers/binance.js'
@@ -247,18 +247,20 @@ export default function SignalsPage({ asset }) {
       setResult(sig)
       setPositioning(sig?.positioning ?? null)
 
+      const interp = interpretSignal(sig, raw)
+      setInterpreted(interp)
+
       if (sig?.global != null) {
         saveSignal({
           asset,
-          score:          sig.global,
-          conditions:     sig.scores,
-          recommendation: sig.signal?.label ?? '—',
-          marketHash:     hashMarketState({ dvol, funding, rv, basisAvg }),
+          score:             sig.global,
+          conditions:        sig.scores,
+          recommendation:    sig.signal?.label ?? '—',
+          marketHash:        hashMarketState({ dvol, funding, rv, basisAvg }),
+          strategySignature: interp.expert.strategySignature,
+          marketRegime:      interp.expert.marketRegime,
         }).catch(() => {})
       }
-
-      const interp = interpretSignal(sig, raw)
-      setInterpreted(interp)
 
       if (sig?.global != null) {
         setHistory(prev => [...prev.slice(-19), { score: sig.global, ts: Date.now() }])

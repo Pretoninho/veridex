@@ -254,6 +254,45 @@ function _buildSituation(dvol, funding, rv, basisAvg) {
   return parts.length > 0 ? parts.join(' · ') : 'Données partielles disponibles'
 }
 
+// ── buildStrategySignature ─────────────────────────────────────────────────
+
+/**
+ * Builds a sorted, pipe-separated string of strategy types for hashing.
+ *
+ * @param {Array<{ type: string }>} strategies — array returned by strategyEngine
+ * @returns {string} e.g. "CASH_AND_CARRY|VOL_CARRY|VOL_EXPANSION" or "NO_STRATEGY"
+ */
+export function buildStrategySignature(strategies) {
+  if (!Array.isArray(strategies) || strategies.length === 0) return 'NO_STRATEGY'
+  return strategies.map(s => s.type).sort().join('|')
+}
+
+// ── buildMarketRegime ──────────────────────────────────────────────────────
+
+/**
+ * Builds a pipe-separated market regime string from key market conditions.
+ *
+ * @param {number|null} ivRank   — IV Rank (0–100)
+ * @param {number|null} funding  — annualised funding rate (%)
+ * @param {number|null} basisAvg — average basis annualised (%)
+ * @returns {string} e.g. "HIGH_VOL|EXTREME_LONGS|CONTANGO"
+ */
+export function buildMarketRegime(ivRank, funding, basisAvg) {
+  const vol   = ivRank  == null ? 'UNKNOWN_VOL'
+              : ivRank  > 70    ? 'HIGH_VOL'
+              : ivRank  < 30    ? 'LOW_VOL'
+              : 'MID_VOL'
+  const fund  = funding == null ? 'UNKNOWN_FUNDING'
+              : funding > 15    ? 'EXTREME_LONGS'
+              : funding < -10   ? 'EXTREME_SHORTS'
+              : 'NEUTRAL_FUNDING'
+  const basis = basisAvg == null ? 'UNKNOWN_BASIS'
+              : basisAvg > 8    ? 'CONTANGO'
+              : basisAvg < -2   ? 'BACKWARDATION'
+              : 'FLAT'
+  return `${vol}|${fund}|${basis}`
+}
+
 // ── Strategy Engine ────────────────────────────────────────────────────────
 
 /**
@@ -332,7 +371,9 @@ export function interpretSignal(computedSignal, rawData) {
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
   const situation  = _buildSituation(dvol, funding, rv, basisAvg)
 
-  const dynamicStrategies = strategyEngine({ ivRank, funding: fundingAnn, basisAvg, spot, maxPain })
+  const dynamicStrategies  = strategyEngine({ ivRank, funding: fundingAnn, basisAvg, spot, maxPain })
+  const strategySignature  = buildStrategySignature(dynamicStrategies)
+  const marketRegime       = buildMarketRegime(ivRank, fundingAnn, basisAvg)
 
   const spotReco    = _spotReco(score, dvol)
   const futuresReco = _futuresReco(score, funding, basisAvg, positioning)
@@ -357,6 +398,8 @@ export function interpretSignal(computedSignal, rawData) {
     },
     ivRank,
     fundingAnn,
+    strategySignature,
+    marketRegime,
   }
 
   return { expert }
