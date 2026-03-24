@@ -39,6 +39,15 @@ function _ivRank(dvol) {
   return Math.round(((dvol.current - dvol.monthMin) / range) * 100)
 }
 
+// ── Régime de volatilité ────────────────────────────────────────────────────
+
+function _getVolRegime(ivRank) {
+  if (ivRank == null) return 'NEUTRAL'
+  if (ivRank >= 70) return 'HIGH_VOL'
+  if (ivRank <= 30) return 'LOW_VOL'
+  return 'NEUTRAL'
+}
+
 // ── Recommandation Spot ──────────────────────────────────────────────────
 
 function _spotReco(score, dvol) {
@@ -127,6 +136,22 @@ function _optionsReco(score, dvol, rv, spot, maxPain) {
     ? ` · Max Pain $${maxPain.maxPainStrike.toLocaleString()} (strike réel Deribit ✓)`
     : ''
 
+  const regime = _getVolRegime(ivRank)
+
+  if (regime === 'HIGH_VOL') return {
+    signal:    'Vendre la vol',
+    action:    `${ivStr} — volatilité historiquement élevée. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.${mpStr}`,
+    timeframe: '7 à 14 jours',
+    stopLoss:  'Couper si IV Rank repasse sous 50% ou perte > 1× prime encaissée',
+    maxPain,
+  }
+  if (regime === 'LOW_VOL') return {
+    signal:    'Acheter la vol',
+    action:    `${ivStr} bas — options bon marché en achat. Long puts ~${fmtPrice(strikePut)} comme protection ou long calls spéculatifs si le support tient. Durée 14-30j pour laisser le temps à la position.${mpStr}`,
+    timeframe: '14 à 30 jours',
+    stopLoss:  'Limiter à la prime payée',
+    maxPain,
+  }
   if (score >= 80) return {
     signal:    'Vendre la vol',
     action:    `${ivStr} — volatilité historiquement élevée. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.${mpStr}`,
