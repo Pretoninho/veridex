@@ -39,6 +39,15 @@ function _ivRank(dvol) {
   return Math.round(((dvol.current - dvol.monthMin) / range) * 100)
 }
 
+// ── Régime de volatilité ────────────────────────────────────────────────────
+
+function _getVolRegime(ivRank) {
+  if (ivRank == null) return 'NEUTRAL'
+  if (ivRank >= 70) return 'HIGH_VOL'
+  if (ivRank <= 30) return 'LOW_VOL'
+  return 'NEUTRAL'
+}
+
 // ── Recommandation Spot ──────────────────────────────────────────────────
 
 function _spotReco(score, dvol) {
@@ -127,26 +136,30 @@ function _optionsReco(score, dvol, rv, spot, maxPain) {
     ? ` · Max Pain $${maxPain.maxPainStrike.toLocaleString()} (strike réel Deribit ✓)`
     : ''
 
-  if (score >= 80) return {
-    signal:    'Vendre la vol',
-    action:    `${ivStr} — volatilité historiquement élevée. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.${mpStr}`,
-    timeframe: '7 à 14 jours',
-    stopLoss:  'Couper si IV Rank repasse sous 50% ou perte > 1× prime encaissée',
-    maxPain,
-  }
-  if (score >= 60) return {
-    signal:    'Spreads vendeurs',
-    action:    `${ivStr} — bon contexte pour les spreads verticaux et covered calls. Strike call cible ~${fmtPrice(strikeCall)}. Durée 7j recommandée. Risque limité vs vente nue.${mpStr}`,
-    timeframe: '7 jours',
-    stopLoss:  'Fermer à 50% du profit max ou si prix dépasse le strike court',
-    maxPain,
-  }
-  if (score >= 40) return {
-    signal:    'Achats sélectifs',
-    action:    `${ivStr} neutre — éviter les ventes nues. Long calls ou puts si catalyseur identifié. Spreads débiteurs préférables pour limiter le coût. Strike put ~${fmtPrice(strikePut)}.${mpStr}`,
-    timeframe: 'Sélectif selon catalyseur',
-    stopLoss:  'Limiter à la prime payée (options achetées)',
-    maxPain,
+  const regime = _getVolRegime(ivRank)
+
+  if (regime !== 'LOW_VOL') {
+    if (regime === 'HIGH_VOL' || score >= 80) return {
+      signal:    'Vendre la vol',
+      action:    `${ivStr} — volatilité historiquement élevée. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.${mpStr}`,
+      timeframe: '7 à 14 jours',
+      stopLoss:  'Couper si IV Rank repasse sous 50% ou perte > 1× prime encaissée',
+      maxPain,
+    }
+    if (score >= 60) return {
+      signal:    'Spreads vendeurs',
+      action:    `${ivStr} — bon contexte pour les spreads verticaux et covered calls. Strike call cible ~${fmtPrice(strikeCall)}. Durée 7j recommandée. Risque limité vs vente nue.${mpStr}`,
+      timeframe: '7 jours',
+      stopLoss:  'Fermer à 50% du profit max ou si prix dépasse le strike court',
+      maxPain,
+    }
+    if (score >= 40) return {
+      signal:    'Achats sélectifs',
+      action:    `${ivStr} neutre — éviter les ventes nues. Long calls ou puts si catalyseur identifié. Spreads débiteurs préférables pour limiter le coût. Strike put ~${fmtPrice(strikePut)}.${mpStr}`,
+      timeframe: 'Sélectif selon catalyseur',
+      stopLoss:  'Limiter à la prime payée (options achetées)',
+      maxPain,
+    }
   }
   return {
     signal:    'Acheter la vol',
