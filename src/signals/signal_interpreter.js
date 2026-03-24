@@ -1,12 +1,9 @@
 /**
  * data_processing/signals/signal_interpreter.js
  *
- * Interprète le résultat de computeSignal en deux couches :
+ * Interprète le résultat de computeSignal :
  *
  *   EXPERT  → 3 blocs de recommandations (Spot / Futures / Options)
- *   noviceData → contexte structuré pour la génération Claude
- *
- * La couche novice finale est générée séparément par novice_generator.js.
  */
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -210,8 +207,7 @@ function _buildSituation(dvol, funding, rv, basisAvg) {
  *   asset: string
  * }} rawData
  * @returns {{
- *   expert: object,
- *   noviceData: object
+ *   expert: object
  * }}
  */
 export function interpretSignal(computedSignal, rawData) {
@@ -219,7 +215,7 @@ export function interpretSignal(computedSignal, rawData) {
   const signalMeta  = computedSignal?.signal ?? null
   const maxPain     = computedSignal?.maxPain ?? null
   const positioning = computedSignal?.positioning ?? null
-  const { dvol, funding, rv, basisAvg, spot, asset } = rawData ?? {}
+  const { dvol, funding, rv, basisAvg, spot } = rawData ?? {}
 
   const ivRank     = _ivRank(dvol)
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
@@ -245,28 +241,5 @@ export function interpretSignal(computedSignal, rawData) {
     fundingAnn,
   }
 
-  // Données nécessaires au générateur novice
-  const noviceData = {
-    asset:         asset ?? 'BTC',
-    spotPrice:     spot,
-    label:         signalMeta?.label ?? '—',
-    score,
-    ivRank,
-    funding:       fundingAnn,
-    situation,
-    estimatedGain: calculateGainExample({ score, funding: fundingAnn }),
-    strikeCall:    spot != null ? Math.round(spot * 1.08) : null,
-    strikePut:     spot != null ? Math.round(spot * 0.92) : null,
-    spotSignal:    spotReco.signal,
-    spotAction:    spotReco.action,
-    futuresSignal: futuresReco.signal,
-    futuresAction: futuresReco.action,
-    optionsSignal: optionsReco.signal,
-    optionsAction: optionsReco.action,
-    duration:      optionsReco.timeframe,
-    maxPain,
-    maxPainNovice: maxPain?.interpretation?.novice ?? null,
-  }
-
-  return { expert, noviceData }
+  return { expert }
 }
