@@ -432,7 +432,7 @@ function SettlementEntry({ entry }) {
           ['Hash',  entry.hash,                              'var(--font-mono)'],
           ['Asset', raw.asset,                              null],
           ['Prix',  fmtPrice(raw.settlementPrice, raw.asset), null],
-          ['Source', raw.source ?? 'deribit',               null],
+          ['Date Deribit', raw.settlementDate ?? raw.dateKey, null],
         ].map(([label, val, font]) => (
           <div key={label}>
             <div style={{ fontFamily: 'var(--font-body)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>

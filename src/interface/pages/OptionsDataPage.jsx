@@ -213,6 +213,7 @@ function SettlementRow({ settlement: s, asset, isLast }) {
           {[
             ['vs Max Pain', s.maxPainDeltaLabel ? `${s.maxPainDeltaLabel}${s.maxPainStrike ? ` ($${Number(s.maxPainStrike).toLocaleString('en-US')})` : ''}` : null],
             ['IV Rank',     s.ivRank != null ? `${s.ivRank}` : null],
+            ['Date Deribit', s.settlementDate ?? null],
             ['Hash',        s.hash],
             ['Capture',     s.isLate ? 'Différée ⚠' : 'À l\'heure ✓'],
           ].map(([label, val]) => (
