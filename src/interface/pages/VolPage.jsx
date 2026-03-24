@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { getDVOL, getSpot, getInstruments, getOrderBook } from '../../utils/api.js'
 import { analyzeIV } from '../../core/volatility/iv_rank.js'
 import { calcSkew25d, interpretSkew, calcSmile } from '../../core/volatility/skew.js'
-import { calcOptionGreeks } from '../utils/greeks.js'
+import { calcOptionGreeks } from '../../utils/greeks.js'
 
 export default function VolPage() {
   const [asset, setAsset] = useState('BTC')

@@ -11,11 +11,34 @@ options, futures, funding, IV, Greeks, signaux — données en temps réel depui
 | **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest restructuré en 3 sous-sections (Deribit Options · Binance Perps · Signal Combiné), sentiment Long/Short (Binance), liquidations, countdown prochain fixing funding |
 | **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI, prix de règlement, onglet Signaux avec couche Expert/Simple (Claude API) |
 | **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain · Positionnement), tableau positionnement croisé Retail/Institutionnels (mode Expert), 3 blocs recommandations indépendants (Spot / Futures / Options), couche Expert et Simple (6 tons paramétrables, génération Claude API) |
-| **Trade** | *(en développement)* |
+| **Dual Investment** | ✅ Analyse des opportunités DI, structure à terme, basis |
+| **Volatilité** | ✅ IV/RV, Greeks, skew 25-delta, smile, term structure |
+| **Chaîne Options** | ✅ Visualisation strikes Deribit, Greeks ATM, évaluation RL |
+| **IV Live** | ✅ Tracker IV temps réel, alertes spike, historique |
+| **Trade** | ✅ Gestion positions, P&L simulation, historique |
 | **On-Chain** | Score on-chain composite, Mempool, Exchange Flows, Mining — couche Expert/Simple |
 | **Audit** | Journal de hashage unifié (Signaux · Anomalies · Patterns · Cache), Vue générale avec stats et description des sources. Accessible via l'icône ⚙ dans le header. |
 
 Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour tous les onglets simultanément.
+
+---
+
+## Statut des fonctionnalités
+
+| Onglet | Statut | Contenu |
+|---|---|---|
+| **Market** | ✅ Complet | Prix spot 3 exchanges, VWAP, spreads cross-exchange |
+| **Dérivés** | ✅ Complet | Funding, futures, OI, liquidations, countdown funding |
+| **Options** | ✅ Complet | IV cross-exchange, Greeks, OI multi-source |
+| **Signaux** | ✅ Complet | Score composite, positionnement, recommandations IA |
+| **Dual Investment** | ✅ Complet | Analyse opportunités DI, basis structure, évaluation |
+| **Volatilité** | ✅ Complet | IV/RV, Greeks, skew, smile, term structure ATM |
+| **Chaîne Options** | ✅ Complet | Chaîne strikes, Greeks temps réel, RL evaluation |
+| **IV Live** | ✅ Complet | Tracker temps réel, alertes, historique CSV |
+| **Trade** | ✅ Complet | Gestion positions, P&L simulation, historique |
+| **On-Chain** | ✅ Complet | Composite score, Mempool, Exchange Flows, Mining |
+| **Audit** | ✅ Complet | Journal de hashage, anomalies, patterns, stats cache |
+| **Notifications** | ✅ Complet | Configuration seuils, cooldowns, historique |
 
 ---
 
@@ -65,6 +88,10 @@ src/
 │   ├── DerivativesPage.jsx         ← Onglet Dérivés (+ countdown funding)
 │   ├── OptionsDataPage.jsx         ← Onglet Options (Analyse · Signaux Expert/Simple · Journal)
 │   ├── SignalsPage.jsx             ← Onglet Signaux (Expert/Simple · 3 blocs · copie)
+│   ├── DIPage.jsx                  ← Onglet Dual Investment (opportunités DI, basis, term structure)
+│   ├── VolPage.jsx                 ← Onglet Volatilité (IV/RV, Greeks, skew, smile)
+│   ├── ChainPage.jsx               ← Onglet Chaîne Options (strikes, Greeks, RL evaluation)
+│   ├── TrackerPage.jsx             ← Onglet IV Live (tracker temps réel, alertes, historique)
 │   ├── OnChainPage.jsx             ← Onglet On-Chain
 │   ├── TradePage.jsx               ← Onglet Trade
 │   └── AuditPage.jsx               ← Onglet Audit (Vue générale · Journal de hashage)
@@ -176,6 +203,38 @@ VITE_CRYPTOQUANT_API_KEY=           # Optionnel — exchange flows on-chain (tie
 
 ---
 
+## Installation
+
+### Prérequis
+- Node.js 18+
+- npm ou yarn
+
+### Setup local
+
+```bash
+# Cloner le repo
+git clone https://github.com/Pretoninho/veridex.git
+cd veridex
+
+# Installer les dépendances
+npm install
+
+# Configurer les variables d'environnement
+cp .env.example .env
+# Éditer .env avec vos API keys (Deribit, Binance, Coinbase, etc.)
+
+# Démarrer en développement
+npm run dev
+
+# Build pour production
+npm run build
+```
+
+### Variables d'environnement requises
+Voir `.env.example` pour la liste complète.
+
+---
+
 ## 🚀 Déploiement GitHub Pages
 
 Le workflow `.github/workflows/deploy.yml` se déclenche automatiquement à chaque push sur `main` :
@@ -183,6 +242,22 @@ Le workflow `.github/workflows/deploy.yml` se déclenche automatiquement à chaq
 2. Upload du dossier `dist/` sur GitHub Pages
 
 Dans **Settings → Pages → Source → GitHub Actions**.
+
+### Depuis GitHub Actions
+Un workflow est fourni pour déployer automatiquement sur GitHub Pages.
+
+1. Activer GitHub Pages dans Settings → Pages
+2. Sélectionner branche `main` et dossier `dist`
+3. Push sur main — le build se lance automatiquement
+
+### Build manuel
+```bash
+npm run build
+# Les fichiers sont dans le dossier dist/
+```
+
+### URL de déploiement
+https://pretoninho.github.io/veridex/
 
 ---
 
