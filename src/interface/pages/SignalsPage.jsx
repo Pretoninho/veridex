@@ -1,11 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getDVOL, getFundingRate, getRealizedVol, getFutures, getFuturePrice, getSpot } from '../../utils/api.js'
-import { computeSignal, saveSignal, hashMarketState } from '../../signals/signal_engine.js'
+import { fetchSignals, fetchMarket } from '../../api/backend.js'
+import { saveSignal, hashMarketState } from '../../signals/signal_engine.js'
 import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
-import { getOnChainSnapshot } from '../../data/providers/onchain.js'
-import { normalizeOnChain }   from '../../data/normalizers/format_data.js'
-import * as binanceProvider   from '../../data/providers/binance.js'
-import * as deribitProvider   from '../../data/providers/deribit.js'
 import { generateInsight }    from '../../signals/insight_generator.js'
 
 // ── Sous-composants ──────────────────────────────────────────────────────────
@@ -208,42 +204,15 @@ export default function SignalsPage({ asset }) {
     setLoading(true)
     setError(null)
     try {
-      const [dvol, funding, rv, spot, futures, onchainRaw, sentiment, dOI] = await Promise.all([
-        getDVOL(asset).catch(() => null),
-        getFundingRate(asset).catch(() => null),
-        getRealizedVol(asset).catch(() => null),
-        getSpot(asset).catch(() => null),
-        getFutures(asset).catch(() => []),
-        getOnChainSnapshot(asset).catch(() => null),
-        binanceProvider.getLongShortRatio(asset).catch(() => null),
-        deribitProvider.getOpenInterest(asset).catch(() => null),
+      const [sig, market] = await Promise.all([
+        fetchSignals(asset),
+        fetchMarket(asset),
       ])
 
-      const onChainScore = onchainRaw ? (normalizeOnChain(onchainRaw)?.composite?.onChainScore ?? null) : null
-      const lsRatio      = sentiment?.ratio ?? null
-      const pcRatio      = dOI?.putCallRatio ?? null
-
-      let basisAvg = null
-      if (spot && futures.length) {
-        const prices = await Promise.all(
-          futures
-            .filter(f => !f.instrument_name.includes('PERPETUAL'))
-            .map(async f => {
-              const price = await getFuturePrice(f.instrument_name).catch(() => null)
-              if (!price) return null
-              const days = Math.max(1, Math.round((f.expiration_timestamp - Date.now()) / 86400000))
-              const basis = (price - spot) / spot * 100
-              return basis / days * 365
-            })
-        )
-        const valid = prices.filter(p => p != null)
-        if (valid.length) basisAvg = valid.reduce((s, v) => s + v, 0) / valid.length
-      }
-
+      const { dvol = null, funding = null, rv = null, basisAvg = null, spot = null } = market ?? {}
       const raw = { dvol, funding, rv, basisAvg, spot, asset }
       setRawData(raw)
 
-      const sig = computeSignal({ dvol, funding, rv, basisAvg, spot, asset, onChainScore, lsRatio, pcRatio })
       setResult(sig)
       setPositioning(sig?.positioning ?? null)
 
