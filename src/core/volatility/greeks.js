@@ -89,23 +89,3 @@ export function blackScholes(type, S, K, T, r, sigma) {
   if (type === 'call') return S * normalCdf(d1) - K * Math.exp(-r * T) * normalCdf(d2)
   return K * Math.exp(-r * T) * normalCdf(-d2) - S * normalCdf(-d1)
 }
-
-/**
- * Taux DI annualisé théorique calculé via Black-Scholes.
- *
- * @param {number} iv       — volatilité implicite en %
- * @param {number} S        — spot
- * @param {number} K        — strike
- * @param {number} days     — durée en jours
- * @param {'buy-low'|'sell-high'} type
- * @returns {number|null}   — APY annualisé en %
- */
-export function calcDIRateBS(iv, S, K, days, type) {
-  if (!iv || !days) return null
-  const T = days / 365
-  const sigma = iv / 100
-  const optType = type === 'buy-low' ? 'put' : 'call'
-  const premium = blackScholes(optType, S, K, T, 0, sigma)
-  const premiumPct = premium / (type === 'buy-low' ? K : S) * 100
-  return premiumPct * (365 / days)
-}

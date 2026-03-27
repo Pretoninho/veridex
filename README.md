@@ -11,7 +11,6 @@ options, futures, funding, IV, Greeks, signaux — données en temps réel depui
 | **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest restructuré en 3 sous-sections (Deribit Options · Binance Perps · Signal Combiné), sentiment Long/Short (Binance), liquidations, countdown prochain fixing funding |
 | **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI, prix de règlement, onglet Signaux avec couche Expert/Simple (Claude API) |
 | **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain · Positionnement), tableau positionnement croisé Retail/Institutionnels (mode Expert), 3 blocs recommandations indépendants (Spot / Futures / Options), couche Expert et Simple (6 tons paramétrables, génération Claude API) |
-| **Dual Investment** | ✅ Analyse des opportunités DI, structure à terme, basis |
 | **Volatilité** | ✅ IV/RV, Greeks, skew 25-delta, smile, term structure |
 | **Chaîne Options** | ✅ Visualisation strikes Deribit, Greeks ATM, évaluation RL |
 | **IV Live** | ✅ Tracker IV temps réel, alertes spike, historique |
@@ -31,7 +30,6 @@ Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour t
 | **Dérivés** | ✅ Complet | Funding, futures, OI, liquidations, countdown funding |
 | **Options** | ✅ Complet | IV cross-exchange, Greeks, OI multi-source |
 | **Signaux** | ✅ Complet | Score composite, positionnement, recommandations IA |
-| **Dual Investment** | ✅ Complet | Analyse opportunités DI, basis structure, évaluation |
 | **Volatilité** | ✅ Complet | IV/RV, Greeks, skew, smile, term structure ATM |
 | **Chaîne Options** | ✅ Complet | Chaîne strikes, Greeks temps réel, RL evaluation |
 | **IV Live** | ✅ Complet | Tracker temps réel, alertes, historique CSV |
@@ -88,7 +86,6 @@ src/
 │   ├── DerivativesPage.jsx         ← Onglet Dérivés (+ countdown funding)
 │   ├── OptionsDataPage.jsx         ← Onglet Options (Analyse · Signaux Expert/Simple · Journal)
 │   ├── SignalsPage.jsx             ← Onglet Signaux (Expert/Simple · 3 blocs · copie)
-│   ├── DIPage.jsx                  ← Onglet Dual Investment (opportunités DI, basis, term structure)
 │   ├── VolPage.jsx                 ← Onglet Volatilité (IV/RV, Greeks, skew, smile)
 │   ├── ChainPage.jsx               ← Onglet Chaîne Options (strikes, Greeks, RL evaluation)
 │   ├── TrackerPage.jsx             ← Onglet IV Live (tracker temps réel, alertes, historique)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcOptionGreeks, blackScholes, calcDIRateBS } from './greeks.js'
+import { calcOptionGreeks, blackScholes } from './greeks.js'
 
 // ── calcOptionGreeks ──────────────────────────────────────────────────────────
 
@@ -117,41 +117,5 @@ describe('blackScholes', () => {
   it('prix > 0 pour call ATM', () => {
     const price = blackScholes('call', 50000, 50000, 7 / 365, 0, 0.65)
     expect(price).toBeGreaterThan(0)
-  })
-})
-
-// ── calcDIRateBS ──────────────────────────────────────────────────────────────
-
-describe('calcDIRateBS', () => {
-  it('retourne null si iv=0', () => {
-    expect(calcDIRateBS(0, 50000, 52000, 7, 'sell-high')).toBeNull()
-  })
-
-  it('retourne null si days=0', () => {
-    expect(calcDIRateBS(65, 50000, 52000, 0, 'sell-high')).toBeNull()
-  })
-
-  it('sell-high retourne un taux positif', () => {
-    const rate = calcDIRateBS(65, 50000, 52000, 7, 'sell-high')
-    expect(rate).toBeGreaterThan(0)
-  })
-
-  it('buy-low retourne un taux positif', () => {
-    const rate = calcDIRateBS(65, 50000, 48000, 7, 'buy-low')
-    expect(rate).toBeGreaterThan(0)
-  })
-
-  it('taux plus élevé avec IV plus haute', () => {
-    const low  = calcDIRateBS(40, 50000, 52000, 7, 'sell-high')
-    const high = calcDIRateBS(80, 50000, 52000, 7, 'sell-high')
-    expect(high).toBeGreaterThan(low)
-  })
-
-  it('taux plus élevé avec durée plus courte (annualisé)', () => {
-    const short = calcDIRateBS(65, 50000, 52000, 3,  'sell-high')
-    const long  = calcDIRateBS(65, 50000, 52000, 30, 'sell-high')
-    // Annualisé, les durées courtes ont des taux plus élevés sur options OTM
-    expect(short).toBeDefined()
-    expect(long).toBeDefined()
   })
 })

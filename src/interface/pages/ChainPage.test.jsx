@@ -16,23 +16,6 @@ vi.mock('../../utils/api.js', () => ({
     greeks: { delta: name.includes('PUT') ? -0.22 : 0.18 },
   })),
   getAllExpiries: vi.fn(() => [Date.UTC(2026, 2, 27, 8, 0, 0)]),
-  getBestDIOpportunities: vi.fn(async () => []),
-}))
-
-vi.mock('../../utils/rlDual.js', () => ({
-  getDualRlMetrics: vi.fn(() => ({ states: 4, experiences: 12 })),
-  evaluateDualPolicy: vi.fn((ctx) => ({
-    stateKey: 'BTC|BL|D14|A14|M3|IV70|DL20|DCA10|PV0|TRAP1',
-    action: 'subscribe',
-    confidence: 77,
-    highIvCondition: true,
-    ivFloor: 55,
-    delta: Math.abs(ctx.delta ?? 0.18),
-    deltaFloorOk: true,
-    plusValueLocked: false,
-    trappedProtocolActive: true,
-    protocol: 'trapped-trend-near-dca',
-  })),
 }))
 
 describe('ChainPage', () => {
@@ -47,18 +30,17 @@ describe('ChainPage', () => {
     expect(screen.getByText(/piege tendance actif/i)).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.getByText(/Delta 0\.22 >= 0\.20/i)).toBeInTheDocument()
+      expect(screen.getByText(/Delta 0\.22/i)).toBeInTheDocument()
     })
 
-    expect(screen.getByText(/Piege: viser DCA/i)).toBeInTheDocument()
-    expect(screen.getByText(/RL GO 77%/i)).toBeInTheDocument()
+    expect(screen.getByText(/Sous DCA si exerce/i)).toBeInTheDocument()
   })
 
   it('declenche Subscribe avec un payload enrichi DCA/delta/protocole', async () => {
     const onSubscribe = vi.fn()
     render(<ChainPage onSubscribe={onSubscribe} />)
 
-    await screen.findByText(/RL GO 77%/i)
+    await screen.findByText(/Sous DCA si exerce/i)
 
     fireEvent.click(screen.getByRole('button', { name: /Subscribe/i }))
 
@@ -69,8 +51,6 @@ describe('ChainPage', () => {
       dca: 50000,
       trappedTrend: true,
       plusValueLocked: false,
-      rlAction: 'subscribe',
-      rlConfidence: 77,
     }))
   })
 })

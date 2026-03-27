@@ -7,7 +7,7 @@
  * - History (metric history, percentile calculations)
  */
 
-export { calcOptionGreeks, blackScholes, calcDIRateBS } from './volatility/greeks.js'
+export { calcOptionGreeks, blackScholes } from './volatility/greeks.js'
 export { calcIVRank, calcIVPercentile, detectIVSpike, interpretIVRank, analyzeIV } from './volatility/iv_rank.js'
 export { calcSkew25d, calcSmile, interpretSkew } from './volatility/skew.js'
 export { parseInstrument, calculateMaxPain, calculateMaxPainByExpiry, interpretMaxPain } from './volatility/max_pain.js'
@@ -15,10 +15,7 @@ export { parseInstrument, calculateMaxPain, calculateMaxPainByExpiry, interpretM
 export {
   calcBasis,
   annualizeBasis,
-  calcDIRateSimple,
   analyzeTermStructure,
-  calcTermStructureSignal,
-  findBestDIExpiry,
 } from './market_structure/term_structure.js'
 
 export {
