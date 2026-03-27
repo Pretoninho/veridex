@@ -1,67 +1,72 @@
 // analytics/strategy_engine.js
 //
-// Cerveau de trading structuré :
-//   • sélection automatique des meilleurs patterns (backtest interne)
-//   • filtrage adaptatif selon le régime de volatilité (DVOL)
-//   • position sizing Kelly simplifié
-//   • contrôle du drawdown
-//   • score EV pondéré par DVOL
+// Moteur de stratégie de trading structuré.
+//
+// Fournit :
+//   1. Sélection automatique des meilleurs patterns (backtest)
+//   2. Filtrage adaptatif selon la volatilité (DVOL)
+//   3. Position sizing via Kelly simplifié
+//   4. Contrôle du drawdown
+//   5. Score EV final ajusté au régime de marché
 
 import { getAllPatterns, computeAdvancedStats } from '../signals/market_fingerprint.js'
 
-// ── 1. Sélection des meilleurs patterns ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 1. Sélection automatique des meilleurs patterns
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Récupère et classe les patterns par score (EV × winrate × log(occurrences)).
- * Retourne les 10 meilleurs patterns avec des données suffisantes (24h).
+ * Récupère tous les patterns enregistrés et les classe par score composite.
+ * Score = EV × winrate × log(occurrences + 1)
  *
+ * @param {{ timeframe?: '1h'|'24h'|'7d', topN?: number }} [options]
  * @returns {Promise<Array<{
  *   id: string,
  *   ev: number,
  *   winrate: number,
- *   occurrences: number,
  *   rewardRisk: number|null,
+ *   occurrences: number,
  *   score: number,
  * }>>}
  */
-export async function selectBestPatterns() {
+export async function selectBestPatterns({ timeframe = '24h', topN = 10 } = {}) {
   const patterns = await getAllPatterns()
 
   return patterns
     .map(p => {
-      const tfStats = p.patternStats?.['24h']
-      const advanced = computeAdvancedStats(tfStats)
+      const tfStat = p.patternStats?.[timeframe]
+      if (!tfStat) return null
+
+      const advanced = computeAdvancedStats(tfStat)
       if (!advanced) return null
 
-      const ev          = advanced.expectedValue || 0
-      const winrate     = advanced.probUp         || 0
-      const occurrences = p.occurrences           || 0
+      const ev          = advanced.expectedValue ?? 0
+      const winrate     = advanced.probUp         ?? 0
+      const rewardRisk  = advanced.riskReward     ?? null
+      const occurrences = p.occurrences           ?? 0
 
       return {
-        id:        p.hash,
+        id: p.hash,
         ev,
         winrate,
+        rewardRisk,
         occurrences,
-        rewardRisk: advanced.riskReward ?? null,
-        score:      ev * winrate * Math.log(occurrences + 1),
+        score: ev * winrate * Math.log(occurrences + 1),
       }
     })
     .filter(Boolean)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 10)
+    .slice(0, topN)
 }
 
-// ── 2. Filtrage adaptatif selon DVOL ─────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 2. Filtrage adaptatif selon le régime de volatilité (DVOL)
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Retourne les seuils minimaux d'EV et de winrate selon le niveau de DVOL.
+ * Retourne les seuils EV et winrate adaptés au niveau de DVOL.
  *
- * Régimes :
- *   DVOL < 40  → marché calme  : exiger un edge plus fort
- *   DVOL < 70  → régime normal : seuils standards
- *   DVOL ≥ 70  → forte vola    : légèrement plus strict pour limiter le risque
- *
- * @param {number} dvol — DVOL actuel (ex: 55)
+ * @param {number} dvol — DVOL index (Deribit Volatility Index)
  * @returns {{ minEV: number, minWinrate: number }}
  */
 export function adaptThresholds(dvol) {
@@ -75,36 +80,36 @@ export function adaptThresholds(dvol) {
 }
 
 /**
- * Filtre les patterns en fonction des seuils adaptatifs calculés à partir du DVOL.
+ * Filtre une liste de patterns selon les seuils adaptatifs issus du DVOL.
  *
  * @param {Array<{ ev: number, winrate: number }>} patterns
  * @param {number} dvol
- * @returns {Array}
+ * @returns {Array<{ ev: number, winrate: number }>}
  */
 export function filterPatterns(patterns, dvol) {
   const { minEV, minWinrate } = adaptThresholds(dvol)
 
   return patterns.filter(p =>
-    p.ev      > minEV &&
+    p.ev > minEV &&
     p.winrate > minWinrate
   )
 }
 
-// ── 3. Position sizing — Kelly simplifié ─────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 3. Position sizing — Kelly simplifié
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Calcule la taille de position selon le critère de Kelly simplifié.
- * Plafonnée à 20 % du capital pour limiter l'exposition maximale.
- *
- * Kelly = (winrate × (R/R + 1) − 1) / R/R
+ * Calcule la taille de position en unités de balance via Kelly fractionné.
+ * Le résultat est plafonné à 20 % du capital (cap direct à 0.2).
  *
  * @param {{ winrate?: number, rewardRisk?: number }} signal
  * @param {number} balance — capital disponible
- * @returns {number} — montant en devise à allouer
+ * @returns {number} — montant à allouer
  */
 export function computePositionSize(signal, balance) {
-  const winrate = signal.winrate    || 0.5
-  const rr      = signal.rewardRisk || 1
+  const winrate = signal.winrate  ?? 0.5
+  const rr      = signal.rewardRisk ?? 1
 
   const kelly     = (winrate * (rr + 1) - 1) / rr
   const safeKelly = Math.max(0, Math.min(kelly, 0.2))
@@ -112,38 +117,42 @@ export function computePositionSize(signal, balance) {
   return balance * safeKelly
 }
 
-// ── 4. Contrôle du drawdown ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 4. Contrôle du drawdown
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Retourne un facteur multiplicatif [0 ; 1] appliqué à la taille de position
- * en fonction du drawdown courant par rapport au pic de capital.
+ * Retourne un facteur multiplicatif de réduction de taille basé sur le drawdown.
  *
- *   DD < 20 % → pas de réduction
- *   DD ≥ 20 % → taille réduite à 50 %
- *   DD ≥ 30 % → mode survie : taille réduite à 20 %
+ * - dd > 30 % → mode survie (facteur 0.2)
+ * - dd > 20 % → réduction modérée (facteur 0.5)
+ * - sinon     → nominal (facteur 1)
  *
  * @param {number} balance — capital actuel
- * @param {number} peak    — capital maximum historique
+ * @param {number} peak    — capital au plus haut historique
  * @returns {number} — facteur entre 0 et 1
  */
 export function applyDrawdownControl(balance, peak) {
-  if (!peak || peak <= 0) return 1
+  if (peak <= 0) return 1
 
   const dd = (peak - balance) / peak
 
-  if (dd >= 0.3) return 0.2
-  if (dd >= 0.2) return 0.5
+  if (dd > 0.3) return 0.2
+  if (dd > 0.2) return 0.5
+
   return 1
 }
 
-// ── 5. Score EV final pondéré par DVOL ───────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 5. Score EV final ajusté au régime DVOL
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Score de décision final : EV × winrate, pondéré par le régime DVOL.
+ * Calcule le score EV final en pondérant par le régime de volatilité.
  *
- *   DVOL < 40  → dvolFactor = 0.7  (marché calme : edge moins fiable)
- *   DVOL < 70  → dvolFactor = 1.0  (régime normal)
- *   DVOL ≥ 70  → dvolFactor = 0.8  (forte vola : plus de risque de gap)
+ * - DVOL < 40 : marché calme, on réduit la confiance (facteur 0.7)
+ * - DVOL < 70 : régime normal                         (facteur 1)
+ * - DVOL ≥ 70 : haute volatilité, on tempère          (facteur 0.8)
  *
  * @param {{ ev: number, winrate: number }} signal
  * @param {number} dvol
@@ -152,23 +161,27 @@ export function applyDrawdownControl(balance, peak) {
 export function computeFinalScore(signal, dvol) {
   const dvolFactor =
     dvol < 40 ? 0.7 :
-    dvol < 70 ? 1.0 :
-                0.8
+    dvol < 70 ? 1   :
+    0.8
 
   return signal.ev * signal.winrate * dvolFactor
 }
 
-// ── 6. Pipeline complet ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// 6. Pipeline — sélection + filtrage
+// ─────────────────────────────────────────────────────────────
 
 /**
- * Sélectionne les meilleurs patterns et les filtre selon le DVOL courant.
+ * Sélectionne les meilleurs patterns pour un timeframe donné puis les filtre
+ * selon les seuils adaptatifs issus du DVOL courant.
  * Point d'entrée principal du pipeline stratégie.
  *
- * @param {number} dvol — DVOL actuel
- * @returns {Promise<Array>} — patterns filtrés prêts à trader
+ * @param {number} dvol                              — DVOL actuel
+ * @param {{ timeframe?: '1h'|'24h'|'7d', topN?: number }} [options]
+ * @returns {Promise<Array>}                         — patterns filtrés prêts à trader
  */
-export async function selectAndFilter(dvol) {
-  const best     = await selectBestPatterns()
+export async function selectAndFilter(dvol, options = {}) {
+  const best     = await selectBestPatterns(options)
   const filtered = filterPatterns(best, dvol)
   return filtered
 }
