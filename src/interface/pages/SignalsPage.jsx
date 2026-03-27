@@ -3,6 +3,7 @@ import { fetchSignals, fetchMarket } from '../../api/backend.js'
 import { saveSignal, hashMarketState } from '../../signals/signal_engine.js'
 import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
 import { generateInsight }    from '../../signals/insight_generator.js'
+import { getAllPatterns, computeAdvancedStats } from '../../signals/market_fingerprint.js'
 
 // ── Hook rafraîchissement automatique ────────────────────────────────────────
 
@@ -106,7 +107,136 @@ function useInsight(metric, value, context, deps = []) {
   return { insight, loadingI }
 }
 
-// Bouton copie rapide
+// ── AlertBanner — signal fort détecté ────────────────────────────────────────
+
+function AlertBanner({ score, label, onDismiss }) {
+  if (!score || !label) return null
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      background: 'rgba(0,229,160,.1)', border: '1px solid rgba(0,229,160,.35)',
+      borderRadius: 10, padding: '10px 14px', marginBottom: 14,
+      animation: 'fadeIn .3s ease',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 16 }}>🚨</span>
+        <div>
+          <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: 'var(--call)' }}>
+            Signal fort détecté — {score}/100
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{label}</div>
+        </div>
+      </div>
+      <button
+        onClick={onDismiss}
+        aria-label="Fermer l'alerte"
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: '0 4px',
+        }}
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
+// ── TopPatterns — top 5 patterns par espérance à 24h ─────────────────────────
+
+function TopPatterns() {
+  const [patterns, setPatterns] = useState([])
+  const [loading, setLoading]   = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    getAllPatterns()
+      .then(all => {
+        const ranked = all
+          .map(p => ({
+            hash:        p.hash,
+            occurrences: p.occurrences,
+            config:      p.config,
+            ev24h:       computeAdvancedStats(p.patternStats?.['24h'])?.expectedValue ?? null,
+            probUp:      computeAdvancedStats(p.patternStats?.['24h'])?.probUp ?? null,
+          }))
+          .filter(p => p.ev24h !== null)
+          .sort((a, b) => b.ev24h - a.ev24h)
+          .slice(0, 5)
+        setPatterns(ranked)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+      height: 90, animation: 'shimmer 1.4s infinite',
+      backgroundImage: 'linear-gradient(90deg, transparent 25%, rgba(255,255,255,.04) 50%, transparent 75%)',
+      backgroundSize: '200% 100%',
+    }} />
+  )
+
+  if (patterns.length === 0) return null
+
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, overflow: 'hidden', marginBottom: 14,
+    }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{
+          fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+          fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
+        }}>
+          🏆 Top Patterns — Espérance 24h
+        </div>
+      </div>
+      {patterns.map((p, i) => {
+        const evColor = p.ev24h > 0 ? 'var(--call)' : 'var(--put)'
+        const probPct = p.probUp != null ? Math.round(p.probUp * 100) : null
+        return (
+          <div key={p.hash} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 16px',
+            borderBottom: i < patterns.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 11,
+                color: 'var(--text-muted)', width: 18,
+              }}>
+                #{i + 1}
+              </span>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text)', fontWeight: 700 }}>
+                  EV : <span style={{ color: evColor }}>
+                    {p.ev24h > 0 ? '+' : ''}{p.ev24h.toFixed(2)}%
+                  </span>
+                </div>
+                {probPct != null && (
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
+                    {probPct}% haussier
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{
+              fontSize: 10, color: 'var(--text-muted)',
+              background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '3px 8px',
+            }}>
+              {p.occurrences} obs.
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+
 function CopyButton({ getText, style }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
@@ -221,6 +351,10 @@ export default function SignalsPage({ asset }) {
   // Positioning
   const [positioning, setPositioning] = useState(null)
 
+  // Alerte signal fort
+  const [alertBanner, setAlertBanner] = useState(null)
+  const lastAlertedSignal = useRef(null)
+
   // ── Chargement du signal ──────────────────────────────────────────────────
 
   const load = useCallback(async () => {
@@ -270,14 +404,29 @@ export default function SignalsPage({ asset }) {
   // Auto-rafraîchissement toutes les 5 minutes
   useInterval(load, 5 * 60 * 1000)
 
+  // ── Alerte signal fort ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (result?.global == null) return
+    const score  = result.global
+    const label  = result.signal?.label ?? ''
+    const sigKey = `${asset}:${score}:${label}`
+
+    if (score > 70 && sigKey !== lastAlertedSignal.current) {
+      lastAlertedSignal.current = sigKey
+      setAlertBanner({ score, label })
+    }
+  }, [asset, result])
+
   // ── Variables UI ──────────────────────────────────────────────────────────
 
-  const signal  = result?.signal
-  const scores  = result?.scores
-  const global  = result?.global
-  const expert  = interpreted?.expert
-  const recos   = expert?.recommendations
-  const gColor  = scoreColor(global)
+  const signal     = result?.signal
+  const scores     = result?.scores
+  const global     = result?.global
+  const dvolFactor = result?.dvolFactor ?? 1
+  const expert     = interpreted?.expert
+  const recos      = expert?.recommendations
+  const gColor     = scoreColor(global)
 
   // Insights Claude
   const { insight: insightScore,   loadingI: loadingScore }   = useInsight('global_score', global,                     { asset }, [asset, global])
@@ -328,6 +477,14 @@ export default function SignalsPage({ asset }) {
         }}>
           {error}
         </div>
+      )}
+
+      {alertBanner && (
+        <AlertBanner
+          score={alertBanner.score}
+          label={alertBanner.label}
+          onDismiss={() => setAlertBanner(null)}
+        />
       )}
 
       {/* ── Score global ── */}
@@ -612,6 +769,22 @@ export default function SignalsPage({ asset }) {
                     </div>
                   </div>
                 ))}
+                {dvolFactor !== 1 && (
+                  <div style={{
+                    marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.04)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Filtre DVOL actif</span>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 11,
+                      color: dvolFactor < 1 ? 'var(--atm)' : 'var(--text-muted)',
+                      background: 'rgba(255,215,0,.06)', border: '1px solid rgba(255,215,0,.2)',
+                      borderRadius: 6, padding: '2px 8px',
+                    }}>
+                      ×{dvolFactor} {dvolFactor < 1 ? (rawData.dvol?.current < 40 ? '⚡ Calme' : '🌊 Agité') : ''}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -636,6 +809,9 @@ export default function SignalsPage({ asset }) {
               </svg>
             </div>
           )}
+
+          {/* Top Patterns */}
+          <TopPatterns />
         </>
       )}
 

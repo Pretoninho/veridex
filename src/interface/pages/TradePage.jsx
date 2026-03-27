@@ -1,6 +1,79 @@
 import { useState, useEffect } from 'react'
 import { getSpot } from '../../utils/api.js'
 
+// ── Equity Chart ──────────────────────────────────────────────────────────────
+
+/**
+ * Graphique SVG de la performance cumulée (equity curve) basé sur l'historique
+ * des trades settlés.
+ */
+function EquityChart({ history }) {
+  const sorted = [...history]
+    .filter(t => t.settledTs != null)
+    .sort((a, b) => a.settledTs - b.settledTs)
+
+  if (sorted.length < 2) return null
+
+  const points = sorted.reduce((acc, t, i) => {
+    const prev = i === 0 ? 0 : acc[i - 1].cum
+    acc.push({ cum: prev + (t.pnl ?? 0), ts: t.settledTs })
+    return acc
+  }, [])
+
+  const W = 300
+  const H = 60
+  const minV = Math.min(0, ...points.map(p => p.cum))
+  const maxV = Math.max(0, ...points.map(p => p.cum))
+  const range = maxV - minV || 1
+
+  const toX = (i) => (i / (points.length - 1)) * W
+  const toY = (v) => H - ((v - minV) / range) * (H - 4) - 2
+
+  const polylinePoints = points.map((p, i) => `${toX(i)},${toY(p.cum)}`).join(' ')
+  const finalCum = points[points.length - 1].cum
+  const lineColor = finalCum >= 0 ? 'var(--call)' : 'var(--put)'
+
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+    }}>
+      <div style={{
+        fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+        fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 4,
+        display: 'flex', justifyContent: 'space-between',
+      }}>
+        <span>Equity Curve</span>
+        <span style={{ color: lineColor, fontFamily: 'var(--mono)' }}>
+          {finalCum >= 0 ? '+' : ''}{finalCum.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: 60 }}>
+        {/* Zero line */}
+        {minV < 0 && maxV > 0 && (
+          <line
+            x1="0" y1={toY(0)} x2={W} y2={toY(0)}
+            stroke="rgba(255,255,255,.12)" strokeWidth="1" strokeDasharray="4 3"
+          />
+        )}
+        <polyline
+          points={polylinePoints}
+          fill="none"
+          stroke={lineColor}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* Last point dot */}
+        <circle
+          cx={toX(points.length - 1)} cy={toY(finalCum)}
+          r="3" fill={lineColor}
+        />
+      </svg>
+    </div>
+  )
+}
+
 const LS_POSITIONS = 'paper_di_positions'
 const LS_HISTORY   = 'paper_di_history'
 
@@ -295,7 +368,9 @@ export default function TradePage({ asset }) {
 
       {/* History */}
       {activeTab === 'history' && (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        <>
+          <EquityChart history={recentHistory} />
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
           {recentHistory.length === 0 ? (
             <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
               Aucun trade settlé pour l'instant
@@ -319,7 +394,8 @@ export default function TradePage({ asset }) {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        </>
       )}
 
       {/* Add position form (modal-like) */}
