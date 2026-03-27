@@ -9,7 +9,6 @@ import TradePage      from './pages/TradePage.jsx'
 import OnChainPage    from './pages/OnChainPage.jsx'
 import AuditPage      from './pages/AuditPage.jsx'
 import VolPage        from './pages/VolPage.jsx'
-import ChainPage      from './pages/ChainPage.jsx'
 import TrackerPage    from './pages/TrackerPage.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
 import AuditBanner    from './components/AuditBanner.jsx'
@@ -36,7 +35,6 @@ const PAGE_NAMES = {
   options:       'Options',
   signals:       'Signaux',
   vol:           'Volatilité',
-  chain:         'Chaîne Options',
   tracker:       'IV Live',
   trade:         'Trade',
   onchain:       'On-Chain',
@@ -216,7 +214,6 @@ export default function App() {
         {tab === 'options'       && <OptionsDataPage        asset={asset} clockSync={clockSync} />}
         {tab === 'signals'       && <SignalsPage            asset={asset} clockSync={clockSync} />}
         {tab === 'vol'           && <VolPage />}
-        {tab === 'chain'         && <ChainPage />}
         {tab === 'tracker'       && <TrackerPage />}
         {tab === 'trade'         && <TradePage              asset={asset} />}
         {tab === 'onchain'       && <OnChainPage            asset={asset} />}
