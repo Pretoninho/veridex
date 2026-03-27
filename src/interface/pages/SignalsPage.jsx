@@ -1,24 +1,35 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { fetchSignals, fetchMarket } from '../../api/backend.js'
 import { saveSignal, hashMarketState } from '../../signals/signal_engine.js'
 import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
 import { generateInsight }    from '../../signals/insight_generator.js'
 
+// ── Hook rafraîchissement automatique ────────────────────────────────────────
+
+function useInterval(callback, delay) {
+  const savedCallback = useRef(callback)
+  useEffect(() => { savedCallback.current = callback }, [callback])
+  useEffect(() => {
+    if (delay == null) return
+    const id = setInterval(() => savedCallback.current(), delay)
+    return () => clearInterval(id)
+  }, [delay])
+}
+
 // ── Sous-composants ──────────────────────────────────────────────────────────
 
 function ScoreBar({ label, score, color }) {
-  if (score == null) return null
-  const pct = Math.min(100, Math.max(0, score))
+  const pct = score != null ? Math.min(100, Math.max(0, score)) : 0
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div style={{ marginBottom: 12, transition: 'opacity .3s' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
-        <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color }}>
-          {score}/100
+        <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: score != null ? color : 'var(--text-muted)' }}>
+          {score != null ? `${score}/100` : 'N/A'}
         </span>
       </div>
       <div style={{ height: 5, background: 'rgba(255,255,255,.06)', borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3, transition: 'width .5s' }} />
+        <div style={{ height: '100%', width: `${pct}%`, background: score != null ? color : 'rgba(255,255,255,.1)', borderRadius: 3, transition: 'width .5s' }} />
       </div>
     </div>
   )
@@ -71,6 +82,7 @@ function InsightChip({ text, bias = 'neutral', loading = false, style }) {
       borderRadius: '0 8px 8px 0',
       padding: '6px 10px',
       marginTop: 8,
+      transition: 'opacity .3s',
       ...style,
     }}>
       <span style={{ fontSize: 9, color: s.color, fontFamily: 'var(--mono)', fontWeight: 700, marginTop: 1, flexShrink: 0, letterSpacing: '0.5px' }}>AI</span>
@@ -99,7 +111,18 @@ function CopyButton({ getText, style }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(getText())
+      const text = typeof getText === 'function' ? getText() : ''
+      if (!text) return
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const el = document.createElement('textarea')
+        el.value = text
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
+      }
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {}
@@ -244,6 +267,9 @@ export default function SignalsPage({ asset }) {
 
   useEffect(() => { load() }, [asset])
 
+  // Auto-rafraîchissement toutes les 5 minutes
+  useInterval(load, 5 * 60 * 1000)
+
   // ── Variables UI ──────────────────────────────────────────────────────────
 
   const signal  = result?.signal
@@ -377,9 +403,9 @@ export default function SignalsPage({ asset }) {
               {scores.s6 != null && (
                 <ScoreBar label="Positionnement — 15%" score={scores.s6} color={scoreColor(scores.s6)} />
               )}
-              {scores.s6 == null && scores.s5 == null && (
+              {scores.s6 == null && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                  On-Chain &amp; Positionnement : données non disponibles
+                  Positionnement : données non disponibles
                 </div>
               )}
             </div>
@@ -616,6 +642,7 @@ export default function SignalsPage({ asset }) {
       {lastUpdate && (
         <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5, marginTop: 4, marginBottom: 8 }}>
           Mis à jour {lastUpdate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          {' '}· auto-refresh 5 min
         </div>
       )}
     </div>
