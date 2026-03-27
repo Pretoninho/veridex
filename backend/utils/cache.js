@@ -2,15 +2,63 @@
  * backend/utils/cache.js — SmartCache (server-side)
  *
  * In-memory TTL cache with per-key customizable TTL.
+ * Includes FNV-1a hash-based change detection to avoid redundant recomputation.
  * No browser dependencies (no IndexedDB, no localStorage).
  *
  * Usage:
  *   const cache = new SmartCache({ ttlMs: 30_000 })
  *   cache.set('BTC:spot', data)
  *   cache.get('BTC:spot')  // null if stale
+ *
+ *   const changed = cache.setIfChanged('BTC:signal', signal)
+ *   if (!changed) return cache.get('BTC:signal')
  */
 
 'use strict'
+
+// ── FNV-1a 32-bit hash ────────────────────────────────────────────────────────
+
+/**
+ * FNV-1a 32-bit hash — fast, dependency-free.
+ * Excludes timestamp fields to avoid false positives when only time changes.
+ * @param {string} str
+ * @returns {number} unsigned 32-bit integer
+ */
+function fnv1aHash(str) {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i)
+    hash = (hash * 0x01000193) >>> 0
+  }
+  return hash
+}
+
+const _HASH_EXCLUDED = ['timestamp', 'ts', 'time', 'serverTime', 'syncedAt', 'fetchedAt', 'updatedAt']
+
+/**
+ * Serialize data deterministically, excluding volatile timestamp fields, then hash it.
+ * @param {any} data
+ * @returns {number}
+ */
+function hashData(data) {
+  function clean(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj
+    if (Array.isArray(obj)) return obj.map(clean)
+    const result = {}
+    for (const [k, v] of Object.entries(obj)) {
+      if (_HASH_EXCLUDED.includes(k)) continue
+      result[k] = clean(v)
+    }
+    return result
+  }
+  try {
+    return fnv1aHash(JSON.stringify(clean(data)))
+  } catch {
+    return fnv1aHash(String(data))
+  }
+}
+
+const CHANGE_LOG_MAX = 500
 
 class SmartCache {
   /**
@@ -20,6 +68,10 @@ class SmartCache {
     this._defaultTtl = ttlMs
     /** @type {Map<string, { value: any, expiresAt: number }>} */
     this._store = new Map()
+    /** @type {Map<string, number>} Hash per key for change detection */
+    this._hashes = new Map()
+    /** @type {Array<{ key: string, hash: number, ts: number }>} */
+    this.changeLog = []
   }
 
   /**
@@ -85,7 +137,48 @@ class SmartCache {
   /** Clear the entire cache. */
   clear() {
     this._store.clear()
+    this._hashes.clear()
+    this.changeLog = []
+  }
+
+  /**
+   * Store a value only if its content has changed (FNV-1a hash comparison).
+   * Updates the changeLog when a real change is detected.
+   * Also applies the default TTL so that stale entries are evicted normally.
+   *
+   * @param {string} key
+   * @param {any} data
+   * @returns {boolean} true if the data changed and was stored, false if identical
+   */
+  setIfChanged(key, data) {
+    const hash = hashData(data)
+    const prev = this._hashes.get(key)
+
+    if (prev === hash) return false
+
+    this._hashes.set(key, hash)
+    this._store.set(key, {
+      value:     data,
+      expiresAt: Date.now() + this._defaultTtl,
+    })
+
+    this.changeLog.push({ key, hash, ts: Date.now() })
+    if (this.changeLog.length > CHANGE_LOG_MAX) {
+      this.changeLog.shift()
+    }
+
+    return true
+  }
+
+  /**
+   * Returns a copy of the change log (most recent entries first).
+   * @param {number} [limit] — max entries to return
+   * @returns {Array<{ key: string, hash: number, ts: number }>}
+   */
+  getChangeLog(limit) {
+    const log = [...this.changeLog].reverse()
+    return limit != null ? log.slice(0, limit) : log
   }
 }
 
-module.exports = { SmartCache }
+module.exports = { SmartCache, fnv1aHash, hashData }
