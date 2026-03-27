@@ -23,7 +23,12 @@ import { checkNotifications, notifyAnomaly } from '../signals/notification_engin
 import { requestPermission } from '../signals/notification_manager.js'
 import { runInitialImport } from '../signals/snapshot_importer.js'
 import NotificationSettingsPage from './pages/NotificationSettingsPage.jsx'
+import MaintenancePage          from './pages/MaintenancePage.jsx'
 import './App.css'
+
+// ── Mode maintenance ──────────────────────────────────────────────────────────
+
+const MAINTENANCE_MODE = import.meta.env.VITE_MAINTENANCE_MODE === 'true'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -69,6 +74,9 @@ function getNextFundingCountdown() {
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // Maintenance mode — court-circuit total avant tout autre rendu
+  if (MAINTENANCE_MODE) return <MaintenancePage />
+
   const [inApp,       setInApp]       = useState(false)
   const [tab,         setTab]         = useState('market')
   const [asset,       setAsset]       = useState('BTC')
