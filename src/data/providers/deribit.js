@@ -354,6 +354,43 @@ export function extractExpiries(instruments) {
 }
 
 /**
+ * Calcule la base moyenne annualisée sur les contrats futures front (non-perpétuels).
+ * @param {'BTC'|'ETH'} asset
+ * @param {number|null} spot
+ * @returns {Promise<number|null>}
+ */
+export async function getBasisAvg(asset, spot) {
+  if (!spot) return null
+  try {
+    const futures = await getInstruments(asset, 'future')
+    const nonPerp = futures
+      .filter(f => !f.instrument_name.includes('PERPETUAL'))
+      .slice(0, 4)
+
+    const basisValues = []
+    for (const f of nonPerp) {
+      try {
+        if (f.expiration_timestamp <= Date.now()) continue
+        const book = await getOrderBook(f.instrument_name)
+        const price = book?.price ?? null
+        if (price) {
+          const days = Math.max(1, (f.expiration_timestamp - Date.now()) / 86400000)
+          basisValues.push((price - spot) / spot * 100 / days * 365)
+        }
+      } catch (err) {
+        console.warn(`[deribit] getBasisAvg(${f.instrument_name}) failed:`, err?.message)
+      }
+    }
+
+    if (!basisValues.length) return null
+    return basisValues.reduce((a, b) => a + b, 0) / basisValues.length
+  } catch (err) {
+    console.warn(`[deribit] getBasisAvg(${asset}) failed:`, err?.message)
+    return null
+  }
+}
+
+/**
  * Heure serveur Deribit — synchronisation horloge cross-exchange.
  * Retourne le timestamp en ms (natif Deribit).
  * Timeout réduit à 3s pour ne pas bloquer la sync.
