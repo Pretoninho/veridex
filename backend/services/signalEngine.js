@@ -119,6 +119,18 @@ function calcPositioningScore(lsRatio, pcRatio) {
   return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
 }
 
+const RETAIL_LABELS = {
+  bullish: { label: 'Long',   color: 'put'     },
+  bearish: { label: 'Short',  color: 'call'    },
+  neutral: { label: 'Neutre', color: 'neutral' },
+}
+
+const INSTIT_LABELS = {
+  bullish: { label: 'Offensif', color: 'call'    },
+  bearish: { label: 'Défensif', color: 'put'     },
+  neutral: { label: 'Neutre',   color: 'neutral' },
+}
+
 function interpretPositioning(lsRatio, pcRatio, score) {
   if (score == null) return null
 
@@ -149,7 +161,68 @@ function interpretPositioning(lsRatio, pcRatio, score) {
     strength       = 'moderate'
   }
 
-  return { score, signal, strength, divergenceType, lsRatio, pcRatio }
+  const retailLabel = retailBullish
+    ? RETAIL_LABELS.bullish
+    : retailBearish
+    ? RETAIL_LABELS.bearish
+    : RETAIL_LABELS.neutral
+
+  const institutLabel = institutBullish
+    ? INSTIT_LABELS.bullish
+    : institutBearish
+    ? INSTIT_LABELS.bearish
+    : INSTIT_LABELS.neutral
+
+  let expertAction = ''
+  if (divergenceType === 'retail_bullish_instit_bearish') {
+    expertAction =
+      `Retail massivement long (L/S ${lsRatio?.toFixed(2)}) ` +
+      `· Institutionnels défensifs ` +
+      `(P/C ${pcRatio?.toFixed(2)}). ` +
+      `Signal contrarian baissier ${strength}. ` +
+      `Réduire exposition longue — ` +
+      `envisager short perp ou puts ATM.`
+  } else if (divergenceType === 'retail_bearish_instit_bullish') {
+    expertAction =
+      `Retail paniqué (L/S ${lsRatio?.toFixed(2)}) ` +
+      `· Institutionnels offensifs ` +
+      `(P/C ${pcRatio?.toFixed(2)}). ` +
+      `Signal contrarian haussier ${strength}. ` +
+      `Réduire shorts — ` +
+      `envisager long spot ou calls OTM.`
+  } else if (divergenceType === 'consensus_bullish') {
+    expertAction =
+      `Consensus haussier : retail long ` +
+      `(L/S ${lsRatio?.toFixed(2)}) ` +
+      `· institutionnels offensifs ` +
+      `(P/C ${pcRatio?.toFixed(2)}). ` +
+      `Momentum confirmé mais surveiller ` +
+      `le retournement.`
+  } else if (divergenceType === 'consensus_bearish') {
+    expertAction =
+      `Consensus baissier : retail short ` +
+      `(L/S ${lsRatio?.toFixed(2)}) ` +
+      `· institutionnels défensifs ` +
+      `(P/C ${pcRatio?.toFixed(2)}). ` +
+      `Momentum baissier confirmé.`
+  } else {
+    expertAction =
+      `Positionnement neutre. ` +
+      `Pas d'edge directionnel ` +
+      `depuis le croisement retail/institutionnels.`
+  }
+
+  return {
+    score,
+    signal,
+    strength,
+    divergenceType,
+    retailLabel,
+    institutLabel,
+    lsRatio,
+    pcRatio,
+    expertAction,
+  }
 }
 
 // ── Global score ──────────────────────────────────────────────────────────────

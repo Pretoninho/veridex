@@ -53,6 +53,7 @@ async function fetchAllData(asset) {
       onchainResult,
       fearGreedResult,
       hashRateResult,
+      fundingHistResult,
     ] = await Promise.allSettled([
       deribit.getSpot(asset),
       deribit.getDVOL(asset),
@@ -63,6 +64,7 @@ async function fetchAllData(asset) {
       onchain.getOnChainSnapshot(asset),
       onchain.getFearGreedIndex(),
       onchain.getHashRateHistory(),
+      deribit.getFundingRateHistory(asset, 21), // 21 × 8h = 7 days
     ])
 
     const spot     = spotResult.status     === 'fulfilled' ? spotResult.value?.price ?? null : null
@@ -74,6 +76,14 @@ async function fetchAllData(asset) {
     const snapshot = onchainResult.status  === 'fulfilled' ? onchainResult.value : null
     const fearGreed = fearGreedResult.status === 'fulfilled' ? fearGreedResult.value : null
     const hashRate  = hashRateResult.status  === 'fulfilled' ? hashRateResult.value  : null
+    const fundingHist = fundingHistResult.status === 'fulfilled' ? fundingHistResult.value : null
+
+    // Compute 7-day annualized funding average from history, fall back to current rate
+    const fundingHistItems = fundingHist?.history ?? []
+    const avg7Items = fundingHistItems.slice(-21)
+    const avgAnn7d = avg7Items.length > 0
+      ? avg7Items.reduce((s, r) => s + (r.rateAnn ?? 0), 0) / avg7Items.length
+      : (funding?.rateAnn ?? null)
 
     const basisAvg = await deribit.getBasisAvg(asset, spot).catch(() => null)
 
@@ -90,7 +100,7 @@ async function fetchAllData(asset) {
       asset:        asset.toUpperCase(),
       spot,
       dvol,
-      funding,
+      funding:      funding ? { ...funding, avgAnn7d } : null,
       rv,
       basisAvg,
       lsRatio:      ls?.ratio      ?? null,
