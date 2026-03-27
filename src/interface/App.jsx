@@ -6,6 +6,7 @@ import DerivativesPage from './pages/DerivativesPage.jsx'
 import OptionsDataPage from './pages/OptionsDataPage.jsx'
 import SignalsPage    from './pages/SignalsPage.jsx'
 import TradePage      from './pages/TradePage.jsx'
+import AssistantPage  from './pages/AssistantPage.jsx'
 import OnChainPage    from './pages/OnChainPage.jsx'
 import AuditPage      from './pages/AuditPage.jsx'
 import VolPage        from './pages/VolPage.jsx'
@@ -37,6 +38,7 @@ const PAGE_NAMES = {
   vol:           'Volatilité',
   tracker:       'IV Live',
   trade:         'Trade',
+  assistant:     'Assistant',
   onchain:       'On-Chain',
   audit:         'Audit',
   notifications: 'Notifications',
@@ -216,6 +218,7 @@ export default function App() {
         {tab === 'vol'           && <VolPage />}
         {tab === 'tracker'       && <TrackerPage />}
         {tab === 'trade'         && <TradePage              asset={asset} />}
+        {tab === 'assistant'     && <AssistantPage          asset={asset} />}
         {tab === 'onchain'       && <OnChainPage            asset={asset} />}
         {tab === 'audit'         && <AuditPage />}
         {tab === 'notifications' && <NotificationSettingsPage />}
