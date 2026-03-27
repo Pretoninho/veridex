@@ -103,18 +103,6 @@ function IconVol() {
   )
 }
 
-function IconChain() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7"/>
-      <rect x="14" y="3" width="7" height="7"/>
-      <rect x="14" y="14" width="7" height="7"/>
-      <rect x="3" y="14" width="7" height="7"/>
-    </svg>
-  )
-}
-
 function IconTracker() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -134,7 +122,6 @@ const NAV_ITEMS = [
   { id: 'options',       label: 'Options',           sub: 'IV · Greeks · DVOL',            Icon: IconOptions        },
   { id: 'signals',       label: 'Signaux',           sub: 'Score · Expert · Simple',       Icon: IconSignals        },
   { id: 'vol',           label: 'Volatilité',        sub: 'IV/RV · Greeks · Skew · Smile', Icon: IconVol            },
-  { id: 'chain',         label: 'Chaîne Options',    sub: 'Strikes · Greeks · RL eval',    Icon: IconChain          },
   { id: 'tracker',       label: 'IV Live',           sub: 'Tracker temps réel · Alertes',  Icon: IconTracker        },
   { id: 'onchain',       label: 'On-Chain',          sub: 'Mempool · Exchange Flows',      Icon: IconOnChain        },
   { id: 'audit',         label: 'Audit',             sub: 'Journal · Anomalies · Hashes',  Icon: IconAudit          },
