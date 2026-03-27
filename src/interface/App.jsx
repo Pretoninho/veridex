@@ -11,6 +11,7 @@ import OnChainPage    from './pages/OnChainPage.jsx'
 import AuditPage      from './pages/AuditPage.jsx'
 import VolPage        from './pages/VolPage.jsx'
 import TrackerPage    from './pages/TrackerPage.jsx'
+import CalibrationPage from './pages/CalibrationPage.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
 import AuditBanner    from './components/AuditBanner.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
@@ -47,6 +48,7 @@ const PAGE_NAMES = {
   onchain:       'On-Chain',
   audit:         'Audit',
   notifications: 'Notifications',
+  calibration:   'Calibration',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -230,6 +232,7 @@ export default function App() {
         {tab === 'onchain'       && <OnChainPage            asset={asset} />}
         {tab === 'audit'         && <AuditPage />}
         {tab === 'notifications' && <NotificationSettingsPage />}
+        {tab === 'calibration'   && <CalibrationPage />}
         <VersionBar version={version} forceUpdate={forceUpdate} />
       </div>
 
