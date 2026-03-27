@@ -4,6 +4,7 @@ const express = require('express')
 const cors    = require('cors')
 
 const signalsRouter = require('./routes/signals')
+const marketRouter  = require('./routes/market')
 
 const app  = express()
 const PORT = process.env.PORT ?? 3000
@@ -18,6 +19,7 @@ app.get('/health', (_req, res) => {
 })
 
 app.use('/signals', signalsRouter)
+app.use('/market', marketRouter)
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 

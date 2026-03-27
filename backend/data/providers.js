@@ -9,6 +9,11 @@
 
 'use strict'
 
+const { SmartCache } = require('../utils/cache')
+
+// 30-second TTL — market data refreshes quickly but not faster than one poll cycle
+const _cache = new SmartCache({ ttlMs: 30_000 })
+
 const DERIBIT_BASE = 'https://www.deribit.com/api/v2/public'
 const BINANCE_FUTURE_BASE = 'https://fapi.binance.com'
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -289,34 +294,38 @@ async function getLongShortRatio(asset, period = '1h') {
  * @returns {Promise<{spot, dvol, funding, rv, basisAvg, lsRatio, pcRatio}>}
  */
 async function getMarketData(asset) {
-  const [spotResult, dvolResult, fundingResult, rvResult, oiResult, lsResult] =
-    await Promise.allSettled([
-      getSpot(asset),
-      getDVOL(asset),
-      getFundingRate(asset),
-      getRealizedVol(asset),
-      getOpenInterest(asset),
-      getLongShortRatio(asset),
-    ])
+  const cacheKey = `market:${asset.toUpperCase()}`
 
-  const spot = spotResult.status === 'fulfilled' ? spotResult.value?.price ?? null : null
-  const dvol = dvolResult.status === 'fulfilled' ? dvolResult.value : null
-  const funding = fundingResult.status === 'fulfilled' ? fundingResult.value : null
-  const rv = rvResult.status === 'fulfilled' ? rvResult.value : null
-  const oi = oiResult.status === 'fulfilled' ? oiResult.value : null
-  const ls = lsResult.status === 'fulfilled' ? lsResult.value : null
+  return _cache.getOrFetch(cacheKey, async () => {
+    const [spotResult, dvolResult, fundingResult, rvResult, oiResult, lsResult] =
+      await Promise.allSettled([
+        getSpot(asset),
+        getDVOL(asset),
+        getFundingRate(asset),
+        getRealizedVol(asset),
+        getOpenInterest(asset),
+        getLongShortRatio(asset),
+      ])
 
-  const basisAvg = await getBasisAvg(asset, spot).catch(() => null)
+    const spot = spotResult.status === 'fulfilled' ? spotResult.value?.price ?? null : null
+    const dvol = dvolResult.status === 'fulfilled' ? dvolResult.value : null
+    const funding = fundingResult.status === 'fulfilled' ? fundingResult.value : null
+    const rv = rvResult.status === 'fulfilled' ? rvResult.value : null
+    const oi = oiResult.status === 'fulfilled' ? oiResult.value : null
+    const ls = lsResult.status === 'fulfilled' ? lsResult.value : null
 
-  return {
-    spot,
-    dvol,
-    funding,
-    rv,
-    basisAvg,
-    lsRatio: ls?.lsRatio ?? null,
-    pcRatio: oi?.putCallRatio ?? null,
-  }
+    const basisAvg = await getBasisAvg(asset, spot).catch(() => null)
+
+    return {
+      spot,
+      dvol,
+      funding,
+      rv,
+      basisAvg,
+      lsRatio: ls?.lsRatio ?? null,
+      pcRatio: oi?.putCallRatio ?? null,
+    }
+  })
 }
 
 module.exports = { getMarketData }
