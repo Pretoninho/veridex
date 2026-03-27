@@ -180,9 +180,14 @@ export default function NotificationSettingsPage() {
 
   const handleRequestPermission = async () => {
     setRequesting(true)
-    const result = await requestPermission()
-    setPermission(getPermissionStatus())
-    setRequesting(false)
+    try {
+      const result = await requestPermission()
+      setPermission(result.reason === 'error' ? getPermissionStatus() : result.reason)
+    } catch (_) {
+      setPermission(getPermissionStatus())
+    } finally {
+      setRequesting(false)
+    }
   }
 
   // ── Seuils ──────────────────────────────────────────────────────────────────
