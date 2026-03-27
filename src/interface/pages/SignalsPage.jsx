@@ -4,6 +4,8 @@ import { saveSignal, hashMarketState } from '../../signals/signal_engine.js'
 import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
 import { generateInsight }    from '../../signals/insight_generator.js'
 import { getAllPatterns, computeAdvancedStats } from '../../signals/market_fingerprint.js'
+import { computeConfluence }  from '../../analytics/signal_confluence.js'
+import { clusterPatterns }    from '../../analytics/pattern_cluster.js'
 
 // ── Hook rafraîchissement automatique ────────────────────────────────────────
 
@@ -168,6 +170,16 @@ function TopPatterns() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Cluster patterns by strength × direction
+  const clusters = clusterPatterns(
+    patterns.map(p => ({
+      ...p,
+      type:      Math.abs(p.ev24h ?? 0) > 1 ? 'strong' : 'moderate',
+      direction: (p.probUp ?? 0.5) > 0.5 ? 'bullish' : 'bearish',
+    }))
+  )
+  const clusterEntries = Object.entries(clusters).sort((a, b) => b[1].length - a[1].length)
+
   if (loading) return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--border)',
@@ -232,6 +244,28 @@ function TopPatterns() {
           </div>
         )
       })}
+      {/* Cluster summary */}
+      {clusterEntries.length > 0 && (
+        <div style={{
+          padding: '10px 16px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex', flexWrap: 'wrap', gap: 6,
+        }}>
+          {clusterEntries.map(([key, items]) => (
+            <span key={key} style={{
+              fontSize: 10, fontFamily: 'var(--mono)',
+              background: 'rgba(255,255,255,.04)',
+              border: '1px solid var(--border)',
+              borderRadius: 6, padding: '3px 8px',
+              color: key.includes('bullish') ? 'var(--call)'
+                : key.includes('bearish')   ? 'var(--put)'
+                : 'var(--text-muted)',
+            }}>
+              {items.length}× {key}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -428,6 +462,15 @@ export default function SignalsPage({ asset }) {
   const recos      = expert?.recommendations
   const gColor     = scoreColor(global)
 
+  // Signal confluence (derived from individual scores s1–s6)
+  let confluenceScore = null
+  if (scores) {
+    const signalsList = [scores.s1, scores.s2, scores.s3, scores.s4, scores.s5, scores.s6]
+      .filter(s => s != null)
+      .map(s => ({ signal: s >= 65 ? 'BUY' : s <= 35 ? 'SELL' : 'NEUTRAL' }))
+    confluenceScore = computeConfluence(signalsList)
+  }
+
   // Insights Claude
   const { insight: insightScore,   loadingI: loadingScore }   = useInsight('global_score', global,                     { asset }, [asset, global])
   const { insight: insightFunding, loadingI: loadingFunding } = useInsight('funding',       rawData?.funding?.rateAnn, { asset }, [asset, rawData?.funding?.rateAnn])
@@ -563,6 +606,36 @@ export default function SignalsPage({ asset }) {
               {scores.s6 == null && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
                   Positionnement : données non disponibles
+                </div>
+              )}
+              {/* Signal Confluence */}
+              {confluenceScore != null && (
+                <div style={{
+                  marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <span style={{
+                    fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+                    fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
+                  }}>
+                    Confluence signaux
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 16 }}>
+                      {confluenceScore > 0 ? '↑' : confluenceScore < 0 ? '↓' : '→'}
+                    </span>
+                    <span style={{
+                      fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 16,
+                      color: confluenceScore > 0 ? 'var(--call)'
+                        : confluenceScore < 0   ? 'var(--put)'
+                        : 'var(--atm)',
+                    }}>
+                      {confluenceScore > 0 ? '+' : ''}{confluenceScore}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      / {[scores.s1, scores.s2, scores.s3, scores.s4, scores.s5, scores.s6].filter(s => s != null).length}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

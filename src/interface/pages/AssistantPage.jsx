@@ -4,6 +4,9 @@ import { analyzeIV }             from '../../core/volatility/iv_rank.js'
 import { analyzeMarketPattern }  from '../../analytics/pattern_engine.js'
 import { buildTrade }            from '../../analytics/decision_engine.js'
 import { simulateTrade, getPortfolio, resetPortfolio, INIT_BAL, POSITION_PCT } from '../../analytics/portfolio_simulator.js'
+import { detectMarketRegime } from '../../analytics/market_regime.js'
+import { monteCarlo }         from '../../analytics/monte_carlo.js'
+import { riskOfRuin }         from '../../analytics/risk.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -169,6 +172,9 @@ export default function AssistantPage({ asset }) {
   const [portfolio, setPortfolio] = useState(getPortfolio())
   const [spot,      setSpot]      = useState(null)
   const [lastUpdate, setLastUpdate] = useState(null)
+  const [regime,    setRegime]    = useState(null)
+  const [mcAvg,     setMcAvg]     = useState(null)
+  const [riskValue, setRiskValue] = useState(null)
   const isMounted = useRef(true)
 
   useEffect(() => {
@@ -191,6 +197,12 @@ export default function AssistantPage({ asset }) {
         basisPct:   market.basisAvg        ?? null,
       }
 
+      // Market regime
+      setRegime(detectMarketRegime({
+        price: market.spot,
+        dvol:  market.dvol?.current ?? null,
+      }))
+
       const sig = await analyzeMarketPattern(marketInput)
       if (!isMounted.current) return
 
@@ -206,6 +218,16 @@ export default function AssistantPage({ asset }) {
       if (tr && price) {
         const updated = simulateTrade(tr, price)
         setPortfolio({ ...updated })
+
+        // Monte Carlo & Risk of Ruin
+        if (updated.trades.length >= 2) {
+          const mc  = monteCarlo(updated.trades)
+          setMcAvg(mc.reduce((a, b) => a + b, 0) / mc.length)
+
+          const wins = updated.trades.filter(t => (t.pnl ?? 0) > 0).length
+          const wr   = wins / updated.trades.length
+          setRiskValue(riskOfRuin(wr, updated.balance * POSITION_PCT, updated.balance))
+        }
       } else {
         setPortfolio({ ...getPortfolio() })
       }
@@ -225,6 +247,8 @@ export default function AssistantPage({ asset }) {
   const handleReset = () => {
     const fresh = resetPortfolio()
     setPortfolio({ ...fresh })
+    setMcAvg(null)
+    setRiskValue(null)
   }
 
   const totalPnl  = portfolio.trades.reduce((s, t) => s + (t.pnl ?? 0), 0)
@@ -300,6 +324,21 @@ export default function AssistantPage({ asset }) {
                   {spot ? fmtUsd(spot) : '—'}
                 </span>
               </div>
+              {regime && (
+                <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                  Régime&nbsp;
+                  <span style={{
+                    fontWeight: 700,
+                    fontFamily: 'var(--mono)',
+                    fontSize: 11,
+                    color: regime.startsWith('bull') ? 'var(--call)'
+                      : regime.startsWith('bear')    ? 'var(--put)'
+                      : 'var(--atm)',
+                  }}>
+                    {regime}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -413,6 +452,39 @@ export default function AssistantPage({ asset }) {
           </div>
           <EquityCurve trades={portfolio.trades} />
         </div>
+
+        {/* Monte Carlo + Risk of Ruin */}
+        {(mcAvg != null || riskValue != null) && (
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {mcAvg != null && (
+              <div style={{ background: 'rgba(255,255,255,.02)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 4 }}>
+                  🧪 Monte Carlo
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 13, color: mcAvg >= INIT_BAL ? 'var(--call)' : 'var(--put)' }}>
+                  {fmtUsd(mcAvg)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Moy. 1000 sim.</div>
+              </div>
+            )}
+            {riskValue != null && (
+              <div style={{ background: 'rgba(255,255,255,.02)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 4 }}>
+                  ⚠️ Risque ruine
+                </div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontWeight: 600, fontSize: 13,
+                  color: riskValue < 0.01 ? 'var(--call)' : riskValue < 0.05 ? 'var(--atm)' : 'var(--put)',
+                }}>
+                  {(riskValue * 100).toFixed(4)}%
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {riskValue < 0.01 ? 'Excellent' : riskValue < 0.05 ? 'Acceptable' : 'Attention'}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Last trades */}
         {portfolio.trades.length > 0 && (
