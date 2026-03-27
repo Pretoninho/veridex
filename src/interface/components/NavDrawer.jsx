@@ -94,17 +94,6 @@ function IconNotifications() {
   )
 }
 
-function IconDI() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <line x1="12" y1="8" x2="12" y2="12"/>
-      <line x1="12" y1="16" x2="12.01" y2="16"/>
-    </svg>
-  )
-}
-
 function IconVol() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -144,7 +133,6 @@ const NAV_ITEMS = [
   { id: 'deriv',         label: 'Dérivés',           sub: 'Funding · OI · Term Structure', Icon: IconDeriv          },
   { id: 'options',       label: 'Options',           sub: 'IV · Greeks · DVOL',            Icon: IconOptions        },
   { id: 'signals',       label: 'Signaux',           sub: 'Score · Expert · Simple',       Icon: IconSignals        },
-  { id: 'di',            label: 'Dual Investment',   sub: 'DI · Basis · Term Structure',   Icon: IconDI             },
   { id: 'vol',           label: 'Volatilité',        sub: 'IV/RV · Greeks · Skew · Smile', Icon: IconVol            },
   { id: 'chain',         label: 'Chaîne Options',    sub: 'Strikes · Greeks · RL eval',    Icon: IconChain          },
   { id: 'tracker',       label: 'IV Live',           sub: 'Tracker temps réel · Alertes',  Icon: IconTracker        },

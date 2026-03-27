@@ -8,7 +8,6 @@ import SignalsPage    from './pages/SignalsPage.jsx'
 import TradePage      from './pages/TradePage.jsx'
 import OnChainPage    from './pages/OnChainPage.jsx'
 import AuditPage      from './pages/AuditPage.jsx'
-import DIPage         from './pages/DIPage.jsx'
 import VolPage        from './pages/VolPage.jsx'
 import ChainPage      from './pages/ChainPage.jsx'
 import TrackerPage    from './pages/TrackerPage.jsx'
@@ -36,7 +35,6 @@ const PAGE_NAMES = {
   deriv:         'Dérivés',
   options:       'Options',
   signals:       'Signaux',
-  di:            'Dual Investment',
   vol:           'Volatilité',
   chain:         'Chaîne Options',
   tracker:       'IV Live',
@@ -217,7 +215,6 @@ export default function App() {
         {tab === 'deriv'         && <DerivativesPage        asset={asset} clockSync={clockSync} />}
         {tab === 'options'       && <OptionsDataPage        asset={asset} clockSync={clockSync} />}
         {tab === 'signals'       && <SignalsPage            asset={asset} clockSync={clockSync} />}
-        {tab === 'di'            && <DIPage                 asset={asset} />}
         {tab === 'vol'           && <VolPage />}
         {tab === 'chain'         && <ChainPage />}
         {tab === 'tracker'       && <TrackerPage />}
