@@ -25,6 +25,7 @@ import {
 } from '../data/providers/onchain.js'
 import { normalizeOnChain } from '../data/normalizers/format_data.js'
 import { computeSignal } from '../signals/signal_engine.js'
+import { smartCache } from '../data/data_store/cache.js'
 
 /**
  * Fetch raw normalized market data for the given asset directly from providers.
@@ -132,7 +133,7 @@ export async function fetchSignals(asset) {
     exchangeFlows:   null,
   })
 
-  const { scores, global, signal, noviceData, maxPain, positioning } = computeSignal({
+  const signalInputs = {
     dvol:         market.dvol         ?? null,
     funding:      market.funding      ?? null,
     rv:           market.rv           ?? null,
@@ -142,9 +143,21 @@ export async function fetchSignals(asset) {
     asset:        a,
     lsRatio:      market.lsRatio      ?? null,
     pcRatio:      market.pcRatio      ?? null,
-  })
+  }
 
-  return {
+  const inputKey  = `signals:${a}:inputs`
+  const resultKey = `signals:${a}:result`
+  const prevHash = smartCache.getHash(inputKey)
+  smartCache.set(inputKey, signalInputs)
+
+  if (prevHash != null && !smartCache.hasChanged(inputKey, prevHash)) {
+    const cached = smartCache.get(resultKey)
+    if (cached) return cached
+  }
+
+  const { scores, global, signal, noviceData, maxPain, positioning } = computeSignal(signalInputs)
+
+  const result = {
     asset:      a,
     spot:       market.spot ?? null,
     scores,
@@ -155,4 +168,7 @@ export async function fetchSignals(asset) {
     positioning,
     timestamp:  Date.now(),
   }
+
+  smartCache.set(resultKey, result)
+  return result
 }
