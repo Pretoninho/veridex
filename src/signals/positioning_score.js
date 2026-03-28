@@ -3,8 +3,6 @@
  * Score de positionnement croisé — Retail (Binance) vs Institutionnels (Deribit)
  */
 
-import { POSITIONING } from '../config/signal_calibration.js'
-
 // ── Divergence ────────────────────────────────────────────────────────────────
 
 /**
@@ -19,21 +17,19 @@ import { POSITIONING } from '../config/signal_calibration.js'
 export function calcDivergenceScore(lsRatio, pcRatio) {
   if (lsRatio == null || pcRatio == null) return null
 
-  const t = POSITIONING.tanh
-
   // lsRatio > 1 → retail bullish → score positif
-  const retailSignal = Math.tanh((lsRatio - 1) * t.retailMultiplier)
+  const retailSignal = Math.tanh((lsRatio - 1) * 2)
 
   // pcRatio > 1 → plus de puts → instit bearish → score négatif
-  const institutSignal = Math.tanh((1 - pcRatio) * t.institMultiplier)
+  const institutSignal = Math.tanh((1 - pcRatio) * 2)
 
   // Divergence = retail et institutionnels opposés
   const divergence = retailSignal - institutSignal
 
   // Normaliser à -1 → +1
-  const normalizedDiv = Math.tanh(divergence / t.divergenceNormalizer)
+  const normalizedDiv = Math.tanh(divergence / 2)
 
-  return Math.round(POSITIONING.scoreBase + normalizedDiv * POSITIONING.scoreMultiplier)
+  return Math.round(50 + normalizedDiv * 50)
 }
 
 // ── Ratio combiné ─────────────────────────────────────────────────────────────
@@ -48,26 +44,24 @@ export function calcDivergenceScore(lsRatio, pcRatio) {
 export function calcCombinedRatioScore(lsRatio, pcRatio) {
   if (lsRatio == null && pcRatio == null) return null
 
-  let score = POSITIONING.scoreBase
+  let score = 50
 
   if (lsRatio != null) {
-    const lsAdj = POSITIONING.lsAdjustments
-    if      (lsRatio >= lsAdj.veryBullish.threshold)  score += lsAdj.veryBullish.adjustment
-    else if (lsRatio >= lsAdj.bullish.threshold)      score += lsAdj.bullish.adjustment
-    else if (lsRatio >= lsAdj.mildlyBullish.threshold) score += lsAdj.mildlyBullish.adjustment
-    else if (lsRatio <= lsAdj.veryBearish.threshold)  score += lsAdj.veryBearish.adjustment
-    else if (lsRatio <= lsAdj.bearish.threshold)      score += lsAdj.bearish.adjustment
-    else if (lsRatio <= lsAdj.mildlyBearish.threshold) score += lsAdj.mildlyBearish.adjustment
+    if      (lsRatio >= 2.0)  score -= 25
+    else if (lsRatio >= 1.5)  score -= 15
+    else if (lsRatio >= 1.2)  score -= 5
+    else if (lsRatio <= 0.5)  score += 25
+    else if (lsRatio <= 0.7)  score += 15
+    else if (lsRatio <= 0.85) score += 5
   }
 
   if (pcRatio != null) {
-    const pcAdj = POSITIONING.pcAdjustments
-    if      (pcRatio >= pcAdj.veryBearish.threshold)  score += pcAdj.veryBearish.adjustment
-    else if (pcRatio >= pcAdj.bearish.threshold)      score += pcAdj.bearish.adjustment
-    else if (pcRatio >= pcAdj.mildlyBearish.threshold) score += pcAdj.mildlyBearish.adjustment
-    else if (pcRatio <= pcAdj.veryBullish.threshold)  score += pcAdj.veryBullish.adjustment
-    else if (pcRatio <= pcAdj.bullish.threshold)      score += pcAdj.bullish.adjustment
-    else if (pcRatio <= pcAdj.mildlyBullish.threshold) score += pcAdj.mildlyBullish.adjustment
+    if      (pcRatio >= 1.5)  score -= 25
+    else if (pcRatio >= 1.2)  score -= 15
+    else if (pcRatio >= 1.0)  score -= 5
+    else if (pcRatio <= 0.5)  score += 25
+    else if (pcRatio <= 0.7)  score += 15
+    else if (pcRatio <= 0.85) score += 5
   }
 
   return Math.max(0, Math.min(100, score))

@@ -14,10 +14,9 @@
  */
 
 import { calcPercentile, calcThresholdAtPct } from '../core/history/metric_history.js'
-import { CONVERGENCE } from '../config/signal_calibration.js'
 
-const MIN_HIST_POINTS  = CONVERGENCE.MIN_HIST_POINTS
-const MIN_CONVERGENCE  = CONVERGENCE.MIN_CONVERGENCE
+const MIN_HIST_POINTS  = 20   // points minimum pour activer les seuils dynamiques
+const MIN_CONVERGENCE  = 3    // critères alignés pour déclencher une alerte
 
 // ── Helpers internes ──────────────────────────────────────────────────────────
 
@@ -78,8 +77,6 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
   const fundingVal  = funding?.rateAnn    ?? null
   const ivPremium   = (dvolVal != null && rvVal != null) ? dvolVal - rvVal : null
 
-  const criteria_cfg = CONVERGENCE.criteria
-
   return [
     // 1 — IV Rank élevé : on est dans le haut de la fourchette historique
     criterion({
@@ -87,8 +84,8 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
       label: 'IV Rank',
       value: ivRank,
       hist: hist.ivRank,
-      targetPct: criteria_cfg.ivRank.dynamicPercentile,
-      absThreshold: criteria_cfg.ivRank.absoluteThreshold,
+      targetPct: 70,
+      absThreshold: 60,
       direction: 'above',
       unit: '/100',
     }),
@@ -99,8 +96,8 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
       label: 'DVOL au-dessus moy.',
       value: dvolVal,
       hist: hist.dvol,
-      targetPct: criteria_cfg.dvol.dynamicPercentile,
-      absThreshold: criteria_cfg.dvol.absoluteThreshold,
+      targetPct: 60,
+      absThreshold: 60,
       direction: 'above',
       unit: '%',
     }),
@@ -111,8 +108,8 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
       label: 'Prime IV/RV',
       value: ivPremium,
       hist: hist.ivPremium,
-      targetPct: criteria_cfg.ivPremium.dynamicPercentile,
-      absThreshold: criteria_cfg.ivPremium.absoluteThreshold,
+      targetPct: 65,
+      absThreshold: 5,
       direction: 'above',
       unit: ' pts',
     }),
@@ -123,8 +120,8 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
       label: 'Funding annualisé',
       value: fundingVal,
       hist: hist.fundingAnn,
-      targetPct: criteria_cfg.funding.dynamicPercentile,
-      absThreshold: criteria_cfg.funding.absoluteThreshold,
+      targetPct: 70,
+      absThreshold: 10,
       direction: 'above',
       unit: '%',
     }),
@@ -135,8 +132,8 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
       label: 'Basis contango',
       value: basisAnn,
       hist: hist.basisAnn,
-      targetPct: criteria_cfg.basis.dynamicPercentile,
-      absThreshold: criteria_cfg.basis.absoluteThreshold,
+      targetPct: 60,
+      absThreshold: 3,
       direction: 'above',
       unit: '%',
     }),
@@ -147,8 +144,8 @@ export function buildCriteria({ dvol, rv, funding, basisAnn, ivRank, skew25d, hi
       label: 'Skew 25d',
       value: skew25d != null ? Math.abs(skew25d) : null,
       hist: hist.skew25d?.map(v => Math.abs(v)),
-      targetPct: criteria_cfg.skew.dynamicPercentile,
-      absThreshold: criteria_cfg.skew.absoluteThreshold,
+      targetPct: 65,
+      absThreshold: 4,
       direction: 'above',
       unit: ' pts',
     }),
@@ -179,11 +176,11 @@ export function computeConvergence(criteria, minRequired = MIN_CONVERGENCE) {
   const score    = total > 0 ? Math.round((metCount / total) * 100) : 0
 
   let strength, label, color
-  if (metCount >= CONVERGENCE.STRONG_CONVERGENCE) {
+  if (metCount >= 5) {
     strength = 'strong';  label = 'Signal fort';    color = 'var(--call)'
   } else if (metCount >= minRequired) {
     strength = 'moderate'; label = 'Convergence';   color = 'var(--atm)'
-  } else if (metCount >= CONVERGENCE.WEAK_CONVERGENCE) {
+  } else if (metCount >= 1) {
     strength = 'weak';    label = 'Insuffisant';    color = 'var(--accent2)'
   } else {
     strength = 'none';    label = 'Aucun signal';   color = 'var(--text-muted)'

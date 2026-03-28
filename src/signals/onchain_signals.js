@@ -8,8 +8,6 @@
  *   { metaphor, situation, action, gain, risk }
  */
 
-import { ONCHAIN_SIGNALS } from '../config/signal_calibration.js'
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** Calcule une moyenne simple d'un tableau de nombres. */
@@ -46,17 +44,14 @@ export function detectExchangeFlowSignal(flowData, priceData, history7d) {
       ? Math.abs(netflow) / Math.abs(avg7d)
       : 1
 
-    const moderateM = ONCHAIN_SIGNALS.flow.moderateMultiplier
-    const strongM = ONCHAIN_SIGNALS.flow.strongMultiplier
-
-    if (netflow < 0 && (avg7d == null || multiplier >= moderateM)) {
+    if (netflow < 0 && (avg7d == null || multiplier >= 1.5)) {
       // Outflow fort → accumulation haussière
       signal   = 'ACCUMULATION'
-      strength = multiplier >= strongM ? 'strong' : multiplier >= moderateM ? 'moderate' : 'weak'
-    } else if (netflow > 0 && (avg7d == null || multiplier >= moderateM)) {
+      strength = multiplier >= 2.5 ? 'strong' : multiplier >= 1.5 ? 'moderate' : 'weak'
+    } else if (netflow > 0 && (avg7d == null || multiplier >= 1.5)) {
       // Inflow fort → distribution baissière
       signal   = 'DISTRIBUTION'
-      strength = multiplier >= strongM ? 'strong' : multiplier >= moderateM ? 'moderate' : 'weak'
+      strength = multiplier >= 2.5 ? 'strong' : multiplier >= 1.5 ? 'moderate' : 'weak'
     } else if (netflow < 0) {
       signal = 'ACCUMULATION'
     } else if (netflow > 0) {
@@ -117,12 +112,9 @@ export function detectMempoolSignal(mempoolData) {
   const fastFee    = mempoolData?.fastFee    ?? null
   const congestion = mempoolData?.congestion ?? 'low'
 
-  const criticalFee = ONCHAIN_SIGNALS.mempool.criticalFee
-  const congestedFee = ONCHAIN_SIGNALS.mempool.congestedFee
-
   let signal = 'CALM'
-  if (congestion === 'critical' || (fastFee != null && fastFee > criticalFee)) signal = 'CRITICAL'
-  else if (congestion === 'high' || (fastFee != null && fastFee > congestedFee))  signal = 'CONGESTED'
+  if (congestion === 'critical' || (fastFee != null && fastFee > 100)) signal = 'CRITICAL'
+  else if (congestion === 'high' || (fastFee != null && fastFee > 50))  signal = 'CONGESTED'
   else if (congestion === 'medium')                                       signal = 'ACTIVE'
 
   const txFmt  = txCount != null ? `${txCount.toLocaleString()} tx` : 'N/A'
@@ -189,15 +181,12 @@ export function detectMinerSignal(miningData, previousHashRate) {
   let signal = 'NEUTRAL'
 
   // Calculer la variation si on a un hash rate précédent
-  const bullishThreshold = ONCHAIN_SIGNALS.hashRate.bullish
-  const bearishThreshold = ONCHAIN_SIGNALS.hashRate.bearish
-
   if (hashRate != null && previousHashRate != null && previousHashRate > 0) {
     const changePct = ((hashRate - previousHashRate) / previousHashRate) * 100
-    if (changePct > bullishThreshold) {
+    if (changePct > 5) {
       trend  = 'up'
       signal = 'BULLISH'
-    } else if (changePct < bearishThreshold) {
+    } else if (changePct < -5) {
       trend  = 'down'
       signal = 'BEARISH'
     }
@@ -309,18 +298,16 @@ export function interpretMempoolExpert(mempool) {
   if (!mempool) return null
 
   const { txCount, congestion, fastFee } = mempool
-  const emptyTxCount = ONCHAIN_SIGNALS.mempool.emptyTxCount
-  const criticalTxCount = ONCHAIN_SIGNALS.mempool.criticalTxCount
 
   let action = null
 
-  if (txCount != null && txCount < emptyTxCount) {
+  if (txCount != null && txCount < 5_000) {
     action =
       `Mempool vide (${txCount.toLocaleString('fr-FR')} tx) ` +
       `— activité anormalement basse. ` +
       `Précède souvent un mouvement de prix. ` +
       `Fees < 2 sat/vB suffisants.`
-  } else if (txCount != null && txCount > criticalTxCount) {
+  } else if (txCount != null && txCount > 100_000) {
     action =
       `Mempool congestionné ` +
       `(${txCount.toLocaleString('fr-FR')} tx · ` +
@@ -335,7 +322,7 @@ export function interpretMempoolExpert(mempool) {
       `Réseau sous charge standard.`
   }
 
-  const isAnormal = txCount != null && (txCount < emptyTxCount || txCount > criticalTxCount)
+  const isAnormal = txCount != null && (txCount < 5_000 || txCount > 100_000)
 
   const contextLabel = txCount == null ? 'Inconnu'
     : txCount < 5_000   ? 'Anormalement vide'
@@ -354,30 +341,29 @@ export function interpretFearGreedExpert(fg) {
   if (!fg) return null
 
   const { value, label, delta } = fg
-  const fg_cfg = ONCHAIN_SIGNALS.fearGreed
 
   let action = null
   let bias   = 'neutral'
 
-  if (value <= fg_cfg.extremeFear) {
+  if (value <= 25) {
     bias   = 'bullish'
     action =
       `Fear & Greed ${value} (${label}). ` +
       `Zone d'accumulation historique. ` +
       `Long spot ou long calls OTM avec stop -8% sous support.`
-  } else if (value <= fg_cfg.fear) {
+  } else if (value <= 45) {
     bias   = 'bullish'
     action =
       `Fear & Greed ${value} (${label}). ` +
       `Sentiment négatif — biais haussier contrarian. ` +
       `Puts OTM bon marché pour protection.`
-  } else if (value <= fg_cfg.neutral) {
+  } else if (value <= 55) {
     bias   = 'neutral'
     action =
       `Fear & Greed ${value} (${label}). ` +
       `Pas d'edge directionnel. ` +
       `Se concentrer sur IV et Funding.`
-  } else if (value <= fg_cfg.greed) {
+  } else if (value <= 75) {
     bias   = 'bearish'
     action =
       `Fear & Greed ${value} (${label}). ` +
@@ -391,7 +377,7 @@ export function interpretFearGreedExpert(fg) {
       `Short perp ou achat puts ATM contre le sentiment euphorique.`
   }
 
-  if (delta != null && Math.abs(delta) >= fg_cfg.significantDelta) {
+  if (delta != null && Math.abs(delta) >= 5) {
     action +=
       ` Variation 24h : ${fg.deltaLabel} ` +
       `— momentum ${delta > 0 ? 'haussier' : 'baissier'}.`
@@ -473,16 +459,13 @@ export function interpretHashRateExpert(hashRate, history) {
     action += ` (${sign}${variation7d.toFixed(1)}% sur 7j)`
   }
 
-  const bullishThreshold = ONCHAIN_SIGNALS.hashRate.bullish
-  const bearishThreshold = ONCHAIN_SIGNALS.hashRate.bearish
-
   let bias = 'neutral'
-  if (variation7d != null && variation7d > bullishThreshold) {
+  if (variation7d != null && variation7d > 5) {
     bias    = 'bullish'
     action +=
       `. Mineurs en expansion — confiance long terme dans le prix. ` +
       `Signal haussier structurel.`
-  } else if (variation7d != null && variation7d < bearishThreshold) {
+  } else if (variation7d != null && variation7d < -5) {
     bias    = 'bearish'
     action +=
       `. Hash rate en baisse — mineurs sous pression. ` +
@@ -537,42 +520,38 @@ export function compositeOnChainSignal(flowSignal, mempoolSignal, minerSignal, o
 
   const expert = `[On-Chain Score: ${score}/100] ${flowPart} | ${mempoolPart} | ${minerPart}.`
 
-  const favorable = ONCHAIN_SIGNALS.scoreInterpretation.favorable
-  const neutral_score = ONCHAIN_SIGNALS.scoreInterpretation.neutral
-
-  const actionExpert = score >= favorable
+  const actionExpert = score >= 70
     ? 'Contexte on-chain favorable : renforcer positions longues ou vendre des puts OTM. Surveiller le funding rate pour confirmation.'
-    : score >= neutral_score
+    : score >= 50
     ? 'Signal on-chain neutre à légèrement positif : maintenir positions actuelles, pas d\'augmentation de levier recommandée.'
     : 'Contexte on-chain dégradé : réduire exposition, envisager des hedges via options puts ou stablecoin partiel.'
 
   // ── Synthèse novice ───────────────────────────────────────────────────────
 
-  const novice_cfg = ONCHAIN_SIGNALS.scoreInterpretationNovice
-  const noviceBias = score >= novice_cfg.positive ? 'positif' : score >= novice_cfg.neutral ? 'neutre' : 'négatif'
+  const noviceBias = score >= 65 ? 'positif' : score >= 45 ? 'neutre' : 'négatif'
   const novice = {
-    metaphor:  score >= novice_cfg.positive
+    metaphor:  score >= 65
       ? 'Comme si les "gros joueurs" préparaient discrètement un grand achat...'
-      : score >= novice_cfg.neutral
+      : score >= 45
       ? 'Comme un marché calme où tout le monde attend le prochain signal...'
       : 'Comme si les investisseurs avertis commençaient à sortir discrètement...',
     situation: `Le bilan on-chain est ${noviceBias} (score ${score}/100). ${flowPart.toLowerCase()}, ${mempoolPart.toLowerCase()}.`,
-    action:    score >= novice_cfg.positive
+    action:    score >= 65
       ? 'C\'est un bon moment pour commencer ou renforcer une position sur Binance avec un ordre limite sous le prix actuel.'
-      : score >= novice_cfg.neutral
+      : score >= 45
       ? 'Pas d\'urgence — continue ton DCA habituel sur Binance ou Nexo sans changer ta stratégie.'
       : 'Sois prudent(e) : ne mets pas de grosses sommes maintenant. Sur Nexo, convertis une partie en USDC pour sécuriser.',
-    gain:      score >= novice_cfg.positive
+    gain:      score >= 65
       ? 'Un bon timing on-chain peut améliorer ton point d\'entrée de 5-15%.'
-      : score >= novice_cfg.neutral
+      : score >= 45
       ? 'Rester constant dans un marché neutre évite de mauvais timings émotionnels.'
       : 'Sécuriser pendant un signal négatif peut protéger 10-25% de ton portefeuille.',
     risk:      'Les signaux on-chain sont des indicateurs de tendance, pas des prédictions certaines. Ne mets jamais plus que ce que tu peux te permettre de perdre.',
   }
 
-  const actionNovice = score >= novice_cfg.positive
+  const actionNovice = score >= 65
     ? `Achète progressivement sur Binance (pas tout d\'un coup) et active une alerte de prix.`
-    : score >= novice_cfg.neutral
+    : score >= 45
     ? `Continue ton plan habituel sur Nexo ou Binance — pas de décision urgente.`
     : `Sécurise une partie en USDC sur Nexo et attends une amélioration des signaux.`
 

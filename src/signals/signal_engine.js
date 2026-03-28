@@ -24,7 +24,6 @@ import { fnv1a } from '../data/data_store/cache.js'
 import { calculateGainExample } from './signal_interpreter.js'
 import { calculateMaxPainByExpiry, interpretMaxPain } from '../core/volatility/max_pain.js'
 import { calcPositioningScore, interpretPositioning } from './positioning_score.js'
-import { SCORE_THRESHOLDS, SIGNAL_BOUNDARIES, TIMING, STORAGE_LIMITS, getComponentWeights } from '../config/signal_calibration.js'
 
 // ── Filtre DVOL ───────────────────────────────────────────────────────────────
 
@@ -59,11 +58,10 @@ export function scoreIV(dvol) {
   if (!dvol) return null
   const avg30 = (dvol.monthMin + dvol.monthMax) / 2
   const ratio = dvol.current / avg30
-  const t = SCORE_THRESHOLDS.IV
-  if (ratio >= t.extreme) return 100
-  if (ratio >= t.high) return 75
-  if (ratio >= t.normal) return 50
-  if (ratio >= t.low) return 25
+  if (ratio >= 1.20) return 100
+  if (ratio >= 1.10) return 75
+  if (ratio >= 0.95) return 50
+  if (ratio >= 0.85) return 25
   return 0
 }
 
@@ -76,11 +74,10 @@ export function scoreFunding(funding) {
   if (!funding) return null
   const r = funding.rateAnn ?? funding.avgAnn7d
   if (r == null) return null
-  const t = SCORE_THRESHOLDS.Funding
-  if (r >= t.extreme) return 100
-  if (r >= t.high) return 75
-  if (r >= t.normal) return 50
-  if (r >= t.zero) return 25
+  if (r >= 30) return 100
+  if (r >= 15) return 75
+  if (r >= 5)  return 50
+  if (r >= 0)  return 25
   return 0
 }
 
@@ -91,11 +88,10 @@ export function scoreFunding(funding) {
  */
 export function scoreBasis(basisAvg) {
   if (basisAvg == null) return null
-  const t = SCORE_THRESHOLDS.Basis
-  if (basisAvg >= t.extreme) return 100
-  if (basisAvg >= t.high) return 75
-  if (basisAvg >= t.normal) return 50
-  if (basisAvg >= t.zero) return 25
+  if (basisAvg >= 15) return 100
+  if (basisAvg >= 8)  return 75
+  if (basisAvg >= 3)  return 50
+  if (basisAvg >= 0)  return 25
   return 0
 }
 
@@ -108,10 +104,9 @@ export function scoreBasis(basisAvg) {
 export function scoreIVvsRV(dvol, rv) {
   if (!dvol || !rv) return null
   const premium = dvol.current - rv.current
-  const t = SCORE_THRESHOLDS.IVvRV
-  if (premium >= t.extreme) return 100
-  if (premium >= t.high) return 75
-  if (premium >= t.neutral) return 50
+  if (premium >= 20) return 100
+  if (premium >= 10) return 75
+  if (premium >= 0)  return 50
   return 0
 }
 
@@ -146,7 +141,13 @@ export function scoreIVvsRV(dvol, rv) {
 export function calcGlobalScore(s1, s2, s3, s4, s5, s6) {
   const hasS5 = s5 != null
   const hasS6 = s6 != null
-  const { w1, w2, w3, w4, w5, w6 } = getComponentWeights(hasS5, hasS6)
+
+  const w1 = hasS5 ? 30 : 35
+  const w2 = hasS5 ? 20 : 25
+  const w3 = hasS5 ? 20 : 25
+  const w4 = 15
+  const w5 = hasS6 ? 10 : 15   // réduit si s6 disponible
+  const w6 = hasS6 ? 15 : 0
 
   let total = 0, weights = 0
   if (s1 != null) { total += s1 * w1; weights += w1 }
@@ -167,22 +168,21 @@ export function calcGlobalScore(s1, s2, s3, s4, s5, s6) {
  */
 export function getSignal(score) {
   if (score == null) return null
-  const b = SIGNAL_BOUNDARIES
-  if (score >= b.exceptional) return {
+  if (score >= 80) return {
     label:  '🔥 Exceptionnel',
     color:  'var(--call)',
     bg:     'rgba(0,229,160,.08)',
     border: 'rgba(0,229,160,.3)',
     action: 'Conditions exceptionnelles — multiples opportunités actives',
   }
-  if (score >= b.favorable) return {
+  if (score >= 60) return {
     label:  '✓ Favorable',
     color:  'var(--atm)',
     bg:     'rgba(255,215,0,.06)',
     border: 'rgba(255,215,0,.3)',
     action: 'Conditions favorables — bon moment pour agir',
   }
-  if (score >= b.neutral) return {
+  if (score >= 40) return {
     label:  '~ Neutre',
     color:  'var(--accent2)',
     bg:     'rgba(255,107,53,.06)',
@@ -284,9 +284,8 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
 
 // ── Persistance des anomalies ─────────────────────────────────────────────────
 
-// Use centralized configuration
-const ANOMALY_LOG_KEY = STORAGE_LIMITS.ANOMALY_LOG_KEY
-const MAX_ANOMALIES = STORAGE_LIMITS.MAX_ANOMALIES
+const ANOMALY_LOG_KEY = 'veridex_anomaly_log'
+const MAX_ANOMALIES   = 200
 
 /**
  * Persiste une anomalie détectée dans localStorage avec déduplication.
@@ -318,7 +317,7 @@ function _persistAnomaly(anomalyResult, asset) {
       e.hash === hash ||
       (JSON.stringify(e.changedIndicators) ===
        JSON.stringify(anomalyResult.changedIndicators) &&
-       Date.now() - e.timestamp < TIMING.ANOMALY_DEDUP_MS)
+       Date.now() - e.timestamp < 60_000)
     )
     if (duplicate) return
 
@@ -356,8 +355,8 @@ export function clearAnomalyLog() {
  * Un snapshot attendu : { spreadPct, fundingBinance, fundingDeribit, ivRank, lsRatio, oiDelta }
  */
 const MONITORED_INDICATORS = ['spreadPct', 'fundingBinance', 'fundingDeribit', 'ivRank', 'lsRatio', 'oiDelta']
-const ANOMALY_THRESHOLD = TIMING.ANOMALY_THRESHOLD
-const ANOMALY_WINDOW_MS = TIMING.ANOMALY_WINDOW_MS
+const ANOMALY_THRESHOLD = 3       // nb d'indicateurs simultanés pour déclencher l'alerte
+const ANOMALY_WINDOW_MS = 10_000  // fenêtre de comparaison : 10 secondes
 
 /** Dernier snapshot + timestamp pour la détection d'anomalies */
 let _lastSnapshot = null
@@ -413,8 +412,8 @@ export function detectMarketAnomaly(snapshot, asset) {
 
 // ── Versioning des signaux avec IndexedDB ─────────────────────────────────────
 
-const SIGNALS_IDB_KEY = STORAGE_LIMITS.SIGNALS_IDB_KEY
-const MAX_SIGNALS_STORED = STORAGE_LIMITS.MAX_SIGNALS_STORED
+const SIGNALS_IDB_KEY = 'signal_history'
+const MAX_SIGNALS_STORED = 500
 
 /**
  * Génère le hash d'un signal à partir de son contexte complet.

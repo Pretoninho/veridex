@@ -16,14 +16,13 @@ import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../data/data_store/cache.js'
 import { getDailySettlement } from '../data/providers/deribit.js'
 import { calculateMaxPainByExpiry } from '../core/volatility/max_pain.js'
-import { STORAGE_LIMITS, TIMING } from '../config/signal_calibration.js'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
-const IDB_KEY_BTC         = STORAGE_LIMITS.SETTLEMENT_IDB_KEY_BTC
-const IDB_KEY_ETH         = STORAGE_LIMITS.SETTLEMENT_IDB_KEY_ETH
-const MAX_HISTORY         = STORAGE_LIMITS.MAX_SETTLEMENT_HISTORY
-const SETTLEMENT_UTC_HOUR = TIMING.SETTLEMENT_HOUR_UTC
+const IDB_KEY_BTC         = 'settlement_history_BTC'
+const IDB_KEY_ETH         = 'settlement_history_ETH'
+const MAX_HISTORY         = 365      // 1 an de settlements
+const SETTLEMENT_UTC_HOUR = 8        // 08:00 UTC Deribit
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -84,7 +83,7 @@ export function setupSettlementWatcher(getSpot, getIVRank, getInstruments) {
   // Vérifier au démarrage si le settlement du jour a été manqué
   _checkMissedSettlement(getSpot, getIVRank, getInstruments)
 
-  // Watcher configuré pour détecter 08:00 UTC exactement
+  // Watcher toutes les 30 secondes pour détecter 08:00 UTC exactement
   const interval = setInterval(() => {
     const now    = new Date()
     const utcH   = now.getUTCHours()
@@ -95,7 +94,7 @@ export function setupSettlementWatcher(getSpot, getIVRank, getInstruments) {
       captureSettlement('BTC', getSpot, getIVRank, getInstruments)
       captureSettlement('ETH', getSpot, getIVRank, getInstruments)
     }
-  }, TIMING.SETTLEMENT_CHECK_INTERVAL)
+  }, 30_000)
 
   return () => clearInterval(interval)
 }

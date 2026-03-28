@@ -10,12 +10,10 @@
  * Cache 5 min en mémoire. Fallback statique si API indisponible.
  */
 
-import { API_CONFIG, INTERPRETER, ONCHAIN_SIGNALS } from '../config/signal_calibration.js'
-
-const ANTHROPIC_API = API_CONFIG.ANTHROPIC_API_URL
-const MODEL         = API_CONFIG.CLAUDE_MODEL
-const CACHE_TTL_MS  = API_CONFIG.INSIGHT_CACHE_TTL_MS
-const MAX_TOKENS    = API_CONFIG.CLAUDE_MAX_TOKENS
+const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
+const MODEL         = 'claude-haiku-4-5-20251001'
+const CACHE_TTL_MS  = 5 * 60 * 1000
+const MAX_TOKENS    = 60
 
 const _cache = new Map()
 

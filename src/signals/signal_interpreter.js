@@ -6,8 +6,6 @@
  *   EXPERT  → 3 blocs de recommandations (Spot / Futures / Options)
  */
 
-import { INTERPRETER, OPTIONS_CALC } from '../config/signal_calibration.js'
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const fmt = (n, dec = 1) => (n != null ? n.toFixed(dec) : '—')
@@ -21,14 +19,12 @@ const fmtPrice = (n) => (n != null ? `$${Math.round(n).toLocaleString('fr-FR')}`
  * @param {number} amount — montant exemple en $
  * @returns {number|null}
  */
-export function calculateGainExample(signal, amount = OPTIONS_CALC.example_amount_usd) {
+export function calculateGainExample(signal, amount = 1000) {
   const score = signal?.score ?? 50
-  // Durée estimée : entre min_holding_period (signal faible) et max_holding_period (signal fort)
-  const minDays = OPTIONS_CALC.min_holding_period_days
-  const maxDays = OPTIONS_CALC.max_holding_period_days
-  const days = minDays + Math.round((score / 100) * (maxDays - minDays))
-  // APR proxy : funding ou default_apr par défaut si pas de funding
-  const apr = signal?.funding ?? OPTIONS_CALC.default_apr
+  // Durée estimée : entre 7j (signal faible) et 30j (signal fort)
+  const days = 7 + Math.round((score / 100) * 23)
+  // APR proxy : funding ou 10% par défaut si pas de funding
+  const apr = signal?.funding ?? 10
   if (!apr || apr <= 0) return null
   const gain = amount * (apr / 100) * (days / 365)
   return Math.round(gain)
@@ -47,8 +43,8 @@ function _ivRank(dvol) {
 
 function _getVolRegime(ivRank) {
   if (ivRank == null) return 'NEUTRAL'
-  if (ivRank >= INTERPRETER.ivRank.highVol) return 'HIGH_VOL'
-  if (ivRank <= INTERPRETER.ivRank.lowVol) return 'LOW_VOL'
+  if (ivRank >= 70) return 'HIGH_VOL'
+  if (ivRank <= 30) return 'LOW_VOL'
   return 'NEUTRAL'
 }
 
@@ -57,21 +53,20 @@ function _getVolRegime(ivRank) {
 function _spotReco(score, dvol) {
   const ivRank = _ivRank(dvol)
   const ivStr = ivRank != null ? ` (IV Rank ${ivRank}%)` : ''
-  const spot_cfg = INTERPRETER.spot
 
-  if (score >= spot_cfg.attentif) return {
+  if (score >= 80) return {
     signal:    'Attentif',
     action:    `Volatilité élevée${ivStr} — possibilité de points d'entrée attractifs lors des pics de vol. Accumulation progressive sur supports ; ne pas chasser les breakouts. Attendre une compression de la volatilité pour sécuriser l'entrée.`,
     timeframe: '1 à 4 semaines',
     stopLoss:  'Sortir si IV Rank repasse sous 50%',
   }
-  if (score >= spot_cfg.neutre) return {
+  if (score >= 60) return {
     signal:    'Neutre',
     action:    `Marché actif${ivStr}. Entrée spot modérée envisageable sur support identifié. Pas de signal directionnel fort — dimensionner la position en conséquence.`,
     timeframe: '1 à 2 semaines',
     stopLoss:  'Stop sur cassure du support',
   }
-  if (score >= spot_cfg.prudent) return {
+  if (score >= 40) return {
     signal:    'Prudent',
     action:    `Contexte mixte${ivStr}. Attendre confirmation directionnelle avant toute entrée spot. Réduire l'exposition si déjà en position.`,
     timeframe: 'Pas de trade spot recommandé',
@@ -91,9 +86,6 @@ function _futuresReco(score, funding, basisAvg, positioning) {
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
   const fStr = fundingAnn != null ? ` (${fmt(fundingAnn)}%/an)` : ''
   const bStr = basisAvg != null ? ` — basis ${fmt(basisAvg)}%/an` : ''
-  const spot_cfg = INTERPRETER.spot
-  const funding_cfg = INTERPRETER.funding
-  const basis_cfg = INTERPRETER.basis
 
   // Contexte positionnement croisé à appendre si divergence significative
   let posCtx = ''
@@ -103,19 +95,19 @@ function _futuresReco(score, funding, basisAvg, positioning) {
     posCtx = ` · Retail L/S ${fmt(positioning.lsRatio, 2)} vs Instit P/C ${fmt(positioning.pcRatio, 2)} — divergence contrarian ${positioning.signal === 'bearish' ? 'baissière' : positioning.signal === 'bullish' ? 'haussière' : 'neutre'} confirme le biais.`
   }
 
-  if (score >= spot_cfg.attentif) return {
+  if (score >= 80) return {
     signal:    'Actif',
     action:    `Funding élevé${fStr}${bStr}. Short perp rémunérateur ou cash-and-carry (long spot + short perp) pour capturer le basis sans risque directionnel. Surveiller le funding quotidiennement.${posCtx}`,
     timeframe: '7 à 14 jours',
-    stopLoss:  `Fermer si funding tombe sous ${funding_cfg.moderate}%/an`,
+    stopLoss:  'Fermer si funding tombe sous 5%/an',
   }
-  if (score >= spot_cfg.neutre) return {
+  if (score >= 60) return {
     signal:    'Modéré',
-    action:    `Funding correct${fStr}. Short perp avec taille réduite envisageable. Cash-and-carry si basis > ${basis_cfg.highContango}%/an${bStr}.${posCtx}`,
+    action:    `Funding correct${fStr}. Short perp avec taille réduite envisageable. Cash-and-carry si basis > 8%/an${bStr}.${posCtx}`,
     timeframe: '7 jours',
     stopLoss:  'Surveiller le funding',
   }
-  if (score >= spot_cfg.prudent) return {
+  if (score >= 40) return {
     signal:    'Neutre',
     action:    `Funding insuffisant${fStr} pour justifier un short perp. Positions directionnelles uniquement si conviction forte${bStr}.${posCtx}`,
     timeframe: 'Surveillance uniquement',
@@ -132,11 +124,10 @@ function _futuresReco(score, funding, basisAvg, positioning) {
 // ── Recommandation Options ────────────────────────────────────────────────
 
 function _optionsReco(score, dvol, rv, spot, maxPain, funding, basisAvg) {
-  const ivRank = _ivRank(dvol)
-  const strikeCall = spot != null ? Math.round(spot * OPTIONS_CALC.call_strike_otm_multiplier) : null
-  const strikePut  = spot != null ? Math.round(spot * OPTIONS_CALC.put_strike_otm_multiplier) : null
-  const ivStr = ivRank != null ? `IV Rank ${ivRank}%` : 'IV Rank N/A'
-  const opt_cfg = INTERPRETER.options
+  const ivRank     = _ivRank(dvol)
+  const strikeCall = spot != null ? Math.round(spot * 1.08) : null
+  const strikePut  = spot != null ? Math.round(spot * 0.92) : null
+  const ivStr      = ivRank != null ? `IV Rank ${ivRank}%` : 'IV Rank N/A'
 
   // Contexte IV vs RV (vol implicite chère ou bon marché)
   const rvCurrent = rv?.current ?? null
@@ -202,21 +193,21 @@ function _optionsReco(score, dvol, rv, spot, maxPain, funding, basisAvg) {
   }
 
   // NEUTRAL → fallback basé sur score + contexte enrichi
-  if (score >= opt_cfg.highVolScore) return {
+  if (score >= 80) return {
     signal:    'Vendre la vol',
     action:    `${ivStr} — volatilité historiquement élevée${ctxStr}. Vendre un straddle/strangle (strikes ~${fmtPrice(strikeCall)} / ~${fmtPrice(strikePut)}) ou un Iron Condor sur Deribit. Durée 7-14j. Delta-hedger si le prix se déplace de > 5%.${mpStr}`,
     timeframe: '7 à 14 jours',
     stopLoss:  'Couper si IV Rank repasse sous 50% ou perte > 1× prime encaissée',
     maxPain,
   }
-  if (score >= opt_cfg.spreadsScore) return {
+  if (score >= 60) return {
     signal:    'Spreads vendeurs',
     action:    `${ivStr}${ctxStr} — bon contexte pour les spreads verticaux et covered calls. Strike call cible ~${fmtPrice(strikeCall)}. Durée 7j recommandée. Risque limité vs vente nue.${mpStr}`,
     timeframe: '7 jours',
     stopLoss:  'Fermer à 50% du profit max ou si prix dépasse le strike court',
     maxPain,
   }
-  if (score >= opt_cfg.selectiveScore) return {
+  if (score >= 40) return {
     signal:    'Achats sélectifs',
     action:    `${ivStr} neutre${ctxStr} — éviter les ventes nues. Long calls ou puts si catalyseur identifié. Spreads débiteurs préférables pour limiter le coût. Strike put ~${fmtPrice(strikePut)}.${mpStr}`,
     timeframe: 'Sélectif selon catalyseur',
@@ -237,29 +228,26 @@ function _optionsReco(score, dvol, rv, spot, maxPain, funding, basisAvg) {
 function _buildSituation(dvol, funding, rv, basisAvg) {
   const ivRank = _ivRank(dvol)
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
-  const iv_cfg = INTERPRETER.ivRank
-  const funding_cfg = INTERPRETER.funding
-  const basis_cfg = INTERPRETER.basis
 
   const parts = []
   if (ivRank != null) {
-    parts.push(ivRank >= iv_cfg.highVol
+    parts.push(ivRank >= 70
       ? `IV Rank élevé (${ivRank}%) — volatilité implicite au-dessus de la moyenne`
-      : ivRank <= iv_cfg.lowVol
+      : ivRank <= 30
       ? `IV Rank faible (${ivRank}%) — volatilité implicite comprimée`
       : `IV Rank neutre (${ivRank}%)`)
   }
   if (fundingAnn != null) {
-    parts.push(fundingAnn >= funding_cfg.high
+    parts.push(fundingAnn >= 15
       ? `Funding perp élevé (${fmt(fundingAnn)}%/an) — longs payent fortement`
-      : fundingAnn >= funding_cfg.moderate
+      : fundingAnn >= 5
       ? `Funding modéré (${fmt(fundingAnn)}%/an)`
       : `Funding faible (${fmt(fundingAnn)}%/an)`)
   }
   if (basisAvg != null) {
-    parts.push(basisAvg >= basis_cfg.highContango
+    parts.push(basisAvg >= 8
       ? `Basis futures contango fort (${fmt(basisAvg)}%/an)`
-      : basisAvg <= basis_cfg.backwardation
+      : basisAvg <= -2
       ? `Basis en backwardation (${fmt(basisAvg)}%/an)`
       : `Basis modéré (${fmt(basisAvg)}%/an)`)
   }

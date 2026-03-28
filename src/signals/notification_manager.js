@@ -17,20 +17,59 @@
  */
 
 import { fnv1a } from '../data/data_store/cache.js'
-import { NOTIFICATION_DEFAULTS, NOTIFICATION_COOLDOWNS, STORAGE_LIMITS } from '../config/signal_calibration.js'
 
 // ── Clés localStorage ─────────────────────────────────────────────────────────
 
-const THRESHOLDS_KEY = STORAGE_LIMITS.THRESHOLDS_KEY
-const HISTORY_KEY = STORAGE_LIMITS.HISTORY_KEY
-const COOLDOWNS_KEY = STORAGE_LIMITS.COOLDOWNS_KEY
-const MAX_HISTORY = STORAGE_LIMITS.MAX_NOTIFICATION_HISTORY
+const THRESHOLDS_KEY = 'veridex_notif_thresholds'
+const HISTORY_KEY    = 'veridex_notif_history'
+const COOLDOWNS_KEY  = 'veridex_notif_cooldowns'
+const MAX_HISTORY    = 200
 
 // ── Seuils par défaut ─────────────────────────────────────────────────────────
 
 export const DEFAULT_THRESHOLDS = {
-  ...NOTIFICATION_DEFAULTS,
-  cooldown: NOTIFICATION_COOLDOWNS,
+  // Mouvement de prix
+  price_move_pct:         5.0,
+  price_move_window_ms:   3_600_000,
+
+  // IV Rank
+  iv_spike_low:           50,
+  iv_spike_high:          70,
+  iv_spike_window_ms:     4 * 3_600_000,
+
+  // Funding
+  funding_change_ann:     20.0,
+  funding_change_window_ms: 15 * 60_000,
+
+  // Liquidations
+  liquidations_usd:       50_000_000,
+  liquidations_window_ms: 3_600_000,
+
+  // Settlement
+  settlement_delta_pct:   0.3,
+
+  // Expiration
+  expiry_warning_24h:     24 * 3_600_000,
+  expiry_warning_1h:      3_600_000,
+
+  // Funding fixing
+  funding_fixing_warning: 30 * 60_000,
+
+  // Score
+  score_thresholds: [40, 60, 75, 90],
+
+  // Cooldowns anti-spam par type (ms)
+  cooldown: {
+    price_move:      30 * 60_000,
+    iv_spike:        60 * 60_000,
+    funding_change:  15 * 60_000,
+    liquidations:    30 * 60_000,
+    settlement:      24 * 3_600_000,
+    anomaly:         30 * 60_000,
+    signal_change:   30 * 60_000,
+    expiry:          3_600_000,
+    funding_fixing:  8 * 3_600_000,
+  },
 }
 
 // ── Permission ────────────────────────────────────────────────────────────────

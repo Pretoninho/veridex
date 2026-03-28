@@ -37,13 +37,12 @@
 import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a }                        from '../data/data_store/cache.js'
 import { getAllPatterns }               from './market_fingerprint.js'
-import { STORAGE_LIMITS }               from '../config/signal_calibration.js'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 export const SNAPSHOT_VERSION          = 1
-export const MIN_OCCURRENCES_TO_EXPORT = STORAGE_LIMITS.MIN_OCCURRENCES_TO_EXPORT
-export const MAX_CHAIN_LENGTH          = STORAGE_LIMITS.MAX_CHAIN_LENGTH
+export const MIN_OCCURRENCES_TO_EXPORT = 2
+export const MAX_CHAIN_LENGTH          = 365
 export const GENESIS_HASH             = '00000000'
 
 const CHAIN_KEY = {
