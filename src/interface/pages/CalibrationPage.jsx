@@ -12,6 +12,9 @@
  *   6. Signal global       — seuils de classification du score composite
  *   7. Anomalies           — nb indicateurs et fenêtre de détection
  *   8. Patterns (bucketing) — seuils mouvements prix, spread, L/S, basis
+ *   9. Positioning         — seuils L/S Ratio et P/C Ratio
+ *  10. Convergence         — critères et minimums
+ *  11. On-Chain            — Fear & Greed, Hash Rate, score interprétation
  */
 
 import { useState } from 'react'
@@ -220,6 +223,45 @@ export default function CalibrationPage() {
         {p('basis_back_max',  'Basis backwardation si <',            '%', 0.5, -20, 0)}
         {p('basis_flat_max',  'Basis flat si < (limite haute)',      '%', 0.5, 0, 20)}
         {p('basis_high_min',  'Basis high_contango si ≥',           '%', 0.5, 2, 50, true)}
+      </SectionCard>
+
+      {/* 9. Positioning */}
+      <SectionCard title="Positioning — L/S Ratio (retail)">
+        {p('ls_bullish',     'L/S bullish si ≥',         '', 0.05, 0.5, 3)}
+        {p('ls_bearish',     'L/S bearish si ≤',         '', 0.05, 0.3, 1)}
+        {p('ls_strong_bull', 'L/S fortement bullish si ≥','', 0.05, 1, 4)}
+        {p('ls_strong_bear', 'L/S fortement bearish si ≤','', 0.05, 0.2, 0.9, true)}
+      </SectionCard>
+
+      <SectionCard title="Positioning — P/C Ratio (institutionnel)">
+        {p('pc_bullish',     'P/C bullish si <',          '', 0.05, 0.3, 1.5)}
+        {p('pc_bearish',     'P/C bearish si >',          '', 0.05, 0.5, 2)}
+        {p('pc_strong_bull', 'P/C fortement bullish si <','', 0.05, 0.2, 1)}
+        {p('pc_strong_bear', 'P/C fortement bearish si >','', 0.05, 0.5, 3, true)}
+      </SectionCard>
+
+      {/* 10. Convergence */}
+      <SectionCard title="Convergence des critères">
+        {p('conv_min_hist', 'Points min. pour seuils dynamiques', '',  1, 5,  100)}
+        {p('conv_min',      'Critères min. → signal modéré',      '',  1, 1,  10)}
+        {p('conv_strong',   'Critères min. → signal fort',        '',  1, 2,  10, true)}
+      </SectionCard>
+
+      {/* 11. On-Chain */}
+      <SectionCard title="On-Chain — Fear & Greed">
+        {p('fg_extreme_fear', 'Indice ≤ seuil → Peur extrême', '', 1, 0,  40)}
+        {p('fg_fear',         'Indice ≤ seuil → Peur',         '', 1, 10, 60)}
+        {p('fg_neutral',      'Indice ≤ seuil → Neutre',       '', 1, 30, 70)}
+        {p('fg_greed',        'Indice ≤ seuil → Avidité',      '', 1, 50, 100)}
+        {p('fg_delta',        'Variation significative (momentum)', 'pts', 1, 1, 20, true)}
+      </SectionCard>
+
+      <SectionCard title="On-Chain — Hash Rate & Score">
+        {p('hashrate_bull',    'Hash rate > seuil → bullish (%/7j)',  '%', 1, 0,  30)}
+        {p('hashrate_bear',    'Hash rate < seuil → bearish (%/7j)',  '%', 1, -30, 0)}
+        {p('onchain_favorable','Score on-chain ≥ → favorable',        '', 1, 50, 100)}
+        {p('onchain_neutral',  'Score on-chain ≥ → neutre',           '', 1, 30, 80)}
+        {p('onchain_weak',     'Score on-chain ≤ → faible',           '', 1, 0,  60, true)}
       </SectionCard>
 
       {/* Reset global */}
