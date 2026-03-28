@@ -27,9 +27,9 @@ import { normalizeOnChain } from '../data/normalizers/format_data.js'
 import { computeSignal } from '../signals/signal_engine.js'
 import { hashData, smartCache } from '../data/data_store/cache.js'
 
-const SIGNAL_CACHE_VERSION = 'v1'
+const SIGNAL_CACHE_VERSION = 1
 const buildSignalCacheKey = (assetCode, kind) =>
-  `signals:${assetCode}:${SIGNAL_CACHE_VERSION}:${kind}`
+  `signals:${assetCode}:v${SIGNAL_CACHE_VERSION}:${kind}`
 
 /**
  * Fetch raw normalized market data for the given asset directly from providers.
@@ -153,12 +153,16 @@ export async function fetchSignals(asset) {
   const resultKey = buildSignalCacheKey(assetCode, 'result')
   const prevEntry = smartCache.get(inputKey)
   const cached = smartCache.get(resultKey)
-  const nextHash = hashData(signalInputs)
+  let nextHash = null
   if (prevEntry && cached) {
+    nextHash = hashData(signalInputs)
     if (prevEntry.hash === nextHash) {
-      return cached
+      const refreshed = { ...cached, timestamp: Date.now() }
+      smartCache.set(resultKey, refreshed)
+      return refreshed
     }
   }
+  if (!nextHash) nextHash = hashData(signalInputs)
 
   const { scores, global, signal, noviceData, maxPain, positioning } = computeSignal(signalInputs)
 
