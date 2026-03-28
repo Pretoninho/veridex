@@ -24,6 +24,44 @@ Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour t
 
 ---
 
+## Mode d’emploi — page Calibration
+
+La page **Calibration** permet d’ajuster les seuils utilisés par le moteur de signaux, la détection d’anomalies et le bucketing des patterns. Les changements sont appliqués **en temps réel** et **persistés dans le localStorage** (ils restent actifs après rechargement).
+
+### Accès
+- Ouvrez l’onglet **Calibration** depuis la navigation.
+- Un bandeau en haut indique le nombre de paramètres modifiés.
+
+### Organisation des sections
+Chaque carte correspond à un groupe de seuils :
+- **Filtre DVOL** (marché calme/agité)
+- **Score IV** (ratio IV courante / moyenne 30j)
+- **Score Funding** (% annualisé)
+- **Score Basis** (% annualisé)
+- **Score IV/RV** (prime IV − RV en points)
+- **Signal global** (seuils du score composite)
+- **Détection d’anomalies** (nb d’indicateurs et fenêtre)
+- **Bucketing des patterns** (mouvements prix, spreads, L/S, basis)
+- **Positioning** (L/S retail et P/C institutionnel)
+- **Convergence** (minimums de critères)
+- **On-Chain** (Fear & Greed, Hash Rate, score)
+
+### Modifier un seuil
+- Saisissez une nouvelle valeur dans le champ numérique.
+- Les **unités** sont indiquées à droite (%, pts, ms, etc.).
+- Un **point jaune** apparaît si la valeur diffère du défaut.
+
+### Réinitialiser
+- **Reset** à droite d’un paramètre : remet uniquement ce seuil à sa valeur par défaut.
+- **Réinitialiser tous les paramètres** (bouton en bas) : restaure l’ensemble des valeurs par défaut.
+
+### Bonnes pratiques
+- Ajustez par petites étapes pour isoler l’effet sur les scores.
+- Conservez un ordre logique des seuils (t1 < t2 < t3 < t4) pour éviter des scores incohérents.
+- Les seuils **Funding/Basis** sont en **% annualisé**, et les mouvements **Patterns** en **% de prix**.
+
+---
+
 ## Statut des fonctionnalités
 
 | Onglet | Statut | Contenu |
