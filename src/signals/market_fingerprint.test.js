@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyMove, computeAdvancedStats, TIMEFRAMES } from './market_fingerprint.js'
+import { classifyMove, computeAdvancedStats, createFingerprint, TIMEFRAMES } from './market_fingerprint.js'
 
 // ── TIMEFRAMES ────────────────────────────────────────────────────────────────
 
@@ -138,5 +138,61 @@ describe('computeAdvancedStats', () => {
     const result = computeAdvancedStats(stat)
     expect(result.probUp).toBe(0.333)
     expect(result.probDown).toBe(0.333)
+  })
+})
+
+// ── createFingerprint ─────────────────────────────────────────────────────────
+
+describe('createFingerprint', () => {
+  it('retourne un config et un hash non vides', () => {
+    const fp = createFingerprint({ ivRank: 55, fundingPct: 0.01, spreadPct: 0.2, lsRatio: 1.0, basisPct: 3 })
+    expect(fp).toHaveProperty('config')
+    expect(fp).toHaveProperty('hash')
+    expect(typeof fp.hash).toBe('string')
+    expect(fp.hash.length).toBeGreaterThan(0)
+  })
+
+  it('arrondit ivRank par tranches de 10', () => {
+    const fp = createFingerprint({ ivRank: 54 })
+    expect(fp.config.ivRankBucket).toBe(50)
+    const fp2 = createFingerprint({ ivRank: 56 })
+    expect(fp2.config.ivRankBucket).toBe(60)
+  })
+
+  it('classe le spread correctement', () => {
+    expect(createFingerprint({ spreadPct: 0.6 }).config.spreadBucket).toBe('wide')
+    expect(createFingerprint({ spreadPct: 0.3 }).config.spreadBucket).toBe('normal')
+    expect(createFingerprint({ spreadPct: 0.05 }).config.spreadBucket).toBe('tight')
+  })
+
+  it('classe le lsRatio correctement', () => {
+    expect(createFingerprint({ lsRatio: 1.5 }).config.lsBucket).toBe('long_heavy')
+    expect(createFingerprint({ lsRatio: 1.0 }).config.lsBucket).toBe('balanced')
+    expect(createFingerprint({ lsRatio: 0.7 }).config.lsBucket).toBe('short_heavy')
+  })
+
+  it('classe le basis correctement', () => {
+    expect(createFingerprint({ basisPct: 12 }).config.basisBucket).toBe('high_contango')
+    expect(createFingerprint({ basisPct: 5  }).config.basisBucket).toBe('contango')
+    expect(createFingerprint({ basisPct: 0  }).config.basisBucket).toBe('flat')
+    expect(createFingerprint({ basisPct: -5 }).config.basisBucket).toBe('backwardation')
+  })
+
+  it('deux configurations identiques produisent le même hash', () => {
+    const market = { ivRank: 50, fundingPct: 0.01, spreadPct: 0.2, lsRatio: 1.0, basisPct: 3 }
+    expect(createFingerprint(market).hash).toBe(createFingerprint(market).hash)
+  })
+
+  it('deux configurations différentes produisent des hashs différents', () => {
+    const fp1 = createFingerprint({ ivRank: 20, fundingPct: 0.01, spreadPct: 0.2, lsRatio: 1.0, basisPct: 3 })
+    const fp2 = createFingerprint({ ivRank: 80, fundingPct: 0.01, spreadPct: 0.2, lsRatio: 1.0, basisPct: 3 })
+    expect(fp1.hash).not.toBe(fp2.hash)
+  })
+
+  it('gere les valeurs nulles sans crash', () => {
+    expect(() => createFingerprint({})).not.toThrow()
+    const fp = createFingerprint({})
+    expect(fp.config.ivRankBucket).toBeNull()
+    expect(fp.config.spreadBucket).toBeNull()
   })
 })
