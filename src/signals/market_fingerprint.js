@@ -14,6 +14,7 @@
 
 import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../data/data_store/cache.js'
+import { FINGERPRINT_BUCKETING, TIMING, STORAGE_LIMITS } from '../config/signal_calibration.js'
 
 // ── Multi-timeframe configuration ────────────────────────────────────────────
 
@@ -39,9 +40,10 @@ function bucket(v, step) {
  * @returns {'wide'|'normal'|'tight'|null}
  */
 function spreadBucket(spreadPct) {
+  const spread_cfg = FINGERPRINT_BUCKETING.spread
   if (spreadPct == null) return null
-  if (spreadPct >= 0.5) return 'wide'
-  if (spreadPct >= 0.1) return 'normal'
+  if (spreadPct >= spread_cfg.wide) return 'wide'
+  if (spreadPct >= spread_cfg.normal) return 'normal'
   return 'tight'
 }
 
@@ -51,9 +53,10 @@ function spreadBucket(spreadPct) {
  * @returns {'long_heavy'|'balanced'|'short_heavy'|null}
  */
 function lsBucket(lsRatio) {
+  const ls_cfg = FINGERPRINT_BUCKETING.lsRatio
   if (lsRatio == null) return null
-  if (lsRatio >= 1.2) return 'long_heavy'
-  if (lsRatio <= 0.8) return 'short_heavy'
+  if (lsRatio >= ls_cfg.longHeavy) return 'long_heavy'
+  if (lsRatio <= ls_cfg.shortHeavy) return 'short_heavy'
   return 'balanced'
 }
 
@@ -63,10 +66,11 @@ function lsBucket(lsRatio) {
  * @returns {'high_contango'|'contango'|'flat'|'backwardation'|null}
  */
 function basisBucket(basisPct) {
+  const basis_cfg = FINGERPRINT_BUCKETING.basis
   if (basisPct == null) return null
-  if (basisPct >= 10) return 'high_contango'
-  if (basisPct >= 2)  return 'contango'
-  if (basisPct >= -2) return 'flat'
+  if (basisPct >= basis_cfg.highContango) return 'high_contango'
+  if (basisPct >= basis_cfg.contango)     return 'contango'
+  if (basisPct >= basis_cfg.flat)         return 'flat'
   return 'backwardation'
 }
 
@@ -174,9 +178,10 @@ export function computeAdvancedStats(stat) {
  * @returns {{ config: Object, hash: string }}
  */
 export function createFingerprint(market) {
+  const fb_cfg = FINGERPRINT_BUCKETING
   const config = {
-    ivRankBucket:  bucket(market.ivRank, 10),           // par tranches de 10
-    fundingBucket: bucket((market.fundingPct ?? 0) * 100, 5), // par tranches de 5%
+    ivRankBucket:  bucket(market.ivRank, fb_cfg.ivRank),           // par tranches configurées
+    fundingBucket: bucket((market.fundingPct ?? 0) * 100, fb_cfg.funding), // par tranches configurées
     spreadBucket:  spreadBucket(market.spreadPct),
     lsBucket:      lsBucket(market.lsRatio),
     basisBucket:   basisBucket(market.basisPct),
@@ -216,8 +221,8 @@ export async function recordPattern(fingerprint, spotPrice) {
   existing.count += 1
   existing.outcomes.push({ price: spotPrice, ts: Date.now() })
 
-  // Garder max 200 outcomes par pattern
-  if (existing.outcomes.length > 200) existing.outcomes.shift()
+  // Garder max outcomes configurés par pattern
+  if (existing.outcomes.length > STORAGE_LIMITS.MAX_OUTCOMES_PER_PATTERN) existing.outcomes.shift()
 
   await idbSet(key, existing)
 
@@ -257,23 +262,24 @@ export async function updateOutcomes(hash, currentPrice) {
   const now = Date.now()
   const ONE_HOUR  = 3_600_000
   const FOUR_HOURS = 4 * ONE_HOUR
-  const ONE_DAY   = 24 * ONE_HOUR
-  const ONE_WEEK  = 7 * ONE_DAY
+  const ONE_DAY = 24 * ONE_HOUR
+  const ONE_WEEK = 7 * ONE_DAY
+  const ow = TIMING.outcomeWindows
 
   record.outcomes = record.outcomes.map(o => {
     const age = now - o.ts
     const ret = o.price > 0 ? ((currentPrice - o.price) / o.price) * 100 : null
 
-    if (!o.result_1h  && age >= ONE_HOUR   && age < ONE_HOUR   + 300_000) {
+    if (!o.result_1h  && age >= ONE_HOUR   && age < ONE_HOUR  + ow.oneHour) {
       o.result_1h  = ret
       if (ret != null) _applyMove(record.patternStats['1h'], ret)
     }
-    if (!o.result_4h  && age >= FOUR_HOURS && age < FOUR_HOURS + 300_000) o.result_4h  = ret
-    if (!o.result_24h && age >= ONE_DAY    && age < ONE_DAY    + 300_000) {
+    if (!o.result_4h  && age >= FOUR_HOURS && age < FOUR_HOURS + ow.fourHours) o.result_4h  = ret
+    if (!o.result_24h && age >= ONE_DAY    && age < ONE_DAY   + ow.twentyFourHours) {
       o.result_24h = ret
       if (ret != null) _applyMove(record.patternStats['24h'], ret)
     }
-    if (!o.result_7d  && age >= ONE_WEEK   && age < ONE_WEEK   + 300_000) {
+    if (!o.result_7d  && age >= ONE_WEEK   && age < ONE_WEEK  + ow.sevenDays) {
       o.result_7d  = ret
       if (ret != null) _applyMove(record.patternStats['7d'], ret)
     }

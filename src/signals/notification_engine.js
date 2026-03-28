@@ -18,6 +18,7 @@
 
 import { sendNotification, getThresholds } from './notification_manager.js'
 import { getSettlementHistory }            from './settlement_tracker.js'
+import { TIMING }                          from '../config/signal_calibration.js'
 
 // ── État interne ──────────────────────────────────────────────────────────────
 // Persisté en mémoire — réinitialisé au rechargement de l'app.
@@ -140,7 +141,7 @@ async function _checkLiquidations(asset, liqUSD, t) {
   const now = Date.now()
 
   // Reset la fenêtre si > 1h
-  if (now - _state.liqWindowStart > 3_600_000) {
+  if (now - _state.liqWindowStart > TIMING.LIQUIDATION_WINDOW_MS) {
     _state.liqAccumulator.BTC = 0
     _state.liqAccumulator.ETH = 0
     _state.liqWindowStart = now
@@ -264,9 +265,10 @@ async function _checkSettlement(asset, t) {
     const dayOfMonth = settlDate.getUTCDate()
     const month      = settlDate.getUTCMonth() + 1
 
-    const isWeekly     = dayOfWeek === 5
-    const isMonthly    = isWeekly && dayOfMonth >= 25
-    const isQuarterly  = isMonthly && [3, 6, 9, 12].includes(month)
+    const sm = TIMING.settlementMarkers
+    const isWeekly     = dayOfWeek === sm.weeklyDay
+    const isMonthly    = isWeekly && dayOfMonth >= sm.monthlyDayMin
+    const isQuarterly  = isMonthly && sm.quarterlyMonths.includes(month)
 
     let level    = 'info'
     let priority = 'Quotidien'
@@ -405,14 +407,14 @@ async function _checkFundingFixing(t) {
   const utcM     = now.getUTCMinutes()
   const totalMin = utcH * 60 + utcM
 
-  const fixings    = [0, 8 * 60, 16 * 60]
   const warningMin = t.funding_fixing_warning / 60_000
 
-  for (const fixing of fixings) {
+  for (const fixingTime of TIMING.FUNDING_FIXING_TIMES) {
+    const fixing = fixingTime.hour * 60 + fixingTime.minute
     const diff = fixing - totalMin
 
     if (diff > 0 && diff <= warningMin) {
-      const fixingHour = String(Math.floor(fixing / 60)).padStart(2, '0')
+      const fixingHour = String(fixingTime.hour).padStart(2, '0')
       const key = `fixing_${fixing}_${now.toISOString().slice(0, 10)}`
 
       if (!_state.fixingNotified.has(key)) {
