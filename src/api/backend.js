@@ -25,7 +25,7 @@ import {
 } from '../data/providers/onchain.js'
 import { normalizeOnChain } from '../data/normalizers/format_data.js'
 import { computeSignal } from '../signals/signal_engine.js'
-import { smartCache } from '../data/data_store/cache.js'
+import { hashData, smartCache } from '../data/data_store/cache.js'
 
 const SIGNAL_CACHE_VERSION = 'v1'
 
@@ -151,10 +151,10 @@ export async function fetchSignals(asset) {
   const resultKey = `signals:${a}:${SIGNAL_CACHE_VERSION}:result`
   const prevHash = smartCache.getHash(inputKey)
   const cached = smartCache.get(resultKey)
-  smartCache.set(inputKey, signalInputs)
-
-  const inputsChanged = smartCache.hasChanged(inputKey, prevHash)
+  const nextHash = hashData(signalInputs)
+  const inputsChanged = prevHash === null || nextHash !== prevHash
   if (!inputsChanged && cached) return cached
+  smartCache.set(inputKey, signalInputs)
 
   const { scores, global, signal, noviceData, maxPain, positioning } = computeSignal(signalInputs)
 
