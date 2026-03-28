@@ -155,10 +155,8 @@ export async function fetchSignals(asset) {
   const nextHash = hashData(signalInputs)
   const inputsChanged = prevHash === null || nextHash !== prevHash
 
-  if (!inputsChanged && cached) {
-    const refreshed = { ...cached, timestamp: Date.now() }
-    smartCache.set(resultKey, refreshed)
-    return refreshed
+  if (!inputsChanged) {
+    if (cached) return cached
   }
 
   smartCache.set(inputKey, signalInputs)
