@@ -28,6 +28,8 @@ import { computeSignal } from '../signals/signal_engine.js'
 import { hashData, smartCache } from '../data/data_store/cache.js'
 
 const SIGNAL_CACHE_VERSION = 'v1'
+const buildSignalCacheKey = (assetCode, kind) =>
+  `signals:${assetCode}:${SIGNAL_CACHE_VERSION}:${kind}`
 
 /**
  * Fetch raw normalized market data for the given asset directly from providers.
@@ -147,14 +149,18 @@ export async function fetchSignals(asset) {
     pcRatio:      market.pcRatio      ?? null,
   }
 
-  const inputKey  = `signals:${assetCode}:${SIGNAL_CACHE_VERSION}:inputs`
-  const resultKey = `signals:${assetCode}:${SIGNAL_CACHE_VERSION}:result`
+  const inputKey  = buildSignalCacheKey(assetCode, 'inputs')
+  const resultKey = buildSignalCacheKey(assetCode, 'result')
   const prevInputs = smartCache.get(inputKey)
   const cached = smartCache.get(resultKey)
   const nextHash = hashData(signalInputs)
   if (prevInputs && cached) {
     const prevHash = hashData(prevInputs)
-    if (prevHash === nextHash) return cached
+    if (prevHash === nextHash) {
+      const refreshed = { ...cached, timestamp: Date.now() }
+      smartCache.set(resultKey, refreshed)
+      return refreshed
+    }
   } else if (prevInputs || cached) {
     smartCache.delete(inputKey)
     smartCache.delete(resultKey)
