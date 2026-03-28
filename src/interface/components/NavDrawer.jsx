@@ -94,16 +94,85 @@ function IconNotifications() {
   )
 }
 
+function IconVol() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="2 20 7 10 12 15 16 6 22 20"/>
+    </svg>
+  )
+}
+
+function IconTracker() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="1"/>
+      <circle cx="12" cy="12" r="5"/>
+      <circle cx="12" cy="12" r="9"/>
+    </svg>
+  )
+}
+
+function IconAssistant() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+      <path d="M2 17l10 5 10-5"/>
+      <path d="M2 12l10 5 10-5"/>
+    </svg>
+  )
+}
+
+function IconCalibration() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <line x1="12" y1="2" x2="12" y2="5"/>
+      <line x1="12" y1="19" x2="12" y2="22"/>
+      <line x1="2" y1="12" x2="5" y2="12"/>
+      <line x1="19" y1="12" x2="22" y2="12"/>
+      <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/>
+      <line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+      <line x1="19.78" y1="4.22" x2="17.66" y2="6.34"/>
+      <line x1="6.34" y1="17.66" x2="4.22" y2="19.78"/>
+    </svg>
+  )
+}
+
+function IconFingerprint() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2C6.48 2 2 6.48 2 12"/>
+      <path d="M12 6c3.31 0 6 2.69 6 6"/>
+      <path d="M12 10c1.1 0 2 .9 2 2"/>
+      <path d="M12 14c-1.1 0-2-.9-2-2 0-1.1.9-2 2-2"/>
+      <path d="M6 12c0-3.31 2.69-6 6-6"/>
+      <path d="M12 18c-3.31 0-6-2.69-6-6"/>
+      <path d="M18 12c0 3.31-2.69 6-6 6"/>
+      <path d="M22 12c0 5.52-4.48 10-10 10"/>
+    </svg>
+  )
+}
+
 // ── Items de navigation ───────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { id: 'market',        label: 'Market',        sub: 'Prix · VWAP · Spread',          Icon: IconMarket         },
-  { id: 'deriv',         label: 'Dérivés',        sub: 'Funding · OI · Term Structure', Icon: IconDeriv          },
-  { id: 'options',       label: 'Options',        sub: 'IV · Greeks · DVOL',            Icon: IconOptions        },
-  { id: 'signals',       label: 'Signaux',        sub: 'Score · Expert · Simple',       Icon: IconSignals        },
-  { id: 'onchain',       label: 'On-Chain',       sub: 'Mempool · Exchange Flows',      Icon: IconOnChain        },
-  { id: 'audit',         label: 'Audit',          sub: 'Journal · Anomalies · Hashes',  Icon: IconAudit          },
-  { id: 'notifications', label: 'Notifications',  sub: 'Alertes push · Seuils',         Icon: IconNotifications  },
+  { id: 'market',        label: 'Market',           sub: 'Prix · VWAP · Spread',          Icon: IconMarket         },
+  { id: 'deriv',         label: 'Dérivés',           sub: 'Funding · OI · Term Structure', Icon: IconDeriv          },
+  { id: 'options',       label: 'Options',           sub: 'IV · Greeks · DVOL',            Icon: IconOptions        },
+  { id: 'signals',       label: 'Signaux',           sub: 'Score · Expert · Simple',       Icon: IconSignals        },
+  { id: 'vol',           label: 'Volatilité',        sub: 'IV/RV · Greeks · Skew · Smile', Icon: IconVol            },
+  { id: 'tracker',       label: 'IV Live',           sub: 'Tracker temps réel · Alertes',  Icon: IconTracker        },
+  { id: 'assistant',     label: 'Assistant',         sub: 'Décision · Trade · Simulation', Icon: IconAssistant      },
+  { id: 'onchain',       label: 'On-Chain',          sub: 'Mempool · Exchange Flows',      Icon: IconOnChain        },
+  { id: 'audit',         label: 'Audit',             sub: 'Journal · Anomalies · Hashes',  Icon: IconAudit          },
+  { id: 'notifications', label: 'Notifications',     sub: 'Alertes push · Seuils',         Icon: IconNotifications  },
+  { id: 'calibration',   label: 'Calibration',        sub: 'Signaux · Patterns · Seuils',   Icon: IconCalibration    },
+  { id: 'fingerprint',  label: 'Fingerprint Debug',   sub: 'Patterns · Stats · Monitoring', Icon: IconFingerprint    },
 ]
 
 // ── Composant ─────────────────────────────────────────────────────────────────

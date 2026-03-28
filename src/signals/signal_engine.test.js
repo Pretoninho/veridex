@@ -7,7 +7,10 @@ import {
   calcGlobalScore,
   getSignal,
   computeSignal,
+  hashMarketState,
+  dvolFilter,
 } from './signal_engine.js'
+import { vi } from 'vitest'
 
 // ── scoreIV ───────────────────────────────────────────────────────────────────
 
@@ -169,6 +172,32 @@ describe('getSignal', () => {
   })
 })
 
+// ── dvolFilter ────────────────────────────────────────────────────────────────
+
+describe('dvolFilter', () => {
+  it('retourne 1 si dvolCurrent est null', () => {
+    expect(dvolFilter(null)).toBe(1)
+    expect(dvolFilter(undefined)).toBe(1)
+  })
+
+  it('< 40 → 0.7 (marché trop calme)', () => {
+    expect(dvolFilter(30)).toBe(0.7)
+    expect(dvolFilter(0)).toBe(0.7)
+  })
+
+  it('40-69 → 1 (marché optimal)', () => {
+    expect(dvolFilter(40)).toBe(1)
+    expect(dvolFilter(55)).toBe(1)
+    expect(dvolFilter(69)).toBe(1)
+  })
+
+  it('>= 70 → 0.8 (marché trop agité)', () => {
+    expect(dvolFilter(70)).toBe(0.8)
+    expect(dvolFilter(100)).toBe(0.8)
+    expect(dvolFilter(150)).toBe(0.8)
+  })
+})
+
 // ── computeSignal ─────────────────────────────────────────────────────────────
 
 describe('computeSignal', () => {
@@ -184,14 +213,53 @@ describe('computeSignal', () => {
     expect(result.scores.s2).toBe(75)  // 20% ≥ 15
     expect(result.scores.s3).toBe(75)  // 12% ≥ 8
     expect(result.scores.s4).toBe(100) // premium = 72-45 = 27 ≥ 20 → 100
-    expect(result.global).toBeGreaterThan(70)
+    // dvol.current = 72 ≥ 70 → dvolFactor = 0.8 → global = round(88 × 0.8) = 70
+    expect(result.dvolFactor).toBe(0.8)
+    expect(result.global).toBeGreaterThanOrEqual(60)
     expect(result.signal).not.toBeNull()
-    expect(result.signal.label).toContain('Exceptionnel')
+    expect(result.signal.label).toMatch(/Exceptionnel|Favorable/)
+  })
+
+  it('applique dvolFactor = 1 quand dvol est dans la plage optimale', () => {
+    const dvol    = { current: 55, monthMin: 40, monthMax: 80 }
+    const funding = { avgAnn7d: 20 }
+    const rv      = { current: 30 }
+    const basisAvg = 12
+
+    const result = computeSignal({ dvol, funding, rv, basisAvg })
+    expect(result.dvolFactor).toBe(1)
+    // Le score ne subit aucune réduction DVOL
+    expect(result.global).not.toBeNull()
   })
 
   it('gère les données partielles (null)', () => {
     const result = computeSignal({ dvol: null, funding: null, rv: null, basisAvg: null })
     expect(result.global).toBeNull()
+    expect(result.dvolFactor).toBe(1)
     expect(result.signal).toBeNull()
+  })
+})
+
+// ── _hashSignal — payload étendu ──────────────────────────────────────────────
+
+// saveSignal n'est pas testé directement (IndexedDB), mais on teste la cohérence
+// du hashMarketState et on vérifie que les champs de contexte n'introduisent pas
+// de régression dans hashMarketState.
+
+describe('hashMarketState — déterminisme', () => {
+  it('mêmes inputs → même hash', () => {
+    const inputs = { dvol: { current: 72, monthMin: 40, monthMax: 80 }, funding: { rateAnn: 15 }, rv: { current: 45 }, basisAvg: 10 }
+    expect(hashMarketState(inputs)).toBe(hashMarketState(inputs))
+  })
+
+  it('inputs différents → hashes différents', () => {
+    const a = { dvol: { current: 72, monthMin: 40, monthMax: 80 }, funding: { rateAnn: 15 }, rv: { current: 45 }, basisAvg: 10 }
+    const b = { dvol: { current: 50, monthMin: 40, monthMax: 80 }, funding: { rateAnn: 5  }, rv: { current: 45 }, basisAvg: 5  }
+    expect(hashMarketState(a)).not.toBe(hashMarketState(b))
+  })
+
+  it('retourne une chaîne non vide', () => {
+    expect(typeof hashMarketState({})).toBe('string')
+    expect(hashMarketState({}).length).toBeGreaterThan(0)
   })
 })

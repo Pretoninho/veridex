@@ -26,6 +26,28 @@ import { calculateMaxPainByExpiry, interpretMaxPain } from '../core/volatility/m
 import { calcPositioningScore, interpretPositioning } from './positioning_score.js'
 import { SCORE_THRESHOLDS, SIGNAL_BOUNDARIES, TIMING, STORAGE_LIMITS, getComponentWeights } from '../config/signal_calibration.js'
 
+// ── Filtre DVOL ───────────────────────────────────────────────────────────────
+
+/**
+ * Facteur de pondération contextuel basé sur le niveau DVOL.
+ * Réduit la confiance du signal quand le marché est trop calme ou trop agité.
+ *
+ * @param {number|null} dvolCurrent — valeur courante du DVOL (ex: 55)
+ * @returns {number} facteur multiplicateur entre 0.7 et 1.0
+ */
+export function dvolFilter(dvolCurrent) {
+  if (dvolCurrent == null) return 1
+
+  // Marché trop calme → signal faible
+  if (dvolCurrent < 40) return 0.7
+
+  // Marché optimal
+  if (dvolCurrent < 70) return 1
+
+  // Marché trop agité → réduire la confiance
+  return 0.8
+}
+
 // ── Fonctions de score par composante ────────────────────────────────────────
 
 /**
@@ -212,7 +234,9 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
   const s4 = scoreIVvsRV(dvol, rv)
   const s5 = onChainScore ?? null
   const s6 = calcPositioningScore(lsRatio, pcRatio)
-  const global = calcGlobalScore(s1, s2, s3, s4, s5, s6)
+  const rawGlobal  = calcGlobalScore(s1, s2, s3, s4, s5, s6)
+  const dvolFactor = dvolFilter(dvol?.current ?? null)
+  const global     = rawGlobal != null ? Math.round(rawGlobal * dvolFactor) : null
   const positioning = interpretPositioning(lsRatio, pcRatio, s6)
 
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
@@ -250,6 +274,7 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
   return {
     scores:     { s1, s2, s3, s4, s5, s6 },
     global,
+    dvolFactor,
     signal:     getSignal(global),
     noviceData,
     maxPain:    maxPainResult,
@@ -397,7 +422,15 @@ const MAX_SIGNALS_STORED = STORAGE_LIMITS.MAX_SIGNALS_STORED
  * @returns {string} hash FNV-1a
  */
 function _hashSignal(ctx) {
-  const str = `${ctx.asset}|${ctx.score}|${ctx.recommendation}|${ctx.marketHash ?? ''}|${JSON.stringify(ctx.conditions ?? {})}`
+  const str = [
+    ctx.asset,
+    ctx.score,
+    ctx.recommendation,
+    ctx.marketHash ?? '',
+    JSON.stringify(ctx.conditions ?? {}),
+    ctx.strategySignature ?? 'NO_STRATEGY',
+    ctx.marketRegime ?? '',
+  ].join('|')
   return fnv1a(str)
 }
 

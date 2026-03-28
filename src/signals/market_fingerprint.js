@@ -9,12 +9,17 @@
  *
  * Persistance : IndexedDB via idb-keyval
  *   clé : 'mf_' + fingerprint_hash
- *   valeur : { config, outcomes: [{ price, ts }], count }
+ *   valeur : { config, outcomes: [{ price, ts }], count, patternStats }
  */
 
 import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../data/data_store/cache.js'
 import { FINGERPRINT_BUCKETING, TIMING, STORAGE_LIMITS } from '../config/signal_calibration.js'
+
+// ── Multi-timeframe configuration ────────────────────────────────────────────
+
+/** Supported tracking timeframes. */
+export const TIMEFRAMES = ['1h', '24h', '7d']
 
 // ── Multi-timeframe configuration ────────────────────────────────────────────
 
@@ -235,8 +240,9 @@ export async function recordPattern(fingerprint, spotPrice) {
 }
 
 /**
- * Enregistre le résultat prix à +1h, +4h, +24h après un snapshot.
+ * Enregistre le résultat prix à +1h, +4h, +24h, +7d après un snapshot.
  * À appeler périodiquement avec le prix actuel pour mettre à jour les outcomes.
+ * Met également à jour les statistiques multi-timeframes agrégées (patternStats).
  *
  * Principe : comparer le prix actuel à celui du snapshot enregistré
  * et calculer le % de variation pour les outcomes passés.
@@ -250,8 +256,16 @@ export async function updateOutcomes(hash, currentPrice) {
   const record = await idbGet(key)
   if (!record) return
 
+  // Initialise patternStats si absent (migration des données existantes)
+  if (!record.patternStats) {
+    record.patternStats = {}
+    for (const tf of TIMEFRAMES) {
+      record.patternStats[tf] = emptyTimeframeStat()
+    }
+  }
+
   const now = Date.now()
-  const ONE_HOUR = 3_600_000
+  const ONE_HOUR  = 3_600_000
   const FOUR_HOURS = 4 * ONE_HOUR
   const ONE_DAY = 24 * ONE_HOUR
   const ow = TIMING.outcomeWindows
@@ -281,7 +295,8 @@ export async function updateOutcomes(hash, currentPrice) {
  *   winRate_1h: number|null,    — % de fois où le prix a monté à 1h
  *   winRate_4h: number|null,
  *   avgMove_24h: number|null,   — variation moyenne % à 24h
- *   config: Object|null
+ *   config: Object|null,
+ *   patternStats: Object|null   — statistiques multi-timeframes agrégées
  * }>}
  */
 /**
@@ -328,5 +343,6 @@ export async function getPatternStats(hash) {
     winRate_4h:  winRate('result_4h'),
     avgMove_24h: avgMove('result_24h'),
     config: record.config,
+    patternStats: record.patternStats ?? null,
   }
 }

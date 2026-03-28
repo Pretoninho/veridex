@@ -106,26 +106,41 @@ export function calculateMaxPain(instruments, spotPrice) {
 
   if (strikes.length === 0) return null
 
-  // ── Étape 2 : Calculer la douleur par strike ──────────────────────────────
+  // ── Étape 2 : Calculer la douleur par strike (O(N) via prefix/suffix sums) ──
   // Pour chaque strike candidat S :
-  // Douleur = Σ OI_call_k × max(0, S-k) + Σ OI_put_k × max(0, k-S)
+  // Douleur = Σ OI_call_k × max(0, S−k) + Σ OI_put_k × max(0, k−S)
+  //
+  // Reformulation :
+  //   callPain(S) = S × Σ_{k<S} callOI_k  −  Σ_{k<S} callOI_k × k
+  //   putPain(S)  = Σ_{k>S} putOI_k × k   −  S × Σ_{k>S} putOI_k
+  //
+  // Les sommes sont calculées en O(N) avec des tableaux préfixe/suffixe,
+  // ce qui remplace la boucle imbriquée O(N²) précédente.
 
-  const painByStrike = strikes.map(candidate => {
-    let pain = 0
+  const n = strikes.length
 
-    for (const strike of strikes) {
-      const { callOI, putOI } = byStrike[strike]
+  // Tableaux de prefix sums (exclusif) pour les calls
+  const prefCallOI  = new Array(n).fill(0)
+  const prefCallOIK = new Array(n).fill(0)
+  for (let i = 1; i < n; i++) {
+    const { callOI } = byStrike[strikes[i - 1]]
+    prefCallOI[i]  = prefCallOI[i - 1]  + callOI
+    prefCallOIK[i] = prefCallOIK[i - 1] + callOI * strikes[i - 1]
+  }
 
-      if (candidate > strike && callOI > 0) {
-        pain += (candidate - strike) * callOI
-      }
+  // Tableaux de suffix sums (exclusif) pour les puts
+  const sufPutOI  = new Array(n).fill(0)
+  const sufPutOIK = new Array(n).fill(0)
+  for (let i = n - 2; i >= 0; i--) {
+    const { putOI } = byStrike[strikes[i + 1]]
+    sufPutOI[i]  = sufPutOI[i + 1]  + putOI
+    sufPutOIK[i] = sufPutOIK[i + 1] + putOI * strikes[i + 1]
+  }
 
-      if (candidate < strike && putOI > 0) {
-        pain += (strike - candidate) * putOI
-      }
-    }
-
-    return { strike: candidate, pain }
+  const painByStrike = strikes.map((candidate, i) => {
+    const callPain = candidate * prefCallOI[i] - prefCallOIK[i]
+    const putPain  = sufPutOIK[i] - candidate * sufPutOI[i]
+    return { strike: candidate, pain: callPain + putPain }
   })
 
   // ── Étape 3 : Identifier le Max Pain ──────────────────────────────────────
@@ -209,8 +224,40 @@ export function calculateMaxPain(instruments, spotPrice) {
 
 // ── Calcul par échéance ───────────────────────────────────────────────────────
 
+// Cache d'un seul résultat pour éviter les recalculs redondants lorsque les
+// données n'ont pas changé entre deux appels successifs (intervalles 15-30 s).
+let _cacheKey    = null
+let _cacheResult = null
+
+/**
+ * Calcule une empreinte légère d'un tableau d'instruments.
+ * Combine la longueur, les noms et l'open interest pour détecter tout changement.
+ * @param {Array} instruments
+ * @param {number} spotPrice
+ * @returns {string}
+ */
+function _instrumentsKey(instruments, spotPrice) {
+  // Mix in length and a truncated integer representation of spot price
+  const spotInt = spotPrice * 100 | 0
+  let h = instruments.length ^ spotInt
+  for (let i = 0; i < instruments.length; i++) {
+    const inst = instruments[i]
+    const name = inst.name ?? inst.instrument_name ?? ''
+    const oi   = Number(inst.openInterest ?? inst.open_interest ?? inst.oi ?? 0)
+    // polynomial rolling hash (multiplier 33, as in djb2)
+    for (let j = 0; j < name.length; j++) {
+      h = (Math.imul(h, 33) + name.charCodeAt(j)) | 0
+    }
+    h = (Math.imul(h, 33) + (oi | 0)) | 0
+  }
+  return String(h)
+}
+
 /**
  * Calcule le Max Pain pour toutes les échéances disponibles.
+ *
+ * Les résultats sont mémoïsés : si les instruments et le spot n'ont pas changé
+ * depuis le dernier appel, la valeur en cache est retournée immédiatement.
  *
  * @param {Array} allInstruments — tableau brut de get_book_summary_by_currency
  * @param {number} spotPrice
@@ -218,6 +265,9 @@ export function calculateMaxPain(instruments, spotPrice) {
  */
 export function calculateMaxPainByExpiry(allInstruments, spotPrice) {
   if (!allInstruments?.length || !spotPrice) return []
+
+  const key = _instrumentsKey(allInstruments, spotPrice)
+  if (key === _cacheKey) return _cacheResult
 
   const byExpiry = {}
 
@@ -229,16 +279,16 @@ export function calculateMaxPainByExpiry(allInstruments, spotPrice) {
     // Exclure les échéances déjà expirées
     if (parsed.daysToExpiry < 0) continue
 
-    const key = parsed.expiryStr
-    if (!byExpiry[key]) {
-      byExpiry[key] = {
-        expiryStr:    key,
+    const expiryKey = parsed.expiryStr
+    if (!byExpiry[expiryKey]) {
+      byExpiry[expiryKey] = {
+        expiryStr:    expiryKey,
         expiry:       parsed.expiry,
         daysToExpiry: parsed.daysToExpiry,
         instruments:  [],
       }
     }
-    byExpiry[key].instruments.push(inst)
+    byExpiry[expiryKey].instruments.push(inst)
   }
 
   const results = []
@@ -265,7 +315,10 @@ export function calculateMaxPainByExpiry(allInstruments, spotPrice) {
     }
   }
 
-  return results.sort((a, b) => a.expiry - b.expiry)
+  const sorted = results.sort((a, b) => a.expiry - b.expiry)
+  _cacheKey    = key
+  _cacheResult = sorted
+  return sorted
 }
 
 // ── Interprétation ────────────────────────────────────────────────────────────

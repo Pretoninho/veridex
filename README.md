@@ -9,13 +9,37 @@ options, futures, funding, IV, Greeks, signaux — données en temps réel depui
 |---|---|
 | **Market** | Prix spot 3 exchanges (Deribit index, Binance, Coinbase), VWAP pondéré volume, spread cross-exchange |
 | **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest restructuré en 3 sous-sections (Deribit Options · Binance Perps · Signal Combiné), sentiment Long/Short (Binance), liquidations, countdown prochain fixing funding |
-| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI, prix de règlement, onglet Signaux avec couche Expert/Simple (Claude API) |
-| **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain · Positionnement), tableau positionnement croisé Retail/Institutionnels (mode Expert), 3 blocs recommandations indépendants (Spot / Futures / Options), couche Expert et Simple (6 tons paramétrables, génération Claude API) |
-| **Trade** | *(en développement)* |
-| **On-Chain** | Score on-chain composite, Mempool, Exchange Flows, Mining — couche Expert/Simple |
-| **Audit** | Journal de hashage unifié (Signaux · Anomalies · Patterns · Cache), Vue générale avec stats et description des sources. Accessible via l'icône ⚙ dans le header. |
+| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI, prix de règlement, onglet Signaux avec recommandations stratégies |
+| **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain · Positionnement), top patterns par EV, clustering Bull/Bear, confluence multi-signaux, insights analytiques (Claude API), 3 blocs recommandations indépendants (Spot / Futures / Options) |
+| **Volatilité** | IV/RV, Greeks ATM (Black-Scholes), skew 25-delta, smile, term structure — chargement manuel |
+| **IV Live** | Tracker IV temps réel, alertes spike, historique CSV — streaming WebSocket ou polling configurable |
+| **Trade** | Gestion positions paper trading, P&L simulation, historique settlements |
+| **Assistant** | Moteur de décision IA (LONG/SHORT/NEUTRAL), simulation portfolio, régime de marché, Monte Carlo, risque de ruine |
+| **On-Chain** | Score on-chain composite, Fear & Greed, Mempool, Exchange Flows, Mining, whale transactions |
+| **Audit** | Journal de hashage unifié (Signaux · Anomalies · Patterns · Cache), Vue générale avec stats et description des sources. Accessible via l'icône ≡ dans le header. |
+| **Notifications** | Configuration seuils d'alerte push, cooldowns anti-spam, historique des 20 dernières notifications |
+| **Calibration** | Paramètres de calibration des seuils signaux : IV, Funding, Basis, IV/RV, anomalies, bucketing patterns |
 
 Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour tous les onglets simultanément.
+
+---
+
+## Statut des fonctionnalités
+
+| Onglet | Statut | Contenu |
+|---|---|---|
+| **Market** | ✅ Complet | Prix spot 3 exchanges, VWAP, spreads cross-exchange |
+| **Dérivés** | ✅ Complet | Funding, futures, OI, liquidations, countdown funding |
+| **Options** | ✅ Complet | IV cross-exchange, Greeks, OI multi-source, settlements |
+| **Signaux** | ✅ Complet | Score composite, patterns EV, confluence, insights IA |
+| **Volatilité** | ✅ Complet | IV/RV, Greeks, skew, smile, term structure ATM |
+| **IV Live** | ✅ Complet | Tracker temps réel, alertes, historique CSV, WebSocket |
+| **Trade** | ✅ Complet | Gestion positions paper trading, P&L, historique |
+| **Assistant** | ✅ Complet | Décision IA, portfolio simulation, Monte Carlo, régime marché |
+| **On-Chain** | ✅ Complet | Composite score, Fear & Greed, Mempool, Exchange Flows, Mining |
+| **Audit** | ✅ Complet | Journal de hashage, anomalies, patterns, stats cache |
+| **Notifications** | ✅ Complet | Configuration seuils, cooldowns, historique |
+| **Calibration** | ✅ Complet | Paramètres IV, Funding, Basis, IV/RV, anomalies, patterns |
 
 ---
 
@@ -23,54 +47,92 @@ Le sélecteur d'actif (BTC / ETH) dans le header est global — il met à jour t
 
 ```
 src/
-├── data_core/                      ← Couche données (source unique de vérité)
+├── data/                           ← Couche données (source unique de vérité)
 │   ├── providers/
 │   │   ├── deribit.js              ← REST Deribit : index, options, DVOL, OI, funding, RV, settlement
 │   │   ├── binance.js              ← REST Binance : spot, perp, funding, OI, sentiment, liquidations
 │   │   ├── coinbase.js             ← REST Coinbase Exchange : spot fiat USD
-│   │   └── onchain.js              ← On-chain : blockchain.info, mempool.space, Glassnode, CryptoQuant
+│   │   ├── onchain.js              ← On-chain : blockchain.info, mempool.space, Glassnode, CryptoQuant
+│   │   └── clock_sync.js           ← Synchronisation horloges cross-exchange
 │   ├── normalizers/
 │   │   └── format_data.js          ← Format canonique unifié + validateDataFreshness + normalizeOnChain
 │   ├── data_store/
 │   │   └── cache.js                ← SmartCache FNV-1a (hash-based, évite re-renders React inutiles)
-│   └── index.js                    ← Façade dataCore + exports unifiés
+│   ├── streams/
+│   │   ├── polling.js              ← Polling REST générique
+│   │   └── websocket.js            ← WebSocket Deribit (IV Live)
+│   └── index.js                    ← Façade données + exports unifiés
 │
-├── data_processing/                ← Calculs financiers et signaux
+├── core/                           ← Calculs financiers de base
 │   ├── volatility/
 │   │   ├── greeks.js               ← Black-Scholes : delta, gamma, vega, theta
 │   │   ├── iv_rank.js              ← IV Rank, IV Percentile, détection spike
-│   │   └── skew.js                 ← Skew 25-delta
+│   │   ├── skew.js                 ← Skew 25-delta
+│   │   └── max_pain.js             ← Calcul Max Pain options
 │   ├── market_structure/
 │   │   └── term_structure.js       ← Basis annualisé, contango/backwardation
 │   ├── history/
 │   │   └── metric_history.js       ← Historique snapshots options
-│   └── signals/
-│       ├── signal_engine.js        ← Score composite (IV 30% · Funding 20% · Basis 20% · IV/RV 15% · On-Chain 10-15% · Positionnement 15%)
-│       ├── signal_interpreter.js   ← 3 blocs recommandations : Spot / Futures / Options (+ contexte positionnement)
-│       ├── positioning_score.js    ← Score s6 : divergence Retail (Binance L/S) vs Institutionnels (Deribit P/C)
-│       ├── market_fingerprint.js   ← Fingerprint marché IndexedDB (pattern matching)
-│       ├── onchain_signals.js      ← Signaux on-chain : Exchange flows, Mempool, Mining
-│       ├── tone_config.js          ← 6 tons paramétrables (humor, formal, serious, pedagogical, motivational, storytelling)
-│       └── novice_generator.js     ← Génération Claude API (claude-haiku) avec fallback statique
+│   └── index.js
 │
-├── components/
-│   ├── ToneSelector.jsx            ← Grille 3×2 de sélection du ton (couche Simple)
-│   ├── ClockStatus.jsx             ← Indicateur drift horloges cross-exchange (invisible si OK)
-│   ├── HashJournal.jsx             ← Journal unifié hashage (Signal/Anomalie/Pattern/Cache)
-│   └── AuditBanner.jsx             ← Bandeau d'alerte anomalie fixe (dismissable, poll 30s)
+├── signals/                        ← Moteur de signaux et détection
+│   ├── signal_engine.js            ← Score composite (IV 30% · Funding 20% · Basis 20% · IV/RV 15% · On-Chain 10-15% · Positionnement 15%)
+│   ├── signal_interpreter.js       ← 3 blocs recommandations : Spot / Futures / Options (+ contexte positionnement)
+│   ├── signal_calibration.js       ← Paramètres de calibration persistés (localStorage)
+│   ├── positioning_score.js        ← Score s6 : divergence Retail (Binance L/S) vs Institutionnels (Deribit P/C)
+│   ├── market_fingerprint.js       ← Fingerprint marché IndexedDB (pattern matching)
+│   ├── onchain_signals.js          ← Signaux on-chain : Exchange flows, Mempool, Mining
+│   ├── insight_generator.js        ← Insights analytiques courts via Claude API (claude-haiku) par métrique
+│   ├── probability_engine.js       ← Probabilités conditionnelles par pattern
+│   ├── convergence.js              ← Détection convergence multi-signaux
+│   ├── notification_engine.js      ← Vérification seuils + envoi notifications push
+│   ├── notification_manager.js     ← Gestion permission + historique notifications
+│   ├── settlement_tracker.js       ← Watcher settlement quotidien Deribit (08:00 UTC)
+│   ├── snapshot_generator.js       ← Génération snapshots de patterns
+│   ├── snapshot_importer.js        ← Import initial snapshots BTC/ETH
+│   └── index.js
 │
-├── pages/
-│   ├── LandingPage.jsx             ← Écran d'accueil (splash) — prix BTC + ETH
-│   ├── MarketPage.jsx              ← Onglet Market
-│   ├── DerivativesPage.jsx         ← Onglet Dérivés (+ countdown funding)
-│   ├── OptionsDataPage.jsx         ← Onglet Options (Analyse · Signaux Expert/Simple · Journal)
-│   ├── SignalsPage.jsx             ← Onglet Signaux (Expert/Simple · 3 blocs · copie)
-│   ├── OnChainPage.jsx             ← Onglet On-Chain
-│   ├── TradePage.jsx               ← Onglet Trade
-│   └── AuditPage.jsx               ← Onglet Audit (Vue générale · Journal de hashage)
+├── analytics/                      ← Analyse avancée et simulation
+│   ├── decision_engine.js          ← Décision LONG/SHORT/NEUTRAL (seuils + contexte)
+│   ├── pattern_engine.js           ← Analyse patterns de marché (EV, clustering)
+│   ├── pattern_cluster.js          ← Clustering patterns Bull/Bear × Fort/Modéré
+│   ├── signal_confluence.js        ← Confluence multi-signaux
+│   ├── strategy_engine.js          ← Recommandations stratégies options (radar, skew)
+│   ├── market_regime.js            ← Détection régime : Trending / Choppy / Mean-Reverting
+│   ├── portfolio_simulator.js      ← Simulation paper trading (P&L, win rate, equity curve)
+│   ├── monte_carlo.js              ← Monte Carlo : distribution des rendements
+│   └── risk.js                     ← Risque de ruine
 │
-├── App.jsx                         ← Shell : navigation, asset selector, clock sync, AuditBanner
-└── App.css                         ← Thème dark + variables CSS
+├── api/
+│   └── backend.js                  ← Façade vers les API exchanges (fetch market + signals)
+│
+├── interface/
+│   ├── components/
+│   │   ├── NavDrawer.jsx           ← Drawer de navigation latéral
+│   │   ├── AuditBanner.jsx         ← Bandeau d'alerte anomalie fixe (dismissable, poll 30s)
+│   │   ├── ClockStatus.jsx         ← Indicateur drift horloges cross-exchange (invisible si OK)
+│   │   ├── HashJournal.jsx         ← Journal unifié hashage (Signal/Anomalie/Pattern/Cache)
+│   │   ├── SnapshotManager.jsx     ← Gestion imports/exports de snapshots
+│   │   ├── MaxPainChart.jsx        ← Visualisation Max Pain
+│   │   └── VLogo.jsx               ← Logo Veridex animé
+│   ├── pages/
+│   │   ├── LandingPage.jsx         ← Écran d'accueil (splash) — prix BTC + ETH
+│   │   ├── MarketPage.jsx          ← Onglet Market
+│   │   ├── DerivativesPage.jsx     ← Onglet Dérivés (+ countdown funding)
+│   │   ├── OptionsDataPage.jsx     ← Onglet Options (Analyse · Signaux · Journal)
+│   │   ├── SignalsPage.jsx         ← Onglet Signaux (patterns, confluence, insights IA)
+│   │   ├── VolPage.jsx             ← Onglet Volatilité (IV/RV, Greeks, skew, smile)
+│   │   ├── TrackerPage.jsx         ← Onglet IV Live (tracker temps réel, alertes, historique)
+│   │   ├── TradePage.jsx           ← Onglet Trade (paper trading, P&L, settlements)
+│   │   ├── AssistantPage.jsx       ← Onglet Assistant (décision IA, simulation portfolio)
+│   │   ├── OnChainPage.jsx         ← Onglet On-Chain
+│   │   ├── CalibrationPage.jsx     ← Onglet Calibration (paramètres signaux/patterns)
+│   │   ├── NotificationSettingsPage.jsx ← Onglet Notifications
+│   │   └── AuditPage.jsx           ← Onglet Audit (Vue générale · Journal de hashage)
+│   ├── App.jsx                     ← Shell : navigation, asset selector, clock sync, AuditBanner
+│   └── App.css                     ← Thème dark + variables CSS
+│
+└── main.jsx
 ```
 
 ---
@@ -103,7 +165,7 @@ Le module `positioning_score.js` calcule la divergence entre :
 | Retail long + Instit offensif | Consensus | Haussier (momentum) |
 | Retail short + Instit défensif | Consensus | Baissier (momentum) |
 
-Affiché dans **SignalsPage** (mode Expert) sous forme de tableau avec ratios, badges colorés et action recommandée.
+Affiché dans **SignalsPage** sous forme de tableau avec ratios, badges colorés et action recommandée.
 Affiché dans **DerivativesPage** sous le bloc Open Interest (3 sous-sections + Signal Combiné coloré).
 
 ### Interprétation 3 marchés
@@ -116,12 +178,33 @@ Pour chaque niveau de score, 3 recommandations indépendantes :
 | **Futures/Perp** | Funding rate, cash-and-carry, contexte positionnement croisé si divergence |
 | **Options** | IV Rank, straddle/strangle, strikes ATM ±8% |
 
-### Couche Simple (Claude API)
+### Insights analytiques (Claude API)
 
-- Génération via `claude-haiku-4-5-20251001` avec nonce aléatoire (variation garantie)
-- 6 tons : 😄 Humour · 🎩 Formel · 🎯 Sérieux · 📚 Pédagogique · 🔥 Motivant · 📖 Récit
+- Génération via `claude-haiku-4-5-20251001` — 1 phrase technique (15–25 mots) par métrique
+- Métriques supportées : `iv_rank`, `funding`, `basis`, `iv_rv`, `pattern`, `positioning`
+- Cache mémoire 5 min (évite les appels répétés)
 - Fallback statique si API indisponible
-- Ton persisté par page (`selected_tone`, `options_tone`)
+- Utilisé dans **SignalsPage** sous forme de chips d'insight (biais bullish/bearish/neutral)
+
+---
+
+## Assistant (moteur de décision IA)
+
+Le module `analytics/` fournit une couche d'analyse avancée consommée par **AssistantPage** :
+
+| Module | Rôle |
+|---|---|
+| `decision_engine.js` | Décision LONG/SHORT/NEUTRAL à partir du score composite et du contexte |
+| `pattern_engine.js` | Détection et scoring des patterns historiques (EV 1h/4h/24h) |
+| `pattern_cluster.js` | Clustering Bull/Bear × Fort/Modéré pour résumé visuel |
+| `signal_confluence.js` | Score de confluence multi-signaux (alignement IV · Funding · Basis · On-Chain) |
+| `strategy_engine.js` | Recommandations stratégies options (radar 5 stratégies : Straddle, Risk Reversal, Calendar, Butterfly, Directionnel) |
+| `market_regime.js` | Détection régime : Trending / Choppy / Mean-Reverting |
+| `portfolio_simulator.js` | Simulation paper trading — application automatique des décisions, equity curve, win rate |
+| `monte_carlo.js` | Monte Carlo N=1000 — distribution des rendements et intervalles de confiance |
+| `risk.js` | Risque de ruine à partir du win rate et du ratio risk/reward |
+
+Le rafraîchissement est automatique toutes les **30 secondes** — aucune intervention utilisateur requise.
 
 ---
 
@@ -137,7 +220,7 @@ Pour chaque niveau de score, 3 recommandations indépendantes :
 
 ### Journal de hashage (AuditPage)
 
-Consultable via l'icône ⚙ dans le header → onglet "Journal de hashage" :
+Consultable via le menu ≡ dans le header → onglet "Journal de hashage" :
 
 | Type | Source | Champs clés |
 |---|---|---|
@@ -163,7 +246,7 @@ Bandeau fixe en bas d'écran (au-dessus de la nav) si anomalie < 10 min :
 npm install
 npm run dev     # → http://localhost:5173
 npm run build   # build de production
-npm test        # 188 tests Vitest
+npm test        # 410 tests Vitest
 ```
 
 Variables d'environnement optionnelles :
@@ -176,6 +259,38 @@ VITE_CRYPTOQUANT_API_KEY=           # Optionnel — exchange flows on-chain (tie
 
 ---
 
+## Installation
+
+### Prérequis
+- Node.js 18+
+- npm ou yarn
+
+### Setup local
+
+```bash
+# Cloner le repo
+git clone https://github.com/Pretoninho/veridex.git
+cd veridex
+
+# Installer les dépendances
+npm install
+
+# Configurer les variables d'environnement
+cp .env.example .env
+# Éditer .env avec vos API keys (Deribit, Binance, Coinbase, etc.)
+
+# Démarrer en développement
+npm run dev
+
+# Build pour production
+npm run build
+```
+
+### Variables d'environnement requises
+Voir `.env.example` pour la liste complète.
+
+---
+
 ## 🚀 Déploiement GitHub Pages
 
 Le workflow `.github/workflows/deploy.yml` se déclenche automatiquement à chaque push sur `main` :
@@ -183,6 +298,22 @@ Le workflow `.github/workflows/deploy.yml` se déclenche automatiquement à chaq
 2. Upload du dossier `dist/` sur GitHub Pages
 
 Dans **Settings → Pages → Source → GitHub Actions**.
+
+### Depuis GitHub Actions
+Un workflow est fourni pour déployer automatiquement sur GitHub Pages.
+
+1. Activer GitHub Pages dans Settings → Pages
+2. Sélectionner branche `main` et dossier `dist`
+3. Push sur main — le build se lance automatiquement
+
+### Build manuel
+```bash
+npm run build
+# Les fichiers sont dans le dossier dist/
+```
+
+### URL de déploiement
+https://pretoninho.github.io/veridex/
 
 ---
 
@@ -218,11 +349,13 @@ Toutes les APIs exchange sont **publiques** — aucune clé requise sauf Anthrop
 
 | Page | Intervalle |
 |---|---|
-| Market | 15 s |
+| Market | 10 s |
 | Dérivés | 30 s |
 | Options | 90 s |
-| Signaux | Manuel (Refresh) |
-| On-Chain | 60 s |
+| Signaux | 5 min (auto) |
+| On-Chain | 60 s (principal) · 5 min (whales, flows) |
+| Assistant | 30 s |
+| IV Live | Configurable 30–600 s (WebSocket ou REST) |
 
 - `Promise.allSettled` partout — une source hors ligne ne bloque pas les autres
 - Bouton "Refresh" manuel sur chaque onglet

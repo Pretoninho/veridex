@@ -6,8 +6,13 @@ import DerivativesPage from './pages/DerivativesPage.jsx'
 import OptionsDataPage from './pages/OptionsDataPage.jsx'
 import SignalsPage    from './pages/SignalsPage.jsx'
 import TradePage      from './pages/TradePage.jsx'
+import AssistantPage  from './pages/AssistantPage.jsx'
 import OnChainPage    from './pages/OnChainPage.jsx'
 import AuditPage      from './pages/AuditPage.jsx'
+import VolPage        from './pages/VolPage.jsx'
+import TrackerPage    from './pages/TrackerPage.jsx'
+import CalibrationPage from './pages/CalibrationPage.jsx'
+import FingerprintDebug from './pages/FingerprintDebug.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
 import AuditBanner    from './components/AuditBanner.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
@@ -20,7 +25,12 @@ import { checkNotifications, notifyAnomaly } from '../signals/notification_engin
 import { requestPermission } from '../signals/notification_manager.js'
 import { runInitialImport } from '../signals/snapshot_importer.js'
 import NotificationSettingsPage from './pages/NotificationSettingsPage.jsx'
+import MaintenancePage          from './pages/MaintenancePage.jsx'
 import './App.css'
+
+// ── Mode maintenance ──────────────────────────────────────────────────────────
+
+const MAINTENANCE_MODE = import.meta.env.VITE_MAINTENANCE_MODE === 'true'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -32,10 +42,15 @@ const PAGE_NAMES = {
   deriv:         'Dérivés',
   options:       'Options',
   signals:       'Signaux',
+  vol:           'Volatilité',
+  tracker:       'IV Live',
   trade:         'Trade',
+  assistant:     'Assistant',
   onchain:       'On-Chain',
   audit:         'Audit',
   notifications: 'Notifications',
+  calibration:   'Calibration',
+  fingerprint:   'Fingerprint Debug',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -63,6 +78,9 @@ function getNextFundingCountdown() {
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // Maintenance mode — court-circuit total avant tout autre rendu
+  if (MAINTENANCE_MODE) return <MaintenancePage />
+
   const [inApp,       setInApp]       = useState(false)
   const [tab,         setTab]         = useState('market')
   const [asset,       setAsset]       = useState('BTC')
@@ -209,10 +227,15 @@ export default function App() {
         {tab === 'deriv'         && <DerivativesPage        asset={asset} clockSync={clockSync} />}
         {tab === 'options'       && <OptionsDataPage        asset={asset} clockSync={clockSync} />}
         {tab === 'signals'       && <SignalsPage            asset={asset} clockSync={clockSync} />}
+        {tab === 'vol'           && <VolPage />}
+        {tab === 'tracker'       && <TrackerPage />}
         {tab === 'trade'         && <TradePage              asset={asset} />}
+        {tab === 'assistant'     && <AssistantPage          asset={asset} />}
         {tab === 'onchain'       && <OnChainPage            asset={asset} />}
         {tab === 'audit'         && <AuditPage />}
         {tab === 'notifications' && <NotificationSettingsPage />}
+        {tab === 'calibration'   && <CalibrationPage />}
+        {tab === 'fingerprint'   && <FingerprintDebug />}
         <VersionBar version={version} forceUpdate={forceUpdate} />
       </div>
 

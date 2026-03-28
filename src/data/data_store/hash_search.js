@@ -114,6 +114,7 @@ function _normalizeSettlement(s) {
       'settlement',
       s.asset?.toLowerCase() ?? '',
       `price:${s.settlementPrice}`,
+      s.settlementDate ? s.settlementDate.toLowerCase() : '',
       s.isLate ? 'late' : 'ontime',
     ].join(' '),
     score:    null,

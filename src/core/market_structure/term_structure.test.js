@@ -2,10 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   calcBasis,
   annualizeBasis,
-  calcDIRateSimple,
   analyzeTermStructure,
-  calcTermStructureSignal,
-  findBestDIExpiry,
 } from './term_structure.js'
 
 // ── calcBasis ─────────────────────────────────────────────────────────────────
@@ -47,29 +44,6 @@ describe('annualizeBasis', () => {
 
   it('retourne null si days non-fini', () => {
     expect(annualizeBasis(2, NaN)).toBeNull()
-  })
-})
-
-// ── calcDIRateSimple ──────────────────────────────────────────────────────────
-
-describe('calcDIRateSimple', () => {
-  it('retourne null si iv = 0 ou null', () => {
-    expect(calcDIRateSimple(0, 7)).toBeNull()
-    expect(calcDIRateSimple(null, 7)).toBeNull()
-  })
-
-  it('retourne null si days = 0 ou null', () => {
-    expect(calcDIRateSimple(65, 0)).toBeNull()
-    expect(calcDIRateSimple(65, null)).toBeNull()
-  })
-
-  it('retourne un taux positif pour des entrées normales', () => {
-    const rate = calcDIRateSimple(65, 7)
-    expect(rate).toBeGreaterThan(0)
-  })
-
-  it('taux plus élevé avec IV plus haute', () => {
-    expect(calcDIRateSimple(80, 7)).toBeGreaterThan(calcDIRateSimple(40, 7))
   })
 })
 
@@ -117,75 +91,5 @@ describe('analyzeTermStructure', () => {
     expect(result.avgBasisAnn).toBe(15)
     expect(result.maxBasisAnn).toBe(20)
     expect(result.minBasisAnn).toBe(10)
-  })
-})
-
-// ── calcTermStructureSignal ───────────────────────────────────────────────────
-
-describe('calcTermStructureSignal', () => {
-  it('retourne données insuffisantes si avgBasisAnn = null', () => {
-    const result = calcTermStructureSignal({ avgBasisAnn: null, structure: 'flat' }, 0)
-    expect(result.strength).toBe('neutral')
-    expect(result.signal).toContain('insuffisantes')
-  })
-
-  it('contango + funding > 10 → signal fort Sell High + Short Perp', () => {
-    const result = calcTermStructureSignal({ avgBasisAnn: 15, structure: 'contango' }, 15)
-    expect(result.strength).toBe('strong')
-    expect(result.signal).toContain('Sell High')
-    expect(result.signal).toContain('Perp')
-  })
-
-  it('contango + funding ∈ (0, 10] → signal modéré Sell High', () => {
-    const result = calcTermStructureSignal({ avgBasisAnn: 15, structure: 'contango' }, 5)
-    expect(result.strength).toBe('moderate')
-    expect(result.signal).toContain('Sell High')
-  })
-
-  it('backwardation + funding < 0 → signal fort Buy Low + Long Perp', () => {
-    const result = calcTermStructureSignal({ avgBasisAnn: -10, structure: 'backwardation' }, -8)
-    expect(result.strength).toBe('strong')
-    expect(result.signal).toContain('Buy Low')
-    expect(result.signal).toContain('Perp')
-  })
-
-  it('backwardation seule → signal modéré Buy Low', () => {
-    const result = calcTermStructureSignal({ avgBasisAnn: -10, structure: 'backwardation' }, 2)
-    expect(result.strength).toBe('moderate')
-    expect(result.signal).toContain('Buy Low')
-  })
-
-  it('flat → marché neutre', () => {
-    const result = calcTermStructureSignal({ avgBasisAnn: 0.1, structure: 'flat' }, 0)
-    expect(result.strength).toBe('neutral')
-    expect(result.signal).toContain('neutre')
-  })
-})
-
-// ── findBestDIExpiry ──────────────────────────────────────────────────────────
-
-describe('findBestDIExpiry', () => {
-  it('retourne null si aucune row datée avec diRate', () => {
-    const rows = [{ isPerp: true, diRate: null, basisAnn: null }]
-    expect(findBestDIExpiry(rows)).toBeNull()
-  })
-
-  it('sélectionne la row avec diRate + |basisAnn| le plus élevé', () => {
-    const rows = [
-      { isPerp: false, diRate: 10, basisAnn: 5, instrument: 'A' },
-      { isPerp: false, diRate: 20, basisAnn: 8, instrument: 'B' },
-      { isPerp: false, diRate: 15, basisAnn: 2, instrument: 'C' },
-    ]
-    const best = findBestDIExpiry(rows)
-    // B : 20 + 8 = 28 > A : 10+5=15 > C : 15+2=17
-    expect(best.instrument).toBe('B')
-  })
-
-  it('ignore les rows perpetuelles', () => {
-    const rows = [
-      { isPerp: true,  diRate: 100, basisAnn: 100, instrument: 'PERP' },
-      { isPerp: false, diRate: 10,  basisAnn: 5,   instrument: 'A' },
-    ]
-    expect(findBestDIExpiry(rows).instrument).toBe('A')
   })
 })

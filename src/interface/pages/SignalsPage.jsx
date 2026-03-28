@@ -1,28 +1,38 @@
-import { useState, useEffect, useCallback } from 'react'
-import { getDVOL, getFundingRate, getRealizedVol, getFutures, getFuturePrice, getSpot } from '../../utils/api.js'
-import { computeSignal, saveSignal, hashMarketState } from '../../signals/signal_engine.js'
-import { interpretSignal }    from '../../signals/signal_interpreter.js'
-import { getOnChainSnapshot } from '../../data/providers/onchain.js'
-import { normalizeOnChain }   from '../../data/normalizers/format_data.js'
-import * as binanceProvider   from '../../data/providers/binance.js'
-import * as deribitProvider   from '../../data/providers/deribit.js'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { fetchSignals, fetchMarket } from '../../api/backend.js'
+import { saveSignal, hashMarketState } from '../../signals/signal_engine.js'
+import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
 import { generateInsight }    from '../../signals/insight_generator.js'
+import { getAllPatterns, computeAdvancedStats } from '../../signals/market_fingerprint.js'
+import { computeConfluence }  from '../../analytics/signal_confluence.js'
+import { clusterPatterns }    from '../../analytics/pattern_cluster.js'
+
+// ── Hook rafraîchissement automatique ────────────────────────────────────────
+
+function useInterval(callback, delay) {
+  const savedCallback = useRef(callback)
+  useEffect(() => { savedCallback.current = callback }, [callback])
+  useEffect(() => {
+    if (delay == null) return
+    const id = setInterval(() => savedCallback.current(), delay)
+    return () => clearInterval(id)
+  }, [delay])
+}
 
 // ── Sous-composants ──────────────────────────────────────────────────────────
 
 function ScoreBar({ label, score, color }) {
-  if (score == null) return null
-  const pct = Math.min(100, Math.max(0, score))
+  const pct = score != null ? Math.min(100, Math.max(0, score)) : 0
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div style={{ marginBottom: 12, transition: 'opacity .3s' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
-        <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color }}>
-          {score}/100
+        <span style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: score != null ? color : 'var(--text-muted)' }}>
+          {score != null ? `${score}/100` : 'N/A'}
         </span>
       </div>
       <div style={{ height: 5, background: 'rgba(255,255,255,.06)', borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3, transition: 'width .5s' }} />
+        <div style={{ height: '100%', width: `${pct}%`, background: score != null ? color : 'rgba(255,255,255,.1)', borderRadius: 3, transition: 'width .5s' }} />
       </div>
     </div>
   )
@@ -75,6 +85,7 @@ function InsightChip({ text, bias = 'neutral', loading = false, style }) {
       borderRadius: '0 8px 8px 0',
       padding: '6px 10px',
       marginTop: 8,
+      transition: 'opacity .3s',
       ...style,
     }}>
       <span style={{ fontSize: 9, color: s.color, fontFamily: 'var(--mono)', fontWeight: 700, marginTop: 1, flexShrink: 0, letterSpacing: '0.5px' }}>AI</span>
@@ -98,12 +109,184 @@ function useInsight(metric, value, context, deps = []) {
   return { insight, loadingI }
 }
 
-// Bouton copie rapide
+// ── AlertBanner — signal fort détecté ────────────────────────────────────────
+
+function AlertBanner({ score, label, onDismiss }) {
+  if (!score || !label) return null
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      background: 'rgba(0,229,160,.1)', border: '1px solid rgba(0,229,160,.35)',
+      borderRadius: 10, padding: '10px 14px', marginBottom: 14,
+      animation: 'fadeIn .3s ease',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 16 }}>🚨</span>
+        <div>
+          <div style={{ fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12, color: 'var(--call)' }}>
+            Signal fort détecté — {score}/100
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{label}</div>
+        </div>
+      </div>
+      <button
+        onClick={onDismiss}
+        aria-label="Fermer l'alerte"
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--text-muted)', fontSize: 18, lineHeight: 1, padding: '0 4px',
+        }}
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
+// ── TopPatterns — top 5 patterns par espérance à 24h ─────────────────────────
+
+function TopPatterns() {
+  const [patterns, setPatterns] = useState([])
+  const [loading, setLoading]   = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    getAllPatterns()
+      .then(all => {
+        const ranked = all
+          .map(p => ({
+            hash:        p.hash,
+            occurrences: p.occurrences,
+            config:      p.config,
+            ev24h:       computeAdvancedStats(p.patternStats?.['24h'])?.expectedValue ?? null,
+            probUp:      computeAdvancedStats(p.patternStats?.['24h'])?.probUp ?? null,
+          }))
+          .filter(p => p.ev24h !== null)
+          .sort((a, b) => b.ev24h - a.ev24h)
+          .slice(0, 5)
+        setPatterns(ranked)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Cluster patterns by strength × direction
+  const clusters = clusterPatterns(
+    patterns.map(p => ({
+      ...p,
+      type:      Math.abs(p.ev24h ?? 0) > 1 ? 'strong' : 'moderate',
+      direction: (p.probUp ?? 0.5) > 0.5 ? 'bullish' : 'bearish',
+    }))
+  )
+  const clusterEntries = Object.entries(clusters).sort((a, b) => b[1].length - a[1].length)
+
+  if (loading) return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+      height: 90, animation: 'shimmer 1.4s infinite',
+      backgroundImage: 'linear-gradient(90deg, transparent 25%, rgba(255,255,255,.04) 50%, transparent 75%)',
+      backgroundSize: '200% 100%',
+    }} />
+  )
+
+  if (patterns.length === 0) return null
+
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 12, overflow: 'hidden', marginBottom: 14,
+    }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{
+          fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+          fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
+        }}>
+          🏆 Top Patterns — Espérance 24h
+        </div>
+      </div>
+      {patterns.map((p, i) => {
+        const evColor = p.ev24h > 0 ? 'var(--call)' : 'var(--put)'
+        const probPct = p.probUp != null ? Math.round(p.probUp * 100) : null
+        return (
+          <div key={p.hash} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 16px',
+            borderBottom: i < patterns.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 11,
+                color: 'var(--text-muted)', width: 18,
+              }}>
+                #{i + 1}
+              </span>
+              <div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text)', fontWeight: 700 }}>
+                  EV : <span style={{ color: evColor }}>
+                    {p.ev24h > 0 ? '+' : ''}{p.ev24h.toFixed(2)}%
+                  </span>
+                </div>
+                {probPct != null && (
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
+                    {probPct}% haussier
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{
+              fontSize: 10, color: 'var(--text-muted)',
+              background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '3px 8px',
+            }}>
+              {p.occurrences} obs.
+            </div>
+          </div>
+        )
+      })}
+      {/* Cluster summary */}
+      {clusterEntries.length > 0 && (
+        <div style={{
+          padding: '10px 16px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex', flexWrap: 'wrap', gap: 6,
+        }}>
+          {clusterEntries.map(([key, items]) => (
+            <span key={key} style={{
+              fontSize: 10, fontFamily: 'var(--mono)',
+              background: 'rgba(255,255,255,.04)',
+              border: '1px solid var(--border)',
+              borderRadius: 6, padding: '3px 8px',
+              color: key.includes('bullish') ? 'var(--call)'
+                : key.includes('bearish')   ? 'var(--put)'
+                : 'var(--text-muted)',
+            }}>
+              {items.length}× {key}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function CopyButton({ getText, style }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(getText())
+      const text = typeof getText === 'function' ? getText() : ''
+      if (!text) return
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const el = document.createElement('textarea')
+        el.value = text
+        document.body.appendChild(el)
+        el.select()
+        document.execCommand('copy')
+        document.body.removeChild(el)
+      }
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {}
@@ -202,63 +385,42 @@ export default function SignalsPage({ asset }) {
   // Positioning
   const [positioning, setPositioning] = useState(null)
 
+  // Alerte signal fort
+  const [alertBanner, setAlertBanner] = useState(null)
+  const lastAlertedSignal = useRef(null)
+
   // ── Chargement du signal ──────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [dvol, funding, rv, spot, futures, onchainRaw, sentiment, dOI] = await Promise.all([
-        getDVOL(asset).catch(() => null),
-        getFundingRate(asset).catch(() => null),
-        getRealizedVol(asset).catch(() => null),
-        getSpot(asset).catch(() => null),
-        getFutures(asset).catch(() => []),
-        getOnChainSnapshot(asset).catch(() => null),
-        binanceProvider.getLongShortRatio(asset).catch(() => null),
-        deribitProvider.getOpenInterest(asset).catch(() => null),
+      const [sig, market] = await Promise.all([
+        fetchSignals(asset),
+        fetchMarket(asset),
       ])
 
-      const onChainScore = onchainRaw ? (normalizeOnChain(onchainRaw)?.composite?.onChainScore ?? null) : null
-      const lsRatio      = sentiment?.ratio ?? null
-      const pcRatio      = dOI?.putCallRatio ?? null
-
-      let basisAvg = null
-      if (spot && futures.length) {
-        const prices = await Promise.all(
-          futures
-            .filter(f => !f.instrument_name.includes('PERPETUAL'))
-            .map(async f => {
-              const price = await getFuturePrice(f.instrument_name).catch(() => null)
-              if (!price) return null
-              const days = Math.max(1, Math.round((f.expiration_timestamp - Date.now()) / 86400000))
-              const basis = (price - spot) / spot * 100
-              return basis / days * 365
-            })
-        )
-        const valid = prices.filter(p => p != null)
-        if (valid.length) basisAvg = valid.reduce((s, v) => s + v, 0) / valid.length
-      }
-
+      const { dvol = null, funding = null, rv = null, basisAvg = null, spot = null } = market ?? {}
       const raw = { dvol, funding, rv, basisAvg, spot, asset }
       setRawData(raw)
 
-      const sig = computeSignal({ dvol, funding, rv, basisAvg, spot, asset, onChainScore, lsRatio, pcRatio })
       setResult(sig)
       setPositioning(sig?.positioning ?? null)
+
+      const interp = interpretSignal(sig, raw)
+      setInterpreted(interp)
 
       if (sig?.global != null) {
         saveSignal({
           asset,
-          score:          sig.global,
-          conditions:     sig.scores,
-          recommendation: sig.signal?.label ?? '—',
-          marketHash:     hashMarketState({ dvol, funding, rv, basisAvg }),
+          score:             sig.global,
+          conditions:        sig.scores,
+          recommendation:    sig.signal?.label ?? '—',
+          marketHash:        hashMarketState({ dvol, funding, rv, basisAvg }),
+          strategySignature: interp.expert.strategySignature,
+          marketRegime:      interp.expert.marketRegime,
         }).catch(() => {})
       }
-
-      const interp = interpretSignal(sig, raw)
-      setInterpreted(interp)
 
       if (sig?.global != null) {
         setHistory(prev => [...prev.slice(-19), { score: sig.global, ts: Date.now() }])
@@ -273,14 +435,41 @@ export default function SignalsPage({ asset }) {
 
   useEffect(() => { load() }, [asset])
 
+  // Auto-rafraîchissement toutes les 5 minutes
+  useInterval(load, 5 * 60 * 1000)
+
+  // ── Alerte signal fort ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (result?.global == null) return
+    const score  = result.global
+    const label  = result.signal?.label ?? ''
+    const sigKey = `${asset}:${score}:${label}`
+
+    if (score > 70 && sigKey !== lastAlertedSignal.current) {
+      lastAlertedSignal.current = sigKey
+      setAlertBanner({ score, label })
+    }
+  }, [asset, result])
+
   // ── Variables UI ──────────────────────────────────────────────────────────
 
-  const signal  = result?.signal
-  const scores  = result?.scores
-  const global  = result?.global
-  const expert  = interpreted?.expert
-  const recos   = expert?.recommendations
-  const gColor  = scoreColor(global)
+  const signal     = result?.signal
+  const scores     = result?.scores
+  const global     = result?.global
+  const dvolFactor = result?.dvolFactor ?? 1
+  const expert     = interpreted?.expert
+  const recos      = expert?.recommendations
+  const gColor     = scoreColor(global)
+
+  // Signal confluence (derived from individual scores s1–s6)
+  let confluenceScore = null
+  if (scores) {
+    const signalsList = [scores.s1, scores.s2, scores.s3, scores.s4, scores.s5, scores.s6]
+      .filter(s => s != null)
+      .map(s => ({ signal: s >= 65 ? 'BUY' : s <= 35 ? 'SELL' : 'NEUTRAL' }))
+    confluenceScore = computeConfluence(signalsList)
+  }
 
   // Insights Claude
   const { insight: insightScore,   loadingI: loadingScore }   = useInsight('global_score', global,                     { asset }, [asset, global])
@@ -331,6 +520,14 @@ export default function SignalsPage({ asset }) {
         }}>
           {error}
         </div>
+      )}
+
+      {alertBanner && (
+        <AlertBanner
+          score={alertBanner.score}
+          label={alertBanner.label}
+          onDismiss={() => setAlertBanner(null)}
+        />
       )}
 
       {/* ── Score global ── */}
@@ -406,9 +603,39 @@ export default function SignalsPage({ asset }) {
               {scores.s6 != null && (
                 <ScoreBar label="Positionnement — 15%" score={scores.s6} color={scoreColor(scores.s6)} />
               )}
-              {scores.s6 == null && scores.s5 == null && (
+              {scores.s6 == null && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                  On-Chain &amp; Positionnement : données non disponibles
+                  Positionnement : données non disponibles
+                </div>
+              )}
+              {/* Signal Confluence */}
+              {confluenceScore != null && (
+                <div style={{
+                  marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <span style={{
+                    fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
+                    fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase',
+                  }}>
+                    Confluence signaux
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 16 }}>
+                      {confluenceScore > 0 ? '↑' : confluenceScore < 0 ? '↓' : '→'}
+                    </span>
+                    <span style={{
+                      fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 16,
+                      color: confluenceScore > 0 ? 'var(--call)'
+                        : confluenceScore < 0   ? 'var(--put)'
+                        : 'var(--atm)',
+                    }}>
+                      {confluenceScore > 0 ? '+' : ''}{confluenceScore}
+                    </span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      / {[scores.s1, scores.s2, scores.s3, scores.s4, scores.s5, scores.s6].filter(s => s != null).length}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
@@ -615,6 +842,22 @@ export default function SignalsPage({ asset }) {
                     </div>
                   </div>
                 ))}
+                {dvolFactor !== 1 && (
+                  <div style={{
+                    marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.04)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Filtre DVOL actif</span>
+                    <span style={{
+                      fontFamily: 'var(--mono)', fontWeight: 700, fontSize: 11,
+                      color: dvolFactor < 1 ? 'var(--atm)' : 'var(--text-muted)',
+                      background: 'rgba(255,215,0,.06)', border: '1px solid rgba(255,215,0,.2)',
+                      borderRadius: 6, padding: '2px 8px',
+                    }}>
+                      ×{dvolFactor} {dvolFactor < 1 ? (rawData.dvol?.current < 40 ? '⚡ Calme' : '🌊 Agité') : ''}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -639,12 +882,16 @@ export default function SignalsPage({ asset }) {
               </svg>
             </div>
           )}
+
+          {/* Top Patterns */}
+          <TopPatterns />
         </>
       )}
 
       {lastUpdate && (
         <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5, marginTop: 4, marginBottom: 8 }}>
           Mis à jour {lastUpdate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          {' '}· auto-refresh 5 min
         </div>
       )}
     </div>

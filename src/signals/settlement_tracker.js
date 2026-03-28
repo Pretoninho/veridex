@@ -168,6 +168,7 @@ export async function captureSettlement(
 
       // ── Prix ──
       settlementPrice: settlement.settlementPrice,
+      settlementDate:  settlement.date,     // date originale Deribit (ex: '14 Mar 25')
 
       // ── Vs spot ──
       spotPrice,

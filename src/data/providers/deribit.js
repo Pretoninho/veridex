@@ -244,25 +244,29 @@ export async function getFundingRateHistory(asset, count = 90) {
 // ── Parser date settlement ─────────────────────────────────────────────────
 
 /**
- * Parse une date Deribit au format '14 Jan 2025'
+ * Parse une date Deribit au format '14 Jan 2025' ou '14 Jan 25'
  * et reconstruit le timestamp 08:00 UTC exact.
+ * Gère les années à 2 chiffres (ex: '25' → 2025) et la casse variable du mois.
  * @param {string} dateStr
  * @returns {number} timestamp ms
  */
-function _parseSettlementDate(dateStr) {
+export function _parseSettlementDate(dateStr) {
   if (!dateStr) return Date.now()
 
   const MONTHS = {
-    Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
-    Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
   }
 
-  const parts = dateStr.split(' ')
-  const day   = parseInt(parts[0])
-  const month = MONTHS[parts[1]]
-  const year  = parseInt(parts[2])
+  const parts = dateStr.trim().split(/\s+/)
+  const day   = parseInt(parts[0], 10)
+  const month = MONTHS[parts[1]?.toLowerCase()?.slice(0, 3)]
+  let   year  = parseInt(parts[2], 10)
 
   if (isNaN(day) || month === undefined || isNaN(year)) return Date.now()
+
+  // Normaliser les années à 2 chiffres : '25' → 2025
+  if (year < 100) year += 2000
 
   // Settlement Deribit = 08:00:00 UTC exact
   return new Date(Date.UTC(year, month, day, 8, 0, 0)).getTime()
@@ -285,9 +289,12 @@ export async function getDailySettlement(asset) {
     if (!data?.length) return null
 
     const latest = data[0]
+    const settlementPrice = Number(latest.delivery_price)
+    if (!isFinite(settlementPrice) || settlementPrice <= 0) return null
+
     return {
       asset:           currency,
-      settlementPrice: Number(latest.delivery_price),
+      settlementPrice,
       date:            latest.date,
       timestamp:       _parseSettlementDate(latest.date),
       source:          'deribit',
@@ -344,6 +351,43 @@ export function extractExpiries(instruments) {
       .filter(t => Number.isFinite(t))
   )]
   return ts.sort((a, b) => a - b)
+}
+
+/**
+ * Calcule la base moyenne annualisée sur les contrats futures front (non-perpétuels).
+ * @param {'BTC'|'ETH'} asset
+ * @param {number|null} spot
+ * @returns {Promise<number|null>}
+ */
+export async function getBasisAvg(asset, spot) {
+  if (!spot) return null
+  try {
+    const futures = await getInstruments(asset, 'future')
+    const nonPerp = futures
+      .filter(f => !f.instrument_name.includes('PERPETUAL'))
+      .slice(0, 4)
+
+    const basisValues = []
+    for (const f of nonPerp) {
+      try {
+        if (f.expiration_timestamp <= Date.now()) continue
+        const book = await getOrderBook(f.instrument_name)
+        const price = book?.price ?? null
+        if (price) {
+          const days = Math.max(1, (f.expiration_timestamp - Date.now()) / 86400000)
+          basisValues.push((price - spot) / spot * 100 / days * 365)
+        }
+      } catch (err) {
+        console.warn(`[deribit] getBasisAvg(${f.instrument_name}) failed:`, err?.message)
+      }
+    }
+
+    if (!basisValues.length) return null
+    return basisValues.reduce((a, b) => a + b, 0) / basisValues.length
+  } catch (err) {
+    console.warn(`[deribit] getBasisAvg(${asset}) failed:`, err?.message)
+    return null
+  }
 }
 
 /**
