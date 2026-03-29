@@ -530,20 +530,52 @@ export function getWeightScenario(hasS5, hasS6) {
 }
 
 /**
- * Calculate individual weights for components
+ * Calculate individual weights for components.
+ * When cal (calibration object) is provided, uses user-defined weights from
+ * localStorage; otherwise falls back to static SCORE_WEIGHTS defaults.
+ *
  * @param {boolean} hasS5 - Has on-chain component
  * @param {boolean} hasS6 - Has positioning component
+ * @param {object|null} [cal] - Optional calibration object from getCalibration()
  * @returns {object} { w1, w2, w3, w4, w5, w6 }
  */
-export function getComponentWeights(hasS5, hasS6) {
+export function getComponentWeights(hasS5, hasS6, cal = null) {
+  if (cal) {
+    if (hasS5 && hasS6) return {
+      w1: (cal.w_complete_s1_iv          ?? SCORE_WEIGHTS.complete.s1_iv)          * 100,
+      w2: (cal.w_complete_s2_funding      ?? SCORE_WEIGHTS.complete.s2_funding)     * 100,
+      w3: (cal.w_complete_s3_basis        ?? SCORE_WEIGHTS.complete.s3_basis)       * 100,
+      w4: (cal.w_complete_s4_ivVsRv       ?? SCORE_WEIGHTS.complete.s4_ivVsRv)      * 100,
+      w5: (cal.w_complete_s5_onChain      ?? SCORE_WEIGHTS.complete.s5_onChain)     * 100,
+      w6: (cal.w_complete_s6_positioning  ?? SCORE_WEIGHTS.complete.s6_positioning) * 100,
+    }
+    if (hasS5 && !hasS6) return {
+      w1: (cal.w_nopos_s1_iv       ?? SCORE_WEIGHTS.withoutPositioning.s1_iv)       * 100,
+      w2: (cal.w_nopos_s2_funding   ?? SCORE_WEIGHTS.withoutPositioning.s2_funding)  * 100,
+      w3: (cal.w_nopos_s3_basis     ?? SCORE_WEIGHTS.withoutPositioning.s3_basis)    * 100,
+      w4: (cal.w_nopos_s4_ivVsRv    ?? SCORE_WEIGHTS.withoutPositioning.s4_ivVsRv)   * 100,
+      w5: (cal.w_nopos_s5_onChain   ?? SCORE_WEIGHTS.withoutPositioning.s5_onChain)  * 100,
+      w6: 0,
+    }
+    // minimal (s1–s4 uniquement)
+    return {
+      w1: (cal.w_min_s1_iv       ?? SCORE_WEIGHTS.minimal.s1_iv)       * 100,
+      w2: (cal.w_min_s2_funding   ?? SCORE_WEIGHTS.minimal.s2_funding)  * 100,
+      w3: (cal.w_min_s3_basis     ?? SCORE_WEIGHTS.minimal.s3_basis)    * 100,
+      w4: (cal.w_min_s4_ivVsRv    ?? SCORE_WEIGHTS.minimal.s4_ivVsRv)   * 100,
+      w5: 0,
+      w6: 0,
+    }
+  }
+  // Fallback : poids statiques
   const weights = getWeightScenario(hasS5, hasS6)
   return {
     w1: weights.s1_iv * 100,
     w2: weights.s2_funding * 100,
     w3: weights.s3_basis * 100,
     w4: weights.s4_ivVsRv * 100,
-    w5: weights.s5_onChain * 100,
-    w6: weights.s6_positioning * 100,
+    w5: (weights.s5_onChain      ?? 0) * 100,
+    w6: (weights.s6_positioning  ?? 0) * 100,
   }
 }
 

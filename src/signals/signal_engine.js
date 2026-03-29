@@ -148,7 +148,8 @@ export function scoreIVvsRV(dvol, rv) {
 export function calcGlobalScore(s1, s2, s3, s4, s5, s6) {
   const hasS5 = s5 != null
   const hasS6 = s6 != null
-  const { w1, w2, w3, w4, w5, w6 } = getComponentWeights(hasS5, hasS6)
+  const cal = getCalibration()
+  const { w1, w2, w3, w4, w5, w6 } = getComponentWeights(hasS5, hasS6, cal)
 
   let total = 0, weights = 0
   if (s1 != null) { total += s1 * w1; weights += w1 }

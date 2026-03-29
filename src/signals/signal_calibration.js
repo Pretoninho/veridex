@@ -107,6 +107,27 @@ export const DEFAULT_CALIBRATION = {
   onchain_favorable: ONCHAIN_SIGNALS.scoreInterpretation.favorable, // 70
   onchain_neutral:   ONCHAIN_SIGNALS.scoreInterpretation.neutral,   // 50
   onchain_weak:      ONCHAIN_SIGNALS.scoreInterpretation.weak,      // 35
+
+  // --- Pondération des composantes — scénario complet (s1–s6) ---
+  w_complete_s1_iv:           0.30,
+  w_complete_s2_funding:      0.20,
+  w_complete_s3_basis:        0.20,
+  w_complete_s4_ivVsRv:       0.15,
+  w_complete_s5_onChain:      0.10,
+  w_complete_s6_positioning:  0.15,
+
+  // --- Pondération — scénario sans positionnement (s1–s5) ---
+  w_nopos_s1_iv:              0.30,
+  w_nopos_s2_funding:         0.20,
+  w_nopos_s3_basis:           0.20,
+  w_nopos_s4_ivVsRv:          0.15,
+  w_nopos_s5_onChain:         0.15,
+
+  // --- Pondération — scénario minimal (s1–s4) ---
+  w_min_s1_iv:                0.35,
+  w_min_s2_funding:           0.25,
+  w_min_s3_basis:             0.25,
+  w_min_s4_ivVsRv:            0.15,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

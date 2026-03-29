@@ -97,6 +97,131 @@ function ParamRow({ label, paramKey, value, defaultValue, unit, step, min, max, 
   )
 }
 
+// ── WeightRow ─────────────────────────────────────────────────────────────────
+
+function WeightRow({ label, paramKey, value, defaultValue, last, onChange, onReset }) {
+  const isDirty = value !== defaultValue
+  const pct = Math.round(value * 100)
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      paddingBottom: last ? 0 : 12, marginBottom: last ? 0 : 12,
+      borderBottom: last ? 'none' : '1px solid rgba(255,255,255,.04)',
+      gap: 8,
+    }}>
+      <span style={{ fontSize: 12, color: isDirty ? 'var(--text)' : 'var(--text-muted)', flex: 1, lineHeight: 1.4 }}>
+        {label}
+        {isDirty && <span style={{ fontSize: 9, color: 'var(--atm)', marginLeft: 5 }}>●</span>}
+      </span>
+      <input
+        type="range"
+        min={0} max={100} step={1}
+        value={pct}
+        onChange={e => onChange(paramKey, parseFloat(e.target.value) / 100)}
+        style={{ width: 90, accentColor: isDirty ? 'var(--atm)' : 'var(--accent)' }}
+      />
+      <span style={{
+        fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12,
+        color: isDirty ? 'var(--atm)' : 'var(--text)',
+        minWidth: 38, textAlign: 'right',
+      }}>
+        {pct}%
+      </span>
+      <button
+        onClick={() => onReset(paramKey, defaultValue)}
+        title="Réinitialiser"
+        style={{
+          background: 'none', border: '1px solid var(--border)',
+          borderRadius: 6, color: 'var(--text-muted)',
+          fontSize: 10, padding: '4px 8px', cursor: 'pointer',
+          fontFamily: 'var(--sans)', fontWeight: 700,
+        }}
+      >
+        Reset
+      </button>
+    </div>
+  )
+}
+
+// ── WeightScenarioSection ─────────────────────────────────────────────────────
+
+function WeightScenarioSection({ title, keys, labels, cfg, defaults, onChange, onReset, onNormalize }) {
+  const total = keys.reduce((sum, k) => sum + (cfg[k] ?? defaults[k]), 0)
+  const totalPct = Math.round(total * 100)
+  const isValid = totalPct === 100
+  return (
+    <div>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: 12,
+      }}>
+        {title && (
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+            {title}
+          </span>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          <span style={{
+            fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 12,
+            color: isValid ? 'var(--call)' : 'var(--put)',
+          }}>
+            Total : {totalPct}%
+          </span>
+          {!isValid && (
+            <button
+              onClick={() => onNormalize(keys)}
+              style={{
+                background: 'rgba(255,215,0,.08)', border: '1px solid rgba(255,215,0,.3)',
+                borderRadius: 6, color: 'var(--atm)',
+                fontSize: 10, padding: '3px 8px', cursor: 'pointer',
+                fontFamily: 'var(--sans)', fontWeight: 700,
+              }}
+            >
+              Normaliser
+            </button>
+          )}
+        </div>
+      </div>
+      {keys.map((k, i) => (
+        <WeightRow
+          key={k}
+          label={labels[i]}
+          paramKey={k}
+          value={cfg[k] ?? defaults[k]}
+          defaultValue={defaults[k]}
+          last={i === keys.length - 1}
+          onChange={onChange}
+          onReset={onReset}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── CollapsibleScenario ───────────────────────────────────────────────────────
+
+function CollapsibleScenario({ title, children }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ borderTop: '1px solid rgba(255,255,255,.04)', paddingTop: 10, marginTop: 4 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700,
+          fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px',
+          padding: '4px 0', marginBottom: open ? 12 : 0,
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ fontSize: 12 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
 // ── Page principale ───────────────────────────────────────────────────────────
 
 export default function CalibrationPage() {
@@ -119,6 +244,21 @@ export default function CalibrationPage() {
     setCfg(reset)
     setResetDone(true)
     setTimeout(() => setResetDone(false), 2000)
+  }
+
+  const handleNormalize = (keys) => {
+    const raw = keys.map(k => cfg[k] ?? DEFAULT_CALIBRATION[k])
+    const sum = raw.reduce((a, b) => a + b, 0)
+    if (sum === 0) return
+    const scaled = raw.map(v => Math.round((v / sum) * 100) / 100)
+    const residual = Math.round((1 - scaled.reduce((a, b) => a + b, 0)) * 100) / 100
+    scaled[0] = Math.round((scaled[0] + residual) * 100) / 100
+    let current = { ...cfg }
+    keys.forEach((k, i) => {
+      current = { ...current, [k]: scaled[i] }
+      updateCalibration(k, scaled[i])
+    })
+    setCfg(current)
   }
 
   const p = (key, label, unit, step, min, max, last = false) => (
@@ -262,6 +402,93 @@ export default function CalibrationPage() {
         {p('onchain_favorable','Score on-chain ≥ → favorable',        '', 1, 50, 100)}
         {p('onchain_neutral',  'Score on-chain ≥ → neutre',           '', 1, 30, 80)}
         {p('onchain_weak',     'Score on-chain ≤ → faible',           '', 1, 0,  60, true)}
+      </SectionCard>
+
+      {/* 12. Pondération des composantes */}
+      <SectionCard title="Pondération des composantes (score composite)">
+
+        <WeightScenarioSection
+          title="Scénario complet — s1 à s6"
+          keys={[
+            'w_complete_s1_iv',
+            'w_complete_s2_funding',
+            'w_complete_s3_basis',
+            'w_complete_s4_ivVsRv',
+            'w_complete_s5_onChain',
+            'w_complete_s6_positioning',
+          ]}
+          labels={[
+            'Rang IV (DVOL vs moy. 30j)',
+            'Taux de Financement',
+            'Basis Futures',
+            'Prime IV / Volatilité Réalisée',
+            'On-Chain (Fear & Greed, Hash Rate)',
+            'Positionnement (L/S + P/C)',
+          ]}
+          cfg={cfg}
+          defaults={DEFAULT_CALIBRATION}
+          onChange={handleChange}
+          onReset={handleReset}
+          onNormalize={handleNormalize}
+        />
+
+        <CollapsibleScenario title="Sans positionnement — s1 à s5">
+          <WeightScenarioSection
+            title=""
+            keys={[
+              'w_nopos_s1_iv',
+              'w_nopos_s2_funding',
+              'w_nopos_s3_basis',
+              'w_nopos_s4_ivVsRv',
+              'w_nopos_s5_onChain',
+            ]}
+            labels={[
+              'Rang IV',
+              'Taux de Financement',
+              'Basis Futures',
+              'Prime IV / Volatilité Réalisée',
+              'On-Chain',
+            ]}
+            cfg={cfg}
+            defaults={DEFAULT_CALIBRATION}
+            onChange={handleChange}
+            onReset={handleReset}
+            onNormalize={handleNormalize}
+          />
+        </CollapsibleScenario>
+
+        <CollapsibleScenario title="Minimal — s1 à s4 uniquement">
+          <WeightScenarioSection
+            title=""
+            keys={[
+              'w_min_s1_iv',
+              'w_min_s2_funding',
+              'w_min_s3_basis',
+              'w_min_s4_ivVsRv',
+            ]}
+            labels={[
+              'Rang IV',
+              'Taux de Financement',
+              'Basis Futures',
+              'Prime IV / Volatilité Réalisée',
+            ]}
+            cfg={cfg}
+            defaults={DEFAULT_CALIBRATION}
+            onChange={handleChange}
+            onReset={handleReset}
+            onNormalize={handleNormalize}
+          />
+        </CollapsibleScenario>
+
+        <div style={{
+          marginTop: 14, padding: '8px 10px', borderRadius: 8,
+          background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.06)',
+          fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6,
+        }}>
+          Le scénario actif est sélectionné automatiquement selon la disponibilité des données
+          (on-chain et positionnement). Les trois scénarios peuvent être calibrés indépendamment.
+        </div>
+
       </SectionCard>
 
       {/* Reset global */}
