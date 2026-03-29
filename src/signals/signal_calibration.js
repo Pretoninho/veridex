@@ -18,8 +18,10 @@ import {
   CONVERGENCE,
   ONCHAIN_SIGNALS,
 } from '../config/signal_calibration.js'
+import { CALIBRATION_PROFILES, DEFAULT_PROFILE_NAME } from './calibration_profiles.js'
 
 const STORAGE_KEY = 'veridex_calibration'
+const PROFILE_KEY = 'veridex_calibration_profile'
 
 // ── Valeurs par défaut (dérivées du config centralisé) ────────────────────────
 
@@ -108,13 +110,25 @@ export const DEFAULT_CALIBRATION = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Retourne la base de calibration en appliquant les surcharges du profil actif
+ * par-dessus DEFAULT_CALIBRATION.
+ * @returns {Record<string, number>}
+ */
+function _profileBase() {
+  const name    = localStorage.getItem(PROFILE_KEY) ?? DEFAULT_PROFILE_NAME
+  const profile = CALIBRATION_PROFILES[name]
+  return profile ? { ...DEFAULT_CALIBRATION, ...profile.params } : { ...DEFAULT_CALIBRATION }
+}
+
 function _load() {
+  const base = _profileBase()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...DEFAULT_CALIBRATION }
-    return { ...DEFAULT_CALIBRATION, ...JSON.parse(raw) }
+    if (!raw) return base
+    return { ...base, ...JSON.parse(raw) }
   } catch (_) {
-    return { ...DEFAULT_CALIBRATION }
+    return base
   }
 }
 
@@ -125,6 +139,30 @@ function _save(cfg) {
 }
 
 // ── API publique ──────────────────────────────────────────────────────────────
+
+/**
+ * Retourne le nom du profil de calibration actif.
+ * @returns {string}
+ */
+export function getActiveCalibrationProfileName() {
+  return localStorage.getItem(PROFILE_KEY) ?? DEFAULT_PROFILE_NAME
+}
+
+/**
+ * Active un profil de calibration et réinitialise les surcharges utilisateur.
+ * Toute personnalisation manuelle est effacée pour repartir proprement sur
+ * les valeurs du profil sélectionné.
+ *
+ * @param {string} name - Clé du profil (ex. 'sensitive', 'balanced', 'conservative')
+ */
+export function setActiveCalibrationProfile(name) {
+  if (!name || !(name in CALIBRATION_PROFILES)) {
+    console.warn('[calibration] profil inconnu :', name)
+    return
+  }
+  localStorage.setItem(PROFILE_KEY, name)
+  localStorage.removeItem(STORAGE_KEY) // reset des surcharges utilisateur
+}
 
 /**
  * Retourne la configuration de calibration courante.

@@ -12,6 +12,7 @@
 import { useState } from 'react'
 import useFingerprintDebug from '../hooks/useFingerprintDebug.js'
 import { TIMEFRAMES } from '../../signals/market_fingerprint.js'
+import CalibrationProfileSelector from '../components/CalibrationProfileSelector.jsx'
 import './FingerprintDebug.css'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -409,8 +410,11 @@ export default function FingerprintDebug() {
       {/* Header */}
       <div className="page-header">
         <div className="page-title">Fingerprint <span>Debug</span></div>
-        <div style={{ fontFamily: 'var(--font-body)', fontSize: 10, color: 'var(--text-muted)' }}>
-          Monitoring · Lecture seule
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <CalibrationProfileSelector onChange={refresh} />
+          <div style={{ fontFamily: 'var(--font-body)', fontSize: 10, color: 'var(--text-muted)' }}>
+            Monitoring · Lecture seule
+          </div>
         </div>
       </div>
 
