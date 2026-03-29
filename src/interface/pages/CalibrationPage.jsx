@@ -23,6 +23,12 @@ import {
   updateCalibration,
   resetCalibration,
   DEFAULT_CALIBRATION,
+  getTemplates,
+  saveTemplate,
+  loadTemplate,
+  deleteTemplate,
+  renameTemplate,
+  MAX_TEMPLATES,
 } from '../../signals/signal_calibration.js'
 
 // ── SectionCard ───────────────────────────────────────────────────────────────
@@ -91,6 +97,124 @@ function ParamRow({ label, paramKey, value, defaultValue, unit, step, min, max, 
           }}
         >
           Reset
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── TemplateSlot ──────────────────────────────────────────────────────────────
+
+function TemplateSlot({ index, template, onSave, onLoad, onDelete, onRename }) {
+  const [mode, setMode]     = useState('idle')   // 'idle' | 'saving' | 'renaming'
+  const [inputVal, setInputVal] = useState('')
+
+  const fmt = (ts) => new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+  const startSave = () => { setMode('saving'); setInputVal(`Template ${index + 1}`) }
+  const confirmSave = () => { onSave(index, inputVal); setMode('idle') }
+  const startRename = () => { setMode('renaming'); setInputVal(template.name) }
+  const confirmRename = () => { onRename(index, inputVal); setMode('idle') }
+  const cancel = () => setMode('idle')
+
+  const inputStyle = {
+    flex: 1, background: 'rgba(255,255,255,.07)', border: '1px solid var(--accent)',
+    borderRadius: 6, color: 'var(--text)', fontFamily: 'var(--sans)',
+    fontSize: 11, fontWeight: 600, padding: '4px 8px', outline: 'none',
+  }
+  const btnBase = {
+    border: 'none', borderRadius: 6, cursor: 'pointer',
+    fontFamily: 'var(--sans)', fontWeight: 700, fontSize: 10, padding: '4px 8px',
+  }
+
+  if (!template) {
+    // Slot vide
+    return (
+      <div style={{
+        border: '1px dashed rgba(255,255,255,.12)', borderRadius: 10,
+        padding: '12px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+        minHeight: 80, justifyContent: 'center',
+      }}>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,.25)', fontFamily: 'var(--sans)', fontWeight: 700, textAlign: 'center' }}>
+          Slot {index + 1}
+        </div>
+        {mode === 'saving' ? (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              autoFocus
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') confirmSave(); if (e.key === 'Escape') cancel() }}
+              placeholder="Nom du template"
+              style={inputStyle}
+            />
+            <button onClick={confirmSave} style={{ ...btnBase, background: 'rgba(0,229,160,.15)', color: 'var(--call)' }}>✓</button>
+            <button onClick={cancel}      style={{ ...btnBase, background: 'rgba(255,255,255,.06)', color: 'var(--text-muted)' }}>✕</button>
+          </div>
+        ) : (
+          <button
+            onClick={startSave}
+            style={{
+              ...btnBase, width: '100%',
+              background: 'rgba(255,255,255,.05)', color: 'var(--text-muted)',
+              border: '1px solid rgba(255,255,255,.1)',
+              padding: '6px 0', fontSize: 11,
+            }}
+          >
+            + Enregistrer
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // Slot rempli
+  return (
+    <div style={{
+      border: '1px solid var(--border)', borderRadius: 10,
+      padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+      background: 'rgba(255,255,255,.02)',
+    }}>
+      {mode === 'renaming' ? (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            autoFocus
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') cancel() }}
+            style={inputStyle}
+          />
+          <button onClick={confirmRename} style={{ ...btnBase, background: 'rgba(0,229,160,.15)', color: 'var(--call)' }}>✓</button>
+          <button onClick={cancel}        style={{ ...btnBase, background: 'rgba(255,255,255,.06)', color: 'var(--text-muted)' }}>✕</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            onClick={startRename}
+            title="Cliquer pour renommer"
+            style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', flex: 1, cursor: 'text', lineHeight: 1.3 }}
+          >
+            {template.name}
+          </span>
+          <button onClick={() => onDelete(index)} title="Supprimer" style={{ ...btnBase, background: 'none', color: 'rgba(255,77,109,.5)', fontSize: 12, padding: '2px 4px' }}>✕</button>
+        </div>
+      )}
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--sans)' }}>
+        {fmt(template.savedAt)}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          onClick={() => onLoad(index)}
+          style={{ ...btnBase, flex: 1, background: 'rgba(255,215,0,.08)', color: 'var(--atm)', border: '1px solid rgba(255,215,0,.2)' }}
+        >
+          Charger
+        </button>
+        <button
+          onClick={() => onSave(index, template.name)}
+          title="Écraser avec la config courante"
+          style={{ ...btnBase, background: 'rgba(255,255,255,.05)', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,.1)' }}
+        >
+          ↑ Maj
         </button>
       </div>
     </div>
@@ -225,8 +349,27 @@ function CollapsibleScenario({ title, children }) {
 // ── Page principale ───────────────────────────────────────────────────────────
 
 export default function CalibrationPage() {
-  const [cfg, setCfg]         = useState(() => getCalibration())
+  const [cfg, setCfg]             = useState(() => getCalibration())
   const [resetDone, setResetDone] = useState(false)
+  const [templates, setTemplates] = useState(() => getTemplates())
+  const [loadedSlot, setLoadedSlot] = useState(null)
+
+  const handleSaveTemplate = (slot, name) => {
+    setTemplates(saveTemplate(slot, name))
+  }
+
+  const handleLoadTemplate = (slot) => {
+    const loaded = loadTemplate(slot)
+    if (loaded) { setCfg(loaded); setLoadedSlot(slot); setTimeout(() => setLoadedSlot(null), 2000) }
+  }
+
+  const handleDeleteTemplate = (slot) => {
+    setTemplates(deleteTemplate(slot))
+  }
+
+  const handleRenameTemplate = (slot, name) => {
+    setTemplates(renameTemplate(slot, name))
+  }
 
   const handleChange = (key, value) => {
     if (isNaN(value)) return
@@ -301,6 +444,36 @@ export default function CalibrationPage() {
           ? `⚙ ${dirtyCount} paramètre${dirtyCount > 1 ? 's' : ''} modifié${dirtyCount > 1 ? 's' : ''} — les scores et patterns utilisent ces valeurs en temps réel.`
           : 'Ajustez les seuils de détection des signaux, du score composite et des patterns.'}
       </div>
+
+      {/* Templates */}
+      <SectionCard title="Templates de configuration">
+        {loadedSlot !== null && (
+          <div style={{
+            padding: '7px 10px', borderRadius: 8, marginBottom: 12,
+            background: 'rgba(0,229,160,.08)', border: '1px solid rgba(0,229,160,.25)',
+            fontSize: 11, color: 'var(--call)', fontFamily: 'var(--sans)', fontWeight: 700,
+          }}>
+            ✓ Template « {templates[loadedSlot]?.name} » chargé
+          </div>
+        )}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 10,
+        }}>
+          {Array.from({ length: MAX_TEMPLATES }, (_, i) => (
+            <TemplateSlot
+              key={i}
+              index={i}
+              template={templates[i]}
+              onSave={handleSaveTemplate}
+              onLoad={handleLoadTemplate}
+              onDelete={handleDeleteTemplate}
+              onRename={handleRenameTemplate}
+            />
+          ))}
+        </div>
+      </SectionCard>
 
       {/* 1. Filtre DVOL */}
       <SectionCard title="Filtre DVOL — qualité de signal">
