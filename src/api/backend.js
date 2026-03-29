@@ -202,9 +202,17 @@ export async function fetchSignals(asset) {
     const { events: ecoEvents }    = getCachedEconomicEvents()
     const newsWindowResult         = isInNewsWindow(Date.now(), ecoEvents)
 
+    // recordPattern écrit en premier, puis updateOutcomes lit le record mis à jour —
+    // les deux chaînes sont séquentielles pour éviter un conflit d'écriture sur la même clé IndexedDB.
     recordPattern(fingerprint, market.spot)
-      .then(() => getPatternStats(fingerprint.hash))
-      .then(stats => {
+      .then(() => Promise.all([
+        getPatternStats(fingerprint.hash),
+        // Met à jour les outcomes de tous les patterns connus avec le prix actuel
+        getAllPatterns().then(patterns =>
+          Promise.all(patterns.map(p => updateOutcomes(p.hash, market.spot).catch(() => {})))
+        ),
+      ]))
+      .then(([stats]) => {
         savePatternAuditEntry({
           asset:       assetCode,
           hash:        fingerprint.hash,
@@ -229,11 +237,6 @@ export async function fetchSignals(asset) {
         })
       })
       .catch(() => {})
-
-    // Met à jour les outcomes de tous les patterns connus avec le prix actuel
-    getAllPatterns().then(patterns => {
-      patterns.forEach(p => updateOutcomes(p.hash, market.spot).catch(() => {}))
-    }).catch(() => {})
   }
 
   return result

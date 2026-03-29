@@ -350,5 +350,6 @@ export async function getPatternStats(hash) {
     avgMove_24h: avgMove('result_24h'),
     config: record.config,
     patternStats: record.patternStats ?? null,
+    outcomes: record.outcomes ?? [],
   }
 }
