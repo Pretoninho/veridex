@@ -13,6 +13,7 @@ import VolPage        from './pages/VolPage.jsx'
 import TrackerPage    from './pages/TrackerPage.jsx'
 import CalibrationPage from './pages/CalibrationPage.jsx'
 import FingerprintDebug from './pages/FingerprintDebug.jsx'
+import MonitorPage      from './pages/MonitorPage.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
 import AuditBanner    from './components/AuditBanner.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
@@ -51,6 +52,7 @@ const PAGE_NAMES = {
   notifications: 'Notifications',
   calibration:   'Calibration',
   fingerprint:   'Fingerprint Debug',
+  monitor:       'Monitoring',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -236,6 +238,7 @@ export default function App() {
         {tab === 'notifications' && <NotificationSettingsPage />}
         {tab === 'calibration'   && <CalibrationPage />}
         {tab === 'fingerprint'   && <FingerprintDebug />}
+        {tab === 'monitor'       && <MonitorPage asset={asset} />}
         <VersionBar version={version} forceUpdate={forceUpdate} />
       </div>
 

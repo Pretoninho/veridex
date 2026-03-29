@@ -158,6 +158,15 @@ function IconFingerprint() {
   )
 }
 
+function IconMonitor() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  )
+}
+
 // ── Items de navigation ───────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
@@ -173,6 +182,7 @@ const NAV_ITEMS = [
   { id: 'notifications', label: 'Notifications',     sub: 'Alertes push · Seuils',         Icon: IconNotifications  },
   { id: 'calibration',   label: 'Calibration',        sub: 'Signaux · Patterns · Seuils',   Icon: IconCalibration    },
   { id: 'fingerprint',  label: 'Fingerprint Debug',   sub: 'Patterns · Stats · Monitoring', Icon: IconFingerprint    },
+  { id: 'monitor',      label: 'Monitoring',           sub: 'Graphique · Patterns · Macro',  Icon: IconMonitor        },
 ]
 
 // ── Composant ─────────────────────────────────────────────────────────────────

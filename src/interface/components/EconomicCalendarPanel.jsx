@@ -3,8 +3,7 @@
  *
  * Affiche les prochaines annonces macro "High" importance (±12h de maintenant).
  *
- * Source : TradingEconomics via useEconomicCalendar (cache 1h).
- * Clé API : variable d'environnement VITE_TE_API_KEY (défaut: guest:guest).
+ * Source : Forex Factory (flux public, sans clé API) via useEconomicCalendar (cache 1h).
  *
  * Met en évidence :
  *  - Fenêtre active (T±30min) : fond rouge, badge pulsant "FENÊTRE NEWS"
@@ -100,7 +99,7 @@ export default function EconomicCalendarPanel() {
         error ? (
           <div style={{ padding: '10px 14px' }}>
             <div className="fp-error-banner">
-              ⚠ {error} — vérifiez VITE_TE_API_KEY (ou attendez le prochain refresh)
+              ⚠ {error} — erreur de chargement (attendez le prochain refresh)
             </div>
           </div>
         ) : nearEvents.length === 0 && !loading ? (
@@ -206,7 +205,7 @@ export default function EconomicCalendarPanel() {
                 ? `Mis à jour : ${new Date(lastUpdated).toLocaleTimeString('fr-FR')} · refresh/h`
                 : 'Chargement…'
               }
-              {' · Clé : VITE_TE_API_KEY'}
+              {' · Source : Forex Factory (public)'}
             </div>
           </div>
         )
