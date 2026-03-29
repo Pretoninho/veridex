@@ -223,3 +223,81 @@ export function resetCalibration() {
   localStorage.removeItem(STORAGE_KEY)
   return { ...DEFAULT_CALIBRATION }
 }
+
+// ── Templates utilisateur ─────────────────────────────────────────────────────
+
+const TEMPLATES_KEY = 'veridex_calibration_templates'
+export const MAX_TEMPLATES = 6
+
+/**
+ * Retourne le tableau des templates (MAX_TEMPLATES slots, null si vide).
+ * @returns {Array<{ name: string, savedAt: number, params: Record<string, number> } | null>}
+ */
+export function getTemplates() {
+  try {
+    const raw = localStorage.getItem(TEMPLATES_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    const result = Array(MAX_TEMPLATES).fill(null)
+    arr.forEach((t, i) => { if (i < MAX_TEMPLATES) result[i] = t })
+    return result
+  } catch (_) {
+    return Array(MAX_TEMPLATES).fill(null)
+  }
+}
+
+/**
+ * Enregistre la configuration courante dans un slot template.
+ * @param {number} slot — indice 0..MAX_TEMPLATES-1
+ * @param {string} name — nom du template
+ * @returns {Array} tableau des templates mis à jour
+ */
+export function saveTemplate(slot, name) {
+  if (slot < 0 || slot >= MAX_TEMPLATES) return getTemplates()
+  const templates = getTemplates()
+  templates[slot] = {
+    name: (name || `Template ${slot + 1}`).trim(),
+    savedAt: Date.now(),
+    params: { ..._load() },
+  }
+  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates))
+  return templates
+}
+
+/**
+ * Charge un template et l'applique comme configuration courante.
+ * @param {number} slot
+ * @returns {Record<string, number> | null} nouvelle configuration complète, ou null si slot vide
+ */
+export function loadTemplate(slot) {
+  const templates = getTemplates()
+  const tpl = templates[slot]
+  if (!tpl) return null
+  _save(tpl.params)
+  return _load()
+}
+
+/**
+ * Supprime un template.
+ * @param {number} slot
+ * @returns {Array} tableau mis à jour
+ */
+export function deleteTemplate(slot) {
+  const templates = getTemplates()
+  templates[slot] = null
+  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates))
+  return templates
+}
+
+/**
+ * Renomme un template existant.
+ * @param {number} slot
+ * @param {string} name
+ * @returns {Array} tableau mis à jour
+ */
+export function renameTemplate(slot, name) {
+  const templates = getTemplates()
+  if (!templates[slot]) return templates
+  templates[slot] = { ...templates[slot], name: (name || templates[slot].name).trim() }
+  localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates))
+  return templates
+}
