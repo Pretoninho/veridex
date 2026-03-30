@@ -227,6 +227,22 @@ export async function fetchSignals(asset) {
               : null,
           },
         })
+
+        // Démarre une session de suivi PatternSession si aucune session active n'existe déjà pour ce hash
+        const sessionManager = window.__veridexTrackers?.[assetCode]?.sessionManager
+        if (sessionManager) {
+          const hasActive = sessionManager.activeSessions.some(
+            s => s.patternHash === fingerprint.hash
+          )
+          if (!hasActive) {
+            sessionManager.onPatternDetected(
+              fingerprint.hash,
+              'composite',
+              Date.now(),
+              { durationMs: 3_600_000 }
+            )
+          }
+        }
       })
       .catch(() => {})
   }
