@@ -26,22 +26,36 @@ const DEFAULT_TIMEOUT_MS = 15_000
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
+// OPTIMISATION: Utiliser AbortSignal.timeout() (ES2024) si disponible,
+// sinon fallback à timer manuel. Réduit allocations éphémères.
 async function apiFetch(endpoint, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const url = new URL(`${BASE_URL}/${endpoint}`)
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  // ES2024: AbortSignal.timeout() est plus efficace que timer manuel
+  const signal = AbortSignal.timeout
+    ? AbortSignal.timeout(timeoutMs)
+    : _legacyTimeoutSignal(timeoutMs)
 
   try {
-    const res = await fetch(url.toString(), { signal: controller.signal })
+    const res = await fetch(url.toString(), { signal })
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${endpoint}`)
     const json = await res.json()
     if (json.error) throw new Error(`Deribit error ${json.error.code}: ${json.error.message}`)
     return json.result
-  } finally {
-    clearTimeout(timer)
+  } catch (err) {
+    // AbortError ou timeout error
+    if (err.name === 'AbortError') throw new Error(`Timeout on ${endpoint}`)
+    throw err
   }
+}
+
+// Fallback pour les navigateurs sans AbortSignal.timeout()
+function _legacyTimeoutSignal(timeoutMs) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  // Cleanup implicite via GC du controller
+  return controller.signal
 }
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────

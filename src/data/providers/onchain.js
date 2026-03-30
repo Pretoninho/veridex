@@ -18,19 +18,33 @@ const TIMEOUT_MS = 5_000
 
 /**
  * Fetch avec timeout.
+ * OPTIMISATION: Utiliser AbortSignal.timeout() (ES2024) si disponible
  * @param {string} url
  * @param {number} [ms]
  */
 async function fetchWithTimeout(url, ms = TIMEOUT_MS) {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), ms)
+  // ES2024: AbortSignal.timeout() est plus efficace que timer manuel
+  const signal = AbortSignal.timeout
+    ? AbortSignal.timeout(ms)
+    : _legacyTimeoutSignal(ms)
+
   try {
-    const res = await fetch(url, { signal: ctrl.signal })
+    const res = await fetch(url, { signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return await res.json()
-  } finally {
-    clearTimeout(timer)
+  } catch (err) {
+    // AbortError ou timeout error
+    if (err.name === 'AbortError') throw new Error(`Timeout on ${url}`)
+    throw err
   }
+}
+
+// Fallback pour les navigateurs sans AbortSignal.timeout()
+function _legacyTimeoutSignal(ms) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), ms)
+  // Cleanup implicite via GC du controller
+  return ctrl.signal
 }
 
 // ── Source 1 : Blockchain.info ────────────────────────────────────────────────
@@ -132,20 +146,22 @@ export async function getExchangeFlows(asset = 'BTC') {
 
   const currency = asset.toLowerCase()
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 8000)
+    // OPTIMISATION: Utiliser AbortSignal.timeout() au lieu de timer manuel
+    const abortSignal = AbortSignal.timeout
+      ? AbortSignal.timeout(8000)
+      : _legacyTimeoutSignal(8000)
+
     const url =
       `https://api.cryptoquant.com/v1/` +
       `${currency}/exchange-flows/netflow` +
       `?window=hour&limit=24`
     const res = await fetch(url, {
-      signal:  controller.signal,
+      signal: abortSignal,
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type':  'application/json',
       },
     })
-    clearTimeout(timeout)
 
     if (res.status === 401) {
       console.error('[getExchangeFlows] Clé API invalide — vérifier VITE_CRYPTOQUANT_API_KEY')

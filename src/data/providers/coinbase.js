@@ -16,20 +16,34 @@ const DEFAULT_TIMEOUT_MS = 10_000
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
+// OPTIMISATION: Utiliser AbortSignal.timeout() (ES2024) si disponible,
+// sinon fallback à timer manuel. Réduit allocations éphémères.
 async function apiFetch(path, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const url = new URL(`${BASE_URL}${path}`)
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  // ES2024: AbortSignal.timeout() est plus efficace que timer manuel
+  const signal = AbortSignal.timeout
+    ? AbortSignal.timeout(timeoutMs)
+    : _legacyTimeoutSignal(timeoutMs)
 
   try {
-    const res = await fetch(url.toString(), { signal: controller.signal })
+    const res = await fetch(url.toString(), { signal })
     if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`)
     return res.json()
-  } finally {
-    clearTimeout(timer)
+  } catch (err) {
+    // AbortError ou timeout error
+    if (err.name === 'AbortError') throw new Error(`Timeout on ${path}`)
+    throw err
   }
+}
+
+// Fallback pour les navigateurs sans AbortSignal.timeout()
+function _legacyTimeoutSignal(timeoutMs) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  // Cleanup implicite via GC du controller
+  return controller.signal
 }
 
 // Produits Coinbase : BTC → BTC-USD
