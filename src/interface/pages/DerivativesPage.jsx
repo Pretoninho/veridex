@@ -1,17 +1,13 @@
 /**
- * DerivativesPage — Vue dérivés cross-exchange
+ * DerivativesPage — Vue dérivés Deribit
  *
- * Futures Deribit (structure à terme), perpétuels funding (Deribit / Binance),
- * sentiment Binance, liquidations, OI multi-source, prix règlement.
+ * Futures Deribit (structure à terme), perpétuels funding Deribit,
+ * OI Deribit, prix règlement.
  *
- * Sources : Deribit + Binance + Coinbase (spot référence fiat)
+ * Source : Deribit uniquement
  */
 import { useState, useEffect, useRef } from 'react'
 import * as deribit  from '../../data/providers/deribit.js'
-import * as binance  from '../../data/providers/binance.js'
-import * as coinbase from '../../data/providers/coinbase.js'
-import { getNextFundingTime } from '../../data/providers/clock_sync.js'
-import { calcPositioningScore, interpretPositioning } from '../../signals/positioning_score.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -1,28 +1,21 @@
 /**
  * data_core/providers/clock_sync.js
  *
- * Synchronisation des horloges serveur cross-exchange.
+ * v2.0: Deribit-only time synchronization
  *
- * UNITÉS PAR SOURCE — bug silencieux classique :
+ * UNITÉS PAR SOURCE :
  *   Deribit  → millisecondes (ms) natif
- *   Binance  → millisecondes (ms) natif
- *   Coinbase → secondes epoch  ← MULTIPLIER × 1000 dans getCoinbaseTime()
  *
- * Les 3 get_time tournent en parallèle (Promise.allSettled).
- * Une source hors ligne ne bloque jamais les autres.
- *
- * Référence de temps : Deribit prioritaire → Binance → Date.now() local
+ * Référence de temps : Deribit
  */
 
 import { getDeribitTime }  from './deribit.js'
-import { getBinanceTime }  from './binance.js'
-import { getCoinbaseTime } from './coinbase.js'
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const DRIFT_WARNING_MS       = 500             // alerte si |drift| > 500 ms
 const DRIFT_CRITICAL_MS      = 2_000           // critique si |drift| > 2 s
-const FUNDING_INTERVALS_UTC  = [0, 8, 16]      // heures UTC fixing Binance
+const FUNDING_INTERVALS_UTC  = [0, 8, 16]      // heures UTC fixing Deribit perpetuals
 const CLOCK_SYNC_LS_KEY      = 'clock_sync_history'
 const MAX_HISTORY             = 10             // syncs conservées dans localStorage
 
@@ -57,7 +50,7 @@ function saveToHistory(sync) {
 // ── Utilitaires exportés ──────────────────────────────────────────────────────
 
 /**
- * Calcule le prochain fixing funding Binance (00:00, 08:00, 16:00 UTC).
+ * Calcule le prochain fixing funding Deribit (00:00, 08:00, 16:00 UTC).
  *
  * @returns {{
  *   nextFixing: Date,
@@ -123,22 +116,14 @@ export function getDaysUntilCorrected(expiryTimestamp, clockSync) {
 // ── Fonction principale ───────────────────────────────────────────────────────
 
 /**
- * Synchronise les horloges des 3 exchanges en parallèle.
+ * Synchronise l'horloge Deribit avec l'horloge locale.
  *
- * Toutes les valeurs sont normalisées en ms avant comparaison.
- * Les unités diffèrent par source (voir en-tête du fichier).
- *
- * Logique de référence :
- *   1. Deribit prioritaire (référence options)
- *   2. Binance si Deribit hors ligne
- *   3. Date.now() local si les deux hors ligne
+ * v2.0: Deribit-only, fallback to Date.now() if Deribit unavailable
  *
  * @returns {Promise<{
  *   syncedAt: number,
  *   sources: {
  *     deribit:  { timestamp: number|null, drift_vs_local: number|null, status: string },
- *     binance:  { timestamp: number|null, drift_vs_local: number|null, status: string },
- *     coinbase: { timestamp: number|null, drift_vs_local: number|null, status: string },
  *   },
  *   maxDrift: number,
  *   driftStatus: 'ok'|'warning'|'critical',
@@ -152,47 +137,25 @@ export function getDaysUntilCorrected(expiryTimestamp, clockSync) {
 export async function syncServerClocks() {
   const localNow = Date.now()
 
-  // Appels en parallèle — une source hors ligne ne bloque pas les autres
-  const [deribitRes, binanceRes, coinbaseRes] = await Promise.allSettled([
+  // Appel Deribit seul
+  const [deribitRes] = await Promise.allSettled([
     getDeribitTime(),
-    getBinanceTime(),
-    getCoinbaseTime(),
   ])
 
   const deribitData  = deribitRes.status  === 'fulfilled' ? deribitRes.value  : null
-  const binanceData  = binanceRes.status  === 'fulfilled' ? binanceRes.value  : null
-  const coinbaseData = coinbaseRes.status === 'fulfilled' ? coinbaseRes.value : null
 
   // ── Référence temporelle ────────────────────────────────────────────────────
-  // Deribit prioritaire → Binance → Date.now() local
-  const reference = deribitData ?? binanceData
-  if (!reference) {
-    console.warn('[clock_sync] Deribit et Binance hors ligne — fallback Date.now() local')
-  }
-  if (!deribitData && binanceData) {
-    console.warn('[clock_sync] Deribit hors ligne — Binance utilisé comme référence')
-  }
-  const referenceTime = reference?.timestamp ?? localNow
-
-  // ── Drift par source vs horloge locale ─────────────────────────────────────
-  const deribitDrift  = deribitData  != null ? deribitData.timestamp  - localNow : null
-  const binanceDrift  = binanceData  != null ? binanceData.timestamp  - localNow : null
-  const coinbaseDrift = coinbaseData != null ? coinbaseData.timestamp - localNow : null
-
-  // Vérification Coinbase : drift > 5s → probable oubli de la conversion × 1000
-  if (coinbaseDrift != null && Math.abs(coinbaseDrift) > 5_000) {
-    console.error('[clock_sync] Probable unit error: Coinbase epoch not converted to ms')
+  // Deribit prioritaire → Date.now() local fallback
+  const referenceTime = deribitData?.timestamp ?? localNow
+  if (!deribitData) {
+    console.warn('[clock_sync] Deribit hors ligne — fallback Date.now() local')
   }
 
-  // ── maxDrift entre toutes les sources disponibles ───────────────────────────
-  const allTs = [deribitData, binanceData, coinbaseData]
-    .filter(Boolean)
-    .map(d => d.timestamp)
+  // ── Drift Deribit vs horloge locale ────────────────────────────────────────
+  const deribitDrift  = deribitData != null ? deribitData.timestamp - localNow : null
 
-  let maxDrift = 0
-  if (allTs.length >= 2) {
-    maxDrift = Math.max(...allTs) - Math.min(...allTs)
-  }
+  // ── maxDrift ───────────────────────────────────────────────────────────────
+  const maxDrift = deribitDrift != null ? Math.abs(deribitDrift) : 0
 
   // ── Statut global ───────────────────────────────────────────────────────────
   const driftStatus = maxDrift >= DRIFT_CRITICAL_MS ? 'critical'
@@ -201,9 +164,7 @@ export async function syncServerClocks() {
 
   // ── Sources dégradées ───────────────────────────────────────────────────────
   const staleSources = [
-    deribitDrift  != null && Math.abs(deribitDrift)  > DRIFT_WARNING_MS ? 'deribit'  : null,
-    binanceDrift  != null && Math.abs(binanceDrift)  > DRIFT_WARNING_MS ? 'binance'  : null,
-    coinbaseDrift != null && Math.abs(coinbaseDrift) > DRIFT_WARNING_MS ? 'coinbase' : null,
+    deribitDrift != null && Math.abs(deribitDrift) > DRIFT_WARNING_MS ? 'deribit' : null,
   ].filter(Boolean)
 
   const { msRemaining } = getNextFundingTime()
@@ -213,12 +174,6 @@ export async function syncServerClocks() {
     sources: {
       deribit:  deribitData  != null
         ? { timestamp: deribitData.timestamp,  drift_vs_local: deribitDrift,  status: sourceStatus(deribitDrift) }
-        : { timestamp: null, drift_vs_local: null, status: 'offline' },
-      binance:  binanceData  != null
-        ? { timestamp: binanceData.timestamp,  drift_vs_local: binanceDrift,  status: sourceStatus(binanceDrift) }
-        : { timestamp: null, drift_vs_local: null, status: 'offline' },
-      coinbase: coinbaseData != null
-        ? { timestamp: coinbaseData.timestamp, drift_vs_local: coinbaseDrift, status: sourceStatus(coinbaseDrift) }
         : { timestamp: null, drift_vs_local: null, status: 'offline' },
     },
     maxDrift,

@@ -1,13 +1,11 @@
 /**
- * MarketPage — Vue marché multi-exchange
+ * MarketPage — Vue marché Deribit
  *
- * Prix spot de toutes les plateformes côte à côte,
- * volume, spread, VWAP. Les futures sont dans l'onglet Derivés.
+ * Index spot Deribit et données on-chain.
+ * Les dérivés sont dans l'onglet Derivés.
  */
 import { useState, useEffect, useRef } from 'react'
 import * as deribit  from '../../data/providers/deribit.js'
-import * as binance  from '../../data/providers/binance.js'
-import * as coinbase from '../../data/providers/coinbase.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,42 +123,24 @@ export default function MarketPage({ asset }) {
     if (!isMounted.current) return
     setLoading(true)
     try {
-      const [dSpot, bSpot, cSpot, oSpot] = await Promise.allSettled([
+      const [dSpot] = await Promise.allSettled([
         deribit.getSpot(asset),
-        binance.getSpot(asset),
-        coinbase.getSpot(asset),
       ])
       if (!isMounted.current) return
       setSpots({
         deribit:  dSpot.status  === 'fulfilled' ? dSpot.value  : null,
-        binance:  bSpot.status  === 'fulfilled' ? bSpot.value  : null,
-        coinbase: cSpot.status  === 'fulfilled' ? cSpot.value  : null,
       })
       setLastUpdate(new Date())
     } catch (_) {}
     if (isMounted.current) setLoading(false)
   }
 
-  // Calculs VWAP + prix individuels
-  const allSpots = Object.values(spots).filter(s => s?.price != null)
-  const prices   = allSpots.map(s => safe(s.price)).filter(v => v !== null)
-
-  const totalVol = allSpots.reduce((s, t) => s + (safe(t.volume24h) ?? 0), 0)
-  const vwap = totalVol > 0
-    ? allSpots.reduce((s, t) => s + (safe(t.price) ?? 0) * (safe(t.volume24h) ?? 0), 0) / totalVol
-    : prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null
-
-  const minPrice = prices.length ? Math.min(...prices) : null
-  const maxPrice = prices.length ? Math.max(...prices) : null
-  const spread   = (minPrice && maxPrice && minPrice > 0) ? (maxPrice - minPrice) / minPrice * 100 : null
-
-  const bRaw      = spots.binance?.raw
-  const change24h = bRaw?.priceChangePercent != null ? safe(bRaw.priceChangePercent) : null
+  // Données Deribit uniquement
+  const spotData = spots.deribit
+  const spotPrice = safe(spotData?.price)
 
   const exchanges = [
     { key: 'deribit',  name: 'Deribit',  color: 'var(--accent)', note: 'Index' },
-    { key: 'binance',  name: 'Binance',  color: '#F0B90B' },
-    { key: 'coinbase', name: 'Coinbase', color: '#0052FF' },
   ]
 
   return (
@@ -184,48 +164,26 @@ export default function MarketPage({ asset }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
-            VWAP {asset}
+            Spot {asset}
           </div>
           <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: 'var(--accent)' }}>
-            {fmtPrice(vwap, asset)}
+            {fmtPrice(spotPrice, asset)}
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
-            {allSpots.length} exchange{allSpots.length > 1 ? 's' : ''}
-          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Deribit Index</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
-            24h Change
-          </div>
-          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: pctColor(change24h) }}>
-            {change24h !== null ? (change24h > 0 ? '+' : '') + change24h.toFixed(2) + '%' : '—'}
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Binance 24h</div>
-        </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
-            Spread cross-exchange
-          </div>
-          <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: safe(spread) > 0.1 ? 'var(--put)' : 'var(--text-muted)' }}>
-            {spread !== null ? spread.toFixed(3) + '%' : '—'}
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
-            {fmtPrice(minPrice, asset)} — {fmtPrice(maxPrice, asset)}
-          </div>
-        </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 6 }}>
-            Volume total 24h
+            Volume 24h
           </div>
           <div style={{ fontFamily: 'var(--sans)', fontWeight: 800, fontSize: 20, color: 'var(--text)' }}>
-            {fmtVol(totalVol)}
+            {fmtVol(spotData?.volume24h)}
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Tous exchanges</div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Deribit</div>
         </div>
       </div>
 
-      {/* Tableau spot multi-exchange */}
-      <SectionTitle>Spot — Comparaison 4 exchanges</SectionTitle>
+      {/* Tableau spot Deribit */}
+      <SectionTitle>Spot — Deribit Index</SectionTitle>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {/* Header colonnes */}
         <div style={{
@@ -244,9 +202,6 @@ export default function MarketPage({ asset }) {
 
         {exchanges.map(ex => {
           const s = spots[ex.key]
-          const exChange = ex.key === 'binance'
-            ? (bRaw?.priceChangePercent != null ? safe(bRaw.priceChangePercent) : null)
-            : s?.change24h ?? null
           return (
             <ExchangeRow
               key={ex.key}
@@ -254,52 +209,11 @@ export default function MarketPage({ asset }) {
               price={s?.price} asset={asset}
               bid={s?.bid} ask={s?.ask}
               volume24h={s?.volume24h}
-              change24h={exChange}
+              change24h={s?.change24h}
             />
           )
         })}
-
-        {/* Ligne spread résumé */}
-        {allSpots.length >= 2 && (
-          <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.02)' }}>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Spread max cross-exchange</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: safe(spread) > 0.05 ? 'var(--atm)' : 'var(--call)' }}>
-              {spread !== null ? spread.toFixed(4) + '%' : '—'}
-            </span>
-          </div>
-        )}
       </div>
-
-      {/* Prix par exchange (mini bar chart relatif) */}
-      {allSpots.length >= 2 && vwap && (
-        <>
-          <SectionTitle>Prix relatif au VWAP</SectionTitle>
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {exchanges.map(ex => {
-              const s = spots[ex.key]
-              if (!s?.price) return null
-              const diff = (s.price - vwap) / vwap * 100
-              const barW = Math.abs(diff) * 200  // échelle visuelle
-              return (
-                <div key={ex.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 60, fontSize: 10, fontWeight: 700, color: 'var(--text)' }}>{ex.name}</div>
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
-                    <div style={{
-                      height: 4, width: `${Math.min(barW, 50)}%`,
-                      background: diff >= 0 ? 'var(--call)' : 'var(--put)',
-                      borderRadius: 2,
-                      marginLeft: diff >= 0 ? '50%' : `${50 - Math.min(barW, 50)}%`,
-                    }} />
-                  </div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: pctColor(diff), width: 60, textAlign: 'right' }}>
-                    {diff >= 0 ? '+' : ''}{diff.toFixed(4)}%
-                  </div>
-                </div>
-              )
-            }).filter(Boolean)}
-          </div>
-        </>
-      )}
 
       {lastUpdate && (
         <div style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-muted)', opacity: .5, marginTop: 12, marginBottom: 4 }}>
