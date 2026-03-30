@@ -48,16 +48,13 @@ function spreadBucket(spreadPct) {
 }
 
 /**
- * Classe le ratio long/short.
+ * Deprecated: lsBucket no longer used in v2.0 (Binance L/S removed)
  * @param {number|null} lsRatio
- * @returns {'long_heavy'|'balanced'|'short_heavy'|null}
+ * @returns {null}
  */
 function lsBucket(lsRatio) {
-  const ls_cfg = FINGERPRINT_BUCKETING.lsRatio
-  if (lsRatio == null) return null
-  if (lsRatio >= ls_cfg.longHeavy) return 'long_heavy'
-  if (lsRatio <= ls_cfg.shortHeavy) return 'short_heavy'
-  return 'balanced'
+  // v2.0: Binance L/S ratio removed
+  return null
 }
 
 /**
@@ -172,7 +169,7 @@ export function computeAdvancedStats(stat) {
  *   ivRank?: number|null,        — 0-100
  *   fundingPct?: number|null,    — % (ex: 0.01 pour 1%)
  *   spreadPct?: number|null,     — % spread bid/ask
- *   lsRatio?: number|null,       — long/short ratio
+ *   lsRatio?: number|null,       — (v2.0: ignored, Binance removed)
  *   basisPct?: number|null,      — basis annualisé en %
  * }} market
  * @returns {{ config: Object, hash: string }}
