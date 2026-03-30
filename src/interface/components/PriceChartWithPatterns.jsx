@@ -2,16 +2,18 @@
  * PriceChartWithPatterns.jsx
  *
  * Graphique de prix (bougies japonaises) avec superposition des patterns
- * détectés et des fenêtres d'annonces macro.
+ * détectés, des fenêtres d'annonces macro, et des trades actifs.
  *
  * Lib : TradingView Lightweight Charts v5 (lightweight-charts)
  *
  * Props :
- *   candles     — [{time (s), open, high, low, close, volume}]  trié ASC
- *   auditLog    — [{timestamp (ms), asset, spot, newsWindow, ...}]
- *   econEvents  — [{ts (ms), currency, event, importance}]
- *   asset       — 'BTC' | 'ETH'
- *   height      — hauteur en px (défaut 320)
+ *   candles      — [{time (s), open, high, low, close, volume}]  trié ASC
+ *   auditLog     — [{timestamp (ms), asset, spot, newsWindow, ...}]
+ *   econEvents   — [{ts (ms), currency, event, importance}]
+ *   asset        — 'BTC' | 'ETH'
+ *   height       — hauteur en px (défaut 320)
+ *   activeTrades — [{entry, direction, tp?, sl?, timestamp?, id?}] (optionnel)
+ *   showTradeLines — afficher TP/SL lines (défaut true)
  */
 
 import { useEffect, useRef } from 'react'
@@ -41,6 +43,11 @@ const COLORS = {
   // Éco events
   econHigh:   '#f0476b88',
   econBg:     '#f0476b14',
+  // Trades
+  tradeLong:  '#00c896',   // vert  : position LONG
+  tradeShort: '#f0476b',   // rouge : position SHORT
+  tradeTP:    '#00c896',   // vert  : take profit
+  tradeSL:    '#f0476b',   // rouge : stop loss
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -77,17 +84,21 @@ function markerFromAudit(entry) {
 // ── Composant ─────────────────────────────────────────────────────────────────
 
 export default function PriceChartWithPatterns({
-  candles     = [],
-  auditLog    = [],
-  econEvents  = [],
-  asset       = 'BTC',
-  height      = 320,
+  candles      = [],
+  auditLog     = [],
+  econEvents   = [],
+  asset        = 'BTC',
+  height       = 320,
+  activeTrades = [],
+  showTradeLines = true,
 }) {
-  const containerRef  = useRef(null)
-  const chartRef      = useRef(null)
-  const seriesRef     = useRef(null)
-  const markersRef    = useRef(null)
-  const econSeriesRef = useRef([])
+  const containerRef   = useRef(null)
+  const chartRef       = useRef(null)
+  const seriesRef      = useRef(null)
+  const markersRef     = useRef(null)
+  const econSeriesRef  = useRef([])
+  const tradeSeriesRef = useRef([])  // Pour TP/SL lines
+  const tradeMarkersRef = useRef(null)  // Pour entry markers
 
   // ── Initialisation du chart ──────────────────────────────────────────────────
 
@@ -158,7 +169,11 @@ export default function PriceChartWithPatterns({
       // Supprimer les séries éco avant de remove le chart
       econSeriesRef.current.forEach(s => { try { chart.removeSeries(s) } catch (_) {} })
       econSeriesRef.current = []
+      // Supprimer les séries trades (TP/SL lines)
+      tradeSeriesRef.current.forEach(s => { try { chart.removeSeries(s) } catch (_) {} })
+      tradeSeriesRef.current = []
       markersRef.current = null
+      tradeMarkersRef.current = null
       chart.remove()
       chartRef.current  = null
       seriesRef.current = null
@@ -262,6 +277,100 @@ export default function PriceChartWithPatterns({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [econEvents, candles])
 
+  // ── Trades actifs (entry markers + TP/SL lines) ────────────────────────────────
+
+  useEffect(() => {
+    if (!chartRef.current || !seriesRef.current || candles.length === 0 || activeTrades.length === 0) {
+      // Nettoyer les séries trades si aucun trade actif
+      tradeSeriesRef.current.forEach(s => {
+        try { chartRef.current?.removeSeries(s) } catch (_) {}
+      })
+      tradeSeriesRef.current = []
+      if (tradeMarkersRef.current) {
+        tradeMarkersRef.current.setMarkers([])
+      }
+      return
+    }
+
+    const candleStart = candles[0]?.time ?? 0
+    const candleEnd   = candles[candles.length - 1]?.time ?? Infinity
+
+    // 1. Créer les markers d'entrée
+    const entryMarkers = activeTrades.map((trade, idx) => {
+      const color = trade.direction === 'LONG' ? COLORS.tradeLong : COLORS.tradeShort
+      const shape = trade.direction === 'LONG' ? 'arrowUp' : 'arrowDown'
+      // Utiliser timestamp du trade ou la bougie la plus proche
+      const time = trade.timestamp ? toSec(trade.timestamp) : candleEnd
+      return {
+        time,
+        position: 'belowBar',
+        color,
+        shape,
+        text: 'E',  // E pour Entry
+        size: 1.2,
+      }
+    })
+
+    // Ajouter ou mettre à jour les markers
+    if (tradeMarkersRef.current) {
+      tradeMarkersRef.current.setMarkers(entryMarkers)
+    } else {
+      tradeMarkersRef.current = createSeriesMarkers(seriesRef.current, entryMarkers)
+    }
+
+    // 2. Créer les lignes TP/SL
+    // Nettoyer les anciennes séries
+    tradeSeriesRef.current.forEach(s => {
+      try { chartRef.current.removeSeries(s) } catch (_) {}
+    })
+    tradeSeriesRef.current = []
+
+    if (showTradeLines) {
+      activeTrades.forEach((trade, idx) => {
+        // Ligne TP (take profit)
+        if (trade.tp != null && Number.isFinite(trade.tp)) {
+          try {
+            const tpSeries = chartRef.current.addSeries(LineSeries, {
+              color: COLORS.tradeTP,
+              lineWidth: 1,
+              lineStyle: 1,  // solid
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+            })
+            // Ligne horizontale avec points aux extrémités temporelles visibles
+            tpSeries.setData([
+              { time: candleStart, value: trade.tp },
+              { time: candleEnd, value: trade.tp },
+            ])
+            tradeSeriesRef.current.push(tpSeries)
+          } catch (_) {}
+        }
+
+        // Ligne SL (stop loss)
+        if (trade.sl != null && Number.isFinite(trade.sl)) {
+          try {
+            const slSeries = chartRef.current.addSeries(LineSeries, {
+              color: COLORS.tradeSL,
+              lineWidth: 1,
+              lineStyle: 3,  // dotted
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+            })
+            // Ligne horizontale avec points aux extrémités temporelles visibles
+            slSeries.setData([
+              { time: candleStart, value: trade.sl },
+              { time: candleEnd, value: trade.sl },
+            ])
+            tradeSeriesRef.current.push(slSeries)
+          } catch (_) {}
+        }
+      })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrades, candles, showTradeLines])
+
   // ── Rendu ────────────────────────────────────────────────────────────────────
 
   return (
@@ -275,11 +384,18 @@ export default function PriceChartWithPatterns({
         fontFamily: 'var(--font-mono, monospace)', fontSize: 9,
         color: 'var(--text-ghost, #4a5260)',
         pointerEvents: 'none',
+        flexWrap: 'wrap',
       }}>
         <span style={{ color: COLORS.neutral }}>● Pattern</span>
         <span style={{ color: COLORS.inWindow }}>⚡ News window</span>
         <span style={{ color: COLORS.preWindow }}>◆ &lt;60min</span>
         <span style={{ color: COLORS.econHigh }}>— Macro event</span>
+        {activeTrades.length > 0 && (
+          <>
+            <span style={{ color: COLORS.tradeLong }}>▲ Entry LONG</span>
+            <span style={{ color: COLORS.tradeShort }}>▼ Entry SHORT</span>
+          </>
+        )}
       </div>
     </div>
   )
