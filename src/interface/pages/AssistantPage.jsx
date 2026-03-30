@@ -7,6 +7,7 @@ import { simulateTrade, getPortfolio, resetPortfolio, INIT_BAL, POSITION_PCT } f
 import { detectMarketRegime } from '../../analytics/market_regime.js'
 import { monteCarlo }         from '../../analytics/monte_carlo.js'
 import { riskOfRuin }         from '../../analytics/risk.js'
+import TradeDisplay           from '../components/TradeDisplay.jsx'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -390,6 +391,14 @@ export default function AssistantPage({ asset }) {
           </div>
         )}
       </Card>
+
+      {/* ── Bloc Trade Structure ── */}
+      {trade && (
+        <Card style={{ marginBottom: 12 }}>
+          <CardTitle>📋 Structure JSON</CardTitle>
+          <TradeDisplay trade={trade} signal={signal} showJSON={true} />
+        </Card>
+      )}
 
       {/* ── Bloc Simulation ── */}
       <Card>
