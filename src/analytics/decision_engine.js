@@ -9,24 +9,17 @@ const VALIDITY_DURATION = '14 jours'  // Validité standard du signal
 const DEFAULT_LOT = 1  // Taille de position par défaut
 
 /**
- * Détermine intelligemment le type de trade basé sur le régime de marché et la volatilité
+ * Détermine intelligemment le type de trade basé sur le score du signal
  * @param {number} score — Score de signal (0-100)
  * @param {string} direction — 'LONG' ou 'SHORT'
- * @param {string} regime — Régime de marché optionnel
- * @returns {'CALL'|'PUT'|'FUTURE'|'SPOT'}
+ * @returns {'CALL'|'PUT'|'FUTURE'}
  */
-function getTradeType(score, direction, regime = null) {
+function getTradeType(score, direction) {
   // Haute volatilité/IV extrême → options
   if (score >= 75) {
     return direction === 'LONG' ? 'CALL' : 'PUT'
   }
-
-  // Basse volatilité/marché calme → futures ou spot
-  if (score <= 35) {
-    return 'FUTURE'
-  }
-
-  // Zone intermédiaire → défaut futures
+  // Zone intermédiaire/basse volatilité → futures
   return 'FUTURE'
 }
 
@@ -66,11 +59,11 @@ export function buildTrade(signal, price) {
     // Champs structurés (spécification métier)
     type: tradeType,
     direction: signal.signal,
-    strike: entry,  // Prix spot comme strike pour crypto
+    strike: entry,
     lot: DEFAULT_LOT,
-    stopLoss: sl,   // Valeur numérique
+    stopLoss: sl,
     takeProfit: tp,
-    confidence: Math.round(confidence),  // 0-100
+    confidence: Math.round(confidence),
     validity: VALIDITY_DURATION,
 
     // Champs historiques (rétro-compatibilité)

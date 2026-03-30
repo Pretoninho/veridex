@@ -97,8 +97,8 @@ export default function PriceChartWithPatterns({
   const seriesRef      = useRef(null)
   const markersRef     = useRef(null)
   const econSeriesRef  = useRef([])
-  const tradeSeriesRef = useRef([])  // Pour TP/SL lines
-  const tradeMarkersRef = useRef(null)  // Pour entry markers
+  const tradeSeriesRef = useRef([])
+  const tradeMarkersRef = useRef(null)
 
   // ── Initialisation du chart ──────────────────────────────────────────────────
 
@@ -299,14 +299,13 @@ export default function PriceChartWithPatterns({
     const entryMarkers = activeTrades.map((trade, idx) => {
       const color = trade.direction === 'LONG' ? COLORS.tradeLong : COLORS.tradeShort
       const shape = trade.direction === 'LONG' ? 'arrowUp' : 'arrowDown'
-      // Utiliser timestamp du trade ou la bougie la plus proche
       const time = trade.timestamp ? toSec(trade.timestamp) : candleEnd
       return {
         time,
         position: 'belowBar',
         color,
         shape,
-        text: 'E',  // E pour Entry
+        text: 'E',
         size: 1.2,
       }
     })
@@ -319,7 +318,6 @@ export default function PriceChartWithPatterns({
     }
 
     // 2. Créer les lignes TP/SL
-    // Nettoyer les anciennes séries
     tradeSeriesRef.current.forEach(s => {
       try { chartRef.current.removeSeries(s) } catch (_) {}
     })
@@ -327,18 +325,17 @@ export default function PriceChartWithPatterns({
 
     if (showTradeLines) {
       activeTrades.forEach((trade, idx) => {
-        // Ligne TP (take profit)
+        // Ligne TP
         if (trade.tp != null && Number.isFinite(trade.tp)) {
           try {
             const tpSeries = chartRef.current.addSeries(LineSeries, {
               color: COLORS.tradeTP,
               lineWidth: 1,
-              lineStyle: 1,  // solid
+              lineStyle: 1,
               priceLineVisible: false,
               lastValueVisible: false,
               crosshairMarkerVisible: false,
             })
-            // Ligne horizontale avec points aux extrémités temporelles visibles
             tpSeries.setData([
               { time: candleStart, value: trade.tp },
               { time: candleEnd, value: trade.tp },
@@ -347,18 +344,17 @@ export default function PriceChartWithPatterns({
           } catch (_) {}
         }
 
-        // Ligne SL (stop loss)
+        // Ligne SL
         if (trade.sl != null && Number.isFinite(trade.sl)) {
           try {
             const slSeries = chartRef.current.addSeries(LineSeries, {
               color: COLORS.tradeSL,
               lineWidth: 1,
-              lineStyle: 3,  // dotted
+              lineStyle: 3,
               priceLineVisible: false,
               lastValueVisible: false,
               crosshairMarkerVisible: false,
             })
-            // Ligne horizontale avec points aux extrémités temporelles visibles
             slSeries.setData([
               { time: candleStart, value: trade.sl },
               { time: candleEnd, value: trade.sl },
