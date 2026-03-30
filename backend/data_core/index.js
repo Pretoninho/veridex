@@ -1,20 +1,20 @@
 /**
  * backend/data_core/index.js — Point d'entrée du Data Core serveur
  *
- * Façade unifiée : agrège Deribit, Binance et données on-chain.
+ * v2.0: Deribit + On-Chain only
+ * Façade unifiée : agrège Deribit et données on-chain.
  * Retourne une structure compatible avec signalEngine.js.
  *
  * Usage :
  *   const { fetchAllData } = require('./data_core')
  *   const data = await fetchAllData('BTC')
- *   // { spot, dvol, funding, rv, basisAvg, lsRatio, pcRatio, onChainScore, onChain, asset }
+ *   // { spot, dvol, funding, rv, basisAvg, pcRatio, onChainScore, onChain, asset }
  */
 
 'use strict'
 
 const { SmartCache } = require('../utils/cache')
 const deribit        = require('./providers/deribit')
-const binance        = require('./providers/binance')
 const onchain        = require('./providers/onchain')
 const { normalizeOnChain } = require('./normalizers/format_data')
 
@@ -32,7 +32,6 @@ const _cache = new SmartCache({ ttlMs: 30_000 })
  *   funding: object|null,
  *   rv: object|null,
  *   basisAvg: number|null,
- *   lsRatio: number|null,
  *   pcRatio: number|null,
  *   onChainScore: number|null,
  *   onChain: object|null,
@@ -49,7 +48,6 @@ async function fetchAllData(asset) {
       fundingResult,
       rvResult,
       oiResult,
-      lsResult,
       onchainResult,
       fearGreedResult,
       hashRateResult,
@@ -60,7 +58,6 @@ async function fetchAllData(asset) {
       deribit.getFundingRate(asset),
       deribit.getRealizedVol(asset),
       deribit.getOpenInterest(asset),
-      binance.getLongShortRatio(asset),
       onchain.getOnChainSnapshot(asset),
       onchain.getFearGreedIndex(),
       onchain.getHashRateHistory(),
@@ -72,7 +69,6 @@ async function fetchAllData(asset) {
     const funding  = fundingResult.status  === 'fulfilled' ? fundingResult.value : null
     const rv       = rvResult.status       === 'fulfilled' ? rvResult.value      : null
     const oi       = oiResult.status       === 'fulfilled' ? oiResult.value      : null
-    const ls       = lsResult.status       === 'fulfilled' ? lsResult.value      : null
     const snapshot = onchainResult.status  === 'fulfilled' ? onchainResult.value : null
     const fearGreed = fearGreedResult.status === 'fulfilled' ? fearGreedResult.value : null
     const hashRate  = hashRateResult.status  === 'fulfilled' ? hashRateResult.value  : null
@@ -103,7 +99,6 @@ async function fetchAllData(asset) {
       funding:      funding ? { ...funding, avgAnn7d } : null,
       rv,
       basisAvg,
-      lsRatio:      ls?.ratio      ?? null,
       pcRatio:      oi?.putCallRatio ?? null,
       onChainScore: onChainNorm.composite.onChainScore,
       onChain:      onChainNorm,
@@ -116,6 +111,5 @@ module.exports = {
   fetchAllData,
   // Re-export providers for direct use if needed
   deribit,
-  binance,
   onchain,
 }

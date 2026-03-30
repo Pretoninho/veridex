@@ -1,6 +1,8 @@
 /**
  * src/config/signal_calibration.js
  *
+ * v2.0: Deribit + On-Chain only configuration
+ *
  * Central configuration file for all signal parameters.
  * This is the single source of truth for 140+ thresholds, weights, and constants.
  *
@@ -8,7 +10,7 @@
  * 1. Score Calculation Thresholds (scoreIV, scoreFunding, etc.)
  * 2. Global Score Weighting (s1-s6 component weights)
  * 3. Signal Interpretation Boundaries (80/60/40 classification)
- * 4. Positioning Thresholds (retail/instit ratios, adjustments)
+ * 4. Positioning Thresholds (Deribit P/C ratio, adjustments)
  * 5. Convergence Criteria (percentile targets, minimums)
  * 6. On-Chain Signal Parameters (exchange flows, mempool, hash rate)
  * 7. Notification Thresholds (defaults for price move, IV spike, etc.)
@@ -111,35 +113,20 @@ export const SIGNAL_BOUNDARIES = {
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. POSITIONING THRESHOLDS
 // ─────────────────────────────────────────────────────────────────────────────
+// v2.0: Deribit P/C ratio only (Binance L/S ratio removed)
 
 export const POSITIONING = {
-  // L/S Ratio thresholds (Binance Long/Short sentiment)
-  lsRatio: {
-    bullish: 1.2,           // Retail bullish: L/S > 1.2
-    bearish: 0.8,           // Retail bearish: L/S < 0.8
-    strongBullish: 1.5,     // Strong signal: L/S > 1.5
-    strongBearish: 0.7,     // Strong signal: L/S < 0.7
-  },
-
-  // P/C Ratio thresholds (Deribit Put/Call ratio, inverted interpretation)
+  // P/C Ratio thresholds (Deribit Put/Call ratio - institutional positioning)
+  // P/C < 1 = more calls = institutional bullish (offensive)
+  // P/C > 1 = more puts = institutional bearish (defensive)
   pcRatio: {
-    bullish: 0.85,          // Instit bullish (fewer puts): P/C < 0.85
-    bearish: 1.15,          // Instit bearish (more puts): P/C > 1.15
-    strongBullish: 0.7,     // Strong signal: P/C < 0.7
-    strongBearish: 1.3,     // Strong signal: P/C > 1.3
+    bullish: 0.85,          // Institutional bullish (fewer puts): P/C < 0.85
+    bearish: 1.15,          // Institutional bearish (more puts): P/C > 1.15
+    strongBullish: 0.7,     // Strong bullish signal: P/C < 0.7
+    strongBearish: 1.3,     // Strong bearish signal: P/C > 1.3
   },
 
-  // Score Adjustments for L/S Ratio (lsRatio > 1 = retail bullish)
-  lsAdjustments: {
-    veryBullish: { threshold: 2.0, adjustment: -25 },    // Retail extremely long
-    bullish: { threshold: 1.5, adjustment: -15 },         // Moderately long
-    mildlyBullish: { threshold: 1.2, adjustment: -5 },    // Slightly long
-    veryBearish: { threshold: 0.5, adjustment: +25 },     // Retail extremely short
-    bearish: { threshold: 0.7, adjustment: +15 },         // Moderately short
-    mildlyBearish: { threshold: 0.85, adjustment: +5 },   // Slightly short
-  },
-
-  // Score Adjustments for P/C Ratio (pcRatio < 1 = instit bullish)
+  // Score Adjustments for P/C Ratio (pcRatio < 1 = institutional bullish)
   pcAdjustments: {
     veryBearish: { threshold: 1.5, adjustment: -25 },     // High puts (defensive)
     bearish: { threshold: 1.2, adjustment: -15 },         // Moderately defensive
@@ -149,16 +136,9 @@ export const POSITIONING = {
     mildlyBullish: { threshold: 0.85, adjustment: +5 },   // Slightly offensive
   },
 
-  // Math.tanh() normalization parameters
-  tanh: {
-    retailMultiplier: 2,     // Math.tanh((lsRatio - 1) * 2)
-    institMultiplier: 2,     // Math.tanh((1 - pcRatio) * 2)
-    divergenceNormalizer: 2, // Math.tanh(divergence / 2)
-  },
-
   // Base score and scaling
   scoreBase: 50,             // Center score before adjustments
-  scoreMultiplier: 50,       // divergence * 50
+  scoreMultiplier: 50,       // Score adjustment multiplier
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -324,12 +304,6 @@ export const FINGERPRINT_BUCKETING = {
     tight: 0.1,                // < 0.1%
   },
 
-  // L/S Ratio Classification
-  lsRatio: {
-    longHeavy: 1.2,            // >= 1.2
-    shortHeavy: 0.8,           // <= 0.8
-  },
-
   // Basis Classification (%)
   basis: {
     highContango: 10,          // >= 10%
@@ -437,9 +411,8 @@ export const API_CONFIG = {
   VITE_ANTHROPIC_API_KEY: 'env:VITE_ANTHROPIC_API_KEY',
   VITE_CRYPTOQUANT_API_KEY: 'env:VITE_CRYPTOQUANT_API_KEY',
 
-  // API Rates & Limits
+  // API Rates & Limits (v2.0: Deribit-only)
   DERIBIT_RATE_LIMIT: 500,       // 500 requests per 10 seconds
-  BINANCE_RATE_LIMIT: 1200,      // 1200 requests per minute
   CRYPTOQUANT_RATE_LIMIT: 100,   // 100 requests per day (free tier)
 }
 

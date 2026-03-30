@@ -1,22 +1,20 @@
 /**
- * OptionsDataPage — Vue options multi-source
+ * OptionsDataPage — Vue options Deribit
  * Onglets : Analyse · Signaux · Journal
  *
- * Sources : Deribit (référence) | Binance European
+ * Source : Deribit uniquement
  *
  * Données affichées :
  *   - DVOL + IV Rank Deribit
  *   - Funding rate perpetuel Deribit
  *   - Structure à terme ATM IV
  *   - Greeks ATM (Deribit)
- *   - OI comparaison 2 sources
- *   - IV spread Deribit / Binance
+ *   - OI Deribit
  *   - Signaux options dérivés des données chargées
  *   - Journal de snapshots persisté en localStorage
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import * as deribit from '../../data/providers/deribit.js'
-import * as binance from '../../data/providers/binance.js'
 import { analyzeIV } from '../../core/volatility/iv_rank.js'
 import { calcOptionGreeks } from '../../core/volatility/greeks.js'
 import { recordSnapshot as saveMetricSnapshot } from '../../core/history/metric_history.js'
@@ -304,16 +302,13 @@ export default function OptionsDataPage({ asset }) {
     setLoading(true)
     try {
       // ── Phase 1 : données de base ──────────────────────────────────────────
-      const [spotRes, dvolRes, rvRes, fundingRes, bOptRes, bOIRes, dOIRes, bFundRes, delivRes] =
+      const [spotRes, dvolRes, rvRes, fundingRes, dOIRes, delivRes] =
         await Promise.allSettled([
           deribit.getSpot(asset),
           deribit.getDVOL(asset),
           deribit.getRealizedVol(asset),
           deribit.getFundingRate(asset),
-          binance.getOptionsChain(asset),
-          binance.getOpenInterest(asset),   // futures OI (fiable) — eapi options trop peu liquides
           deribit.getOpenInterest(asset),
-          binance.getFundingRate(asset),
           deribit.getDeliveryPrices(asset),
         ])
 
@@ -325,16 +320,12 @@ export default function OptionsDataPage({ asset }) {
       const spotPrice = safe(spotData?.price)
 
       const dFundData = fundingRes.status === 'fulfilled' ? fundingRes.value : null
-      const bFundData = bFundRes.status  === 'fulfilled' ? bFundRes.value  : null
 
       setSpot(spotData)
       setDvol(dvolData)
       setRv(rvData)
       setFunding(dFundData)
-      setBChain(bOptRes.status === 'fulfilled' ? bOptRes.value : null)
-      setBOI(bOIRes.status === 'fulfilled' ? bOIRes.value : null)
       setDOI(dOIRes.status === 'fulfilled' ? dOIRes.value : null)
-      setBFunding(bFundData)
       setDeliveries(delivRes.status === 'fulfilled' ? delivRes.value : null)
 
       // IV Rank / Percentile
@@ -401,7 +392,6 @@ export default function OptionsDataPage({ asset }) {
             ivRank:        safe(dvolData ? analyzeIV(dvolData)?.ivRank : null),
             rv:            safe(rvData?.current),
             dFundingRate:  safe(dFundData?.rate),
-            bFundingRate:  safe(bFundData?.rate),
             dPutCallRatio: safe(dOIRes.status === 'fulfilled' ? dOIRes.value?.putCallRatio : null),
           })
         } catch (_) {}
@@ -433,52 +423,17 @@ export default function OptionsDataPage({ asset }) {
     try { localStorage.setItem(journalKey(asset), JSON.stringify(updated)) } catch (e) { console.warn('Snapshot save error:', e) }
   }
 
-  // ── Calculs cross-exchange ─────────────────────────────────────────────────
+  // ── Calculs Deribit ────────────────────────────────────────────────
   const spotPrice = safe(spot?.price)
-
-  // ATM IV par expiry pour Binance
-  const bGroups = groupByExpiry(bChain?.options)
-  const bATM    = spotPrice ? calcATMIV(bGroups, spotPrice) : []
-
-  // Cross-exchange IV par expiry (matching approx par daysToExpiry)
-  const allExpiries = new Map()
-  ;(dChain ?? []).forEach(r => {
-    const bucket = Math.round(r.daysToExpiry)
-    if (!allExpiries.has(bucket)) allExpiries.set(bucket, { days: bucket })
-    allExpiries.get(bucket).deribit = r.atmIV
-  })
-  bATM.forEach(r => {
-    const bucket = Math.round(r.daysToExpiry)
-    if (!allExpiries.has(bucket)) allExpiries.set(bucket, { days: bucket })
-    allExpiries.get(bucket).binance = r.atmIV
-  })
-  const crossTable = [...allExpiries.values()]
-    .filter(r => r.deribit || r.binance)
-    .sort((a, b) => a.days - b.days)
-    .slice(0, 6)
-
-  // IV spread : pour chaque ligne avec 2 sources, calcule spread Deribit − Binance
-  const ivArbSignals = crossTable
-    .map(r => {
-      const ivs = [r.deribit, r.binance].filter(v => v != null)
-      if (ivs.length < 2) return null
-      const maxIV = Math.max(...ivs)
-      const minIV = Math.min(...ivs)
-      const spread = maxIV - minIV
-      return { days: r.days, spread, maxIV, minIV, ...r }
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.spread - a.spread)
 
   const dvolChange = safe(dvol?.current) !== null && safe(dvol?.weekAgo) !== null
     ? dvol.current - dvol.weekAgo : null
   const ivPremium = safe(dvol?.current) !== null && safe(rv?.current) !== null
     ? dvol.current - rv.current : null
 
-  // OI agrégé multi-source
+  // OI Deribit
   const dTotalOI = dOI?.callOI != null ? (dOI.callOI + dOI.putOI) : null
   const dPCR     = safe(dOI?.putCallRatio)
-  const bPCR     = safe(bOI?.putCallRatio)
 
   // ── Max Pain par échéance ─────────────────────────────────────────────────
   // Calculé depuis dOI.raw (données déjà en cache, aucun appel API supplémentaire)
@@ -628,34 +583,6 @@ export default function OptionsDataPage({ asset }) {
             </>
           )}
 
-          {/* ── IV Cross-Exchange ── */}
-          {ivArbSignals.length > 0 && (
-            <>
-              <SectionTitle>IV Cross-Exchange — Deribit vs Binance</SectionTitle>
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-                <TableHead cols={['Jours', 'Deribit', 'Binance', 'Spread']} />
-                {ivArbSignals.map((r, i) => (
-                  <div key={r.days} style={{
-                    display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                    gap: 4, padding: '10px 16px', alignItems: 'center',
-                    borderBottom: i < ivArbSignals.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-                    background: r.spread > 5 ? 'rgba(255,193,7,.04)' : 'transparent',
-                  }}>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.days}j</div>
-                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
-                      {r.deribit != null ? fmtPct(r.deribit, 1) : '—'}
-                    </div>
-                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: '#F0B90B' }}>
-                      {r.binance != null ? fmtPct(r.binance, 1) : '—'}
-                    </div>
-                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 800, color: r.spread > 5 ? 'var(--atm)' : 'var(--text-muted)' }}>
-                      {fmtPct(r.spread, 1)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
 
           {/* ── Structure à terme Deribit ── */}
           {dChain?.length > 0 && (
@@ -713,41 +640,26 @@ export default function OptionsDataPage({ asset }) {
             </>
           )}
 
-          {/* ── OI multi-source ── */}
-          <SectionTitle>Open Interest — Options</SectionTitle>
+          {/* ── OI Deribit ── */}
+          <SectionTitle badge="Deribit">Open Interest — Options</SectionTitle>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-            <TableHead cols={['Source', 'Call OI', 'Put OI', 'P/C Ratio']} />
-            {[
-              { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio, total: null },
-              { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,         putOI: null,        pcr: null,              total: bOI?.total },
-            ].map((row, i) => (
-              <div key={row.name} style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                gap: 4, padding: '10px 16px', alignItems: 'center',
-                borderBottom: i < 1 ? '1px solid rgba(255,255,255,.04)' : 'none',
-              }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: row.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700 }}>{row.name}</span>
-                  </div>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, paddingLeft: 12 }}>{row.type}</div>
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
-                  {row.callOI != null
-                    ? Number(row.callOI).toFixed(0)
-                    : row.total != null
-                      ? <span style={{ color: 'var(--text-muted)' }}>{Number(row.total).toFixed(0)}</span>
-                      : '—'}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
-                  {row.putOI != null ? Number(row.putOI).toFixed(0) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                </div>
-                <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: safe(row.pcr) > 1 ? 'var(--put)' : safe(row.pcr) !== null ? 'var(--call)' : 'var(--text-muted)' }}>
-                  {safe(row.pcr) !== null ? Number(row.pcr).toFixed(3) : '—'}
-                </div>
+            <TableHead cols={['Call OI', 'Put OI', 'P/C Ratio']} />
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+              gap: 4, padding: '10px 16px', alignItems: 'center',
+            }}>
+              <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--call)' }}>
+                {dOI?.callOI != null
+                  ? Number(dOI.callOI).toFixed(0)
+                  : '—'}
               </div>
-            ))}
+              <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: 'var(--put)' }}>
+                {dOI?.putOI != null ? Number(dOI.putOI).toFixed(0) : '—'}
+              </div>
+              <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 800, color: safe(dOI?.putCallRatio) > 1 ? 'var(--put)' : safe(dOI?.putCallRatio) !== null ? 'var(--call)' : 'var(--text-muted)' }}>
+                {safe(dOI?.putCallRatio) !== null ? Number(dOI.putCallRatio).toFixed(3) : '—'}
+              </div>
+            </div>
           </div>
 
           {/* ── Prix de règlement Deribit ── */}

@@ -17,7 +17,6 @@ import {
   getFundingRateHistory,
   getBasisAvg,
 } from '../data/providers/deribit.js'
-import { getLongShortRatio } from '../data/providers/binance.js'
 import {
   getOnChainSnapshot,
   getFearGreedIndex,
@@ -60,7 +59,6 @@ export async function fetchMarket(asset) {
     fundingResult,
     rvResult,
     oiResult,
-    lsResult,
     fundingHistResult,
   ] = await Promise.allSettled([
     getSpot(a),
@@ -68,7 +66,6 @@ export async function fetchMarket(asset) {
     getFundingRate(a),
     getRealizedVol(a),
     getOpenInterest(a),
-    getLongShortRatio(a),
     getFundingRateHistory(a, 21),
   ])
 
@@ -77,7 +74,6 @@ export async function fetchMarket(asset) {
   const funding = fundingResult.status === 'fulfilled' ? fundingResult.value : null
   const rv      = rvResult.status      === 'fulfilled' ? rvResult.value      : null
   const oi      = oiResult.status      === 'fulfilled' ? oiResult.value      : null
-  const ls      = lsResult.status      === 'fulfilled' ? lsResult.value      : null
 
   const fundingHistItems = fundingHistResult.status === 'fulfilled'
     ? (fundingHistResult.value?.history ?? [])
@@ -96,7 +92,6 @@ export async function fetchMarket(asset) {
     funding:   funding ? { ...funding, avgAnn7d } : null,
     rv,
     basisAvg,
-    lsRatio:   ls?.ratio           ?? null,
     pcRatio:   oi?.putCallRatio    ?? null,
     timestamp: Date.now(),
   }
@@ -149,7 +144,6 @@ export async function fetchSignals(asset) {
     onChainScore: onChainNorm.composite.onChainScore,
     spot:         market.spot         ?? null,
     asset:        assetCode,
-    lsRatio:      market.lsRatio      ?? null,
     pcRatio:      market.pcRatio      ?? null,
   }
 
@@ -195,7 +189,6 @@ export async function fetchSignals(asset) {
       ivRank,
       fundingPct: market.funding != null ? (market.funding.rateAnn ?? 0) / 100 : null,
       spreadPct:  null,
-      lsRatio:    market.lsRatio ?? null,
       basisPct:   market.basisAvg ?? null,
     })
     // Vérifie la fenêtre news (T±30min autour d'une annonce macro High)
@@ -220,7 +213,6 @@ export async function fetchSignals(asset) {
           inputs: {
             ivRank:     ivRank,
             fundingAnn: market.funding?.rateAnn ?? null,
-            lsRatio:    market.lsRatio ?? null,
             basisPct:   market.basisAvg ?? null,
           },
           spot:        market.spot,

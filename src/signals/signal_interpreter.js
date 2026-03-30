@@ -95,12 +95,15 @@ function _futuresReco(score, funding, basisAvg, positioning) {
   const funding_cfg = INTERPRETER.funding
   const basis_cfg = INTERPRETER.basis
 
-  // Contexte positionnement croisé à appendre si divergence significative
+  // v2.0: Contexte positionnement Deribit P/C ratio seul
   let posCtx = ''
-  if (positioning?.divergenceType &&
-      positioning.divergenceType !== 'neutral' &&
-      positioning.lsRatio != null && positioning.pcRatio != null) {
-    posCtx = ` · Retail L/S ${fmt(positioning.lsRatio, 2)} vs Instit P/C ${fmt(positioning.pcRatio, 2)} — divergence contrarian ${positioning.signal === 'bearish' ? 'baissière' : positioning.signal === 'bullish' ? 'haussière' : 'neutre'} confirme le biais.`
+  if (positioning?.pcRatio != null && positioning?.score != null) {
+    const pcLabel = positioning.signalType === 'bullish'
+      ? 'Instit. offensif (peu de puts)'
+      : positioning.signalType === 'bearish'
+      ? 'Instit. défensif (beaucoup de puts)'
+      : 'Instit. neutre'
+    posCtx = ` · P/C ratio ${fmt(positioning.pcRatio, 2)} — ${pcLabel}`
   }
 
   if (score >= spot_cfg.attentif) return {

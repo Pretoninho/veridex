@@ -1,15 +1,17 @@
 # Veridex — PWA Mobile
 
+**v2.0: Deribit + On-Chain only**
+
 Application React PWA installable sur mobile pour l'analyse des marchés crypto dérivés :
-options, futures, funding, IV, Greeks, signaux — données en temps réel depuis 3 exchanges.
+options, futures, funding, IV, Greeks, signaux — données en temps réel depuis Deribit + analyse on-chain.
 
 ## Onglets
 
 | Onglet | Contenu |
 |---|---|
-| **Market** | Prix spot 3 exchanges (Deribit index, Binance, Coinbase), VWAP pondéré volume, spread cross-exchange |
-| **Dérivés** | Funding perpétuel (Deribit · Binance), term structure futures + basis annualisé, Open Interest restructuré en 3 sous-sections (Deribit Options · Binance Perps · Signal Combiné), sentiment Long/Short (Binance), liquidations, countdown prochain fixing funding |
-| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), IV spread Deribit / Binance, OI, prix de règlement, onglet Signaux avec recommandations stratégies |
+| **Market** | Prix spot Deribit Index, liquidité du carché |
+| **Dérivés** | Funding perpétuel Deribit, term structure futures + basis annualisé, Open Interest Deribit perpetuals, countdown prochain fixing funding |
+| **Options** | DVOL + IV Rank Deribit, structure à terme ATM IV, Greeks ATM (Black-Scholes), OI Deribit, prix de règlement, onglet Signaux avec recommandations stratégies |
 | **Signaux** | Score composite global (IV · Funding · Basis · IV/RV · On-Chain · Positionnement), top patterns par EV, clustering Bull/Bear, confluence multi-signaux, insights analytiques (Claude API), 3 blocs recommandations indépendants (Spot / Futures / Options) |
 | **Volatilité** | IV/RV, Greeks ATM (Black-Scholes), skew 25-delta, smile, term structure — chargement manuel |
 | **IV Live** | Tracker IV temps réel, alertes spike, historique CSV — streaming WebSocket ou polling configurable |
@@ -41,8 +43,8 @@ Chaque carte correspond à un groupe de seuils :
 - **Score IV/RV** (prime IV − RV en points)
 - **Signal global** (seuils du score composite)
 - **Détection d’anomalies** (nb d’indicateurs et fenêtre)
-- **Bucketing des patterns** (mouvements prix, spreads, L/S, basis)
-- **Positioning** (L/S retail et P/C institutionnel)
+- **Bucketing des patterns** (mouvements prix, spreads, basis)
+- **Positioning** (P/C ratio Deribit institutionnel)
 - **Convergence** (minimums de critères)
 - **On-Chain** (Fear & Greed, Hash Rate, score)
 
@@ -66,9 +68,9 @@ Chaque carte correspond à un groupe de seuils :
 
 | Onglet | Statut | Contenu |
 |---|---|---|
-| **Market** | ✅ Complet | Prix spot 3 exchanges, VWAP, spreads cross-exchange |
-| **Dérivés** | ✅ Complet | Funding, futures, OI, liquidations, countdown funding |
-| **Options** | ✅ Complet | IV cross-exchange, Greeks, OI multi-source, settlements |
+| **Market** | ✅ Complet | Prix spot Deribit Index |
+| **Dérivés** | ✅ Complet | Funding Deribit, futures, OI, countdown funding |
+| **Options** | ✅ Complet | IV Deribit, Greeks, OI Deribit, settlements |
 | **Signaux** | ✅ Complet | Score composite, patterns EV, confluence, insights IA |
 | **Volatilité** | ✅ Complet | IV/RV, Greeks, skew, smile, term structure ATM |
 | **IV Live** | ✅ Complet | Tracker temps réel, alertes, historique CSV, WebSocket |
@@ -88,10 +90,8 @@ src/
 ├── data/                           ← Couche données (source unique de vérité)
 │   ├── providers/
 │   │   ├── deribit.js              ← REST Deribit : index, options, DVOL, OI, funding, RV, settlement
-│   │   ├── binance.js              ← REST Binance : spot, perp, funding, OI, sentiment, liquidations
-│   │   ├── coinbase.js             ← REST Coinbase Exchange : spot fiat USD
 │   │   ├── onchain.js              ← On-chain : blockchain.info, mempool.space, Glassnode, CryptoQuant
-│   │   └── clock_sync.js           ← Synchronisation horloges cross-exchange
+│   │   └── clock_sync.js           ← Synchronisation horloge Deribit
 │   ├── normalizers/
 │   │   └── format_data.js          ← Format canonique unifié + validateDataFreshness + normalizeOnChain
 │   ├── data_store/

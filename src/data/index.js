@@ -31,9 +31,8 @@ export {
 } from './data_store/hash_search.js'
 
 // ── Exports : providers ───────────────────────────────────────────────────────
+// v2.0: Deribit + On-Chain only
 export * as deribit  from './providers/deribit.js'
-export * as binance  from './providers/binance.js'
-export * as coinbase from './providers/coinbase.js'
 export * as onchain  from './providers/onchain.js'
 
 export {
@@ -56,8 +55,6 @@ export {
 } from './providers/clock_sync.js'
 
 export { getDeribitTime }  from './providers/deribit.js'
-export { getBinanceTime }  from './providers/binance.js'
-export { getCoinbaseTime } from './providers/coinbase.js'
 
 export { getCachedClockSync, setCachedClockSync } from './data_store/cache.js'
 
@@ -77,20 +74,7 @@ export {
   normalizeDeribitFundingHistory,
   normalizeDeribitDeliveryPrices,
   normalizeDeribitTrades,
-  // Binance
-  normalizeBinanceTicker,
-  normalizeBinanceFunding,
-  normalizeBinanceOI,
-  normalizeBinancePremiumIndex,
-  normalizeBinanceSentiment,
-  normalizeBinanceTakerVolume,
-  normalizeBinanceLiquidations,
-  normalizeBinanceOptions,
-  normalizeBinanceOptionsOI,
-  // Coinbase
-  normalizeCoinbaseTicker,
   // Utilitaires
-  mergeSpotTickers,
   validateDataFreshness,
   normalizeOnChain,
   getHistoricalContext,
