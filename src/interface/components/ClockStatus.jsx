@@ -107,7 +107,7 @@ export default function ClockStatus({ clockSync, onSync }) {
             </div>
 
             {/* Sources */}
-            {['deribit', 'binance', 'coinbase'].map(src => {
+            {Object.keys(clockSync.sources).map(src => {
               const s = clockSync.sources[src]
               const sColor = statusColor(s.status)
               return (
