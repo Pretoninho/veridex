@@ -91,6 +91,51 @@ export async function notifyAnomaly(asset, anomalyResult) {
   })
 }
 
+// ── Sector-Specific Alerts (export public — called by SectorSignalTracker) ─────
+
+/**
+ * Notifies a sector-specific signal change detected by SectorSignalTracker
+ * Provides more granular alerts than global signal changes
+ *
+ * @param {string} asset - Asset name
+ * @param {string} sector - Sector type: 'futures', 'options', 'onchain'
+ * @param {Array<string>} changedFields - Fields that changed
+ * @param {string} prevHash - Previous hash (first 8 chars for display)
+ * @param {string} currHash - Current hash (first 8 chars for display)
+ * @param {Object} snapshot - Current data snapshot
+ */
+export async function notifySectorChange(asset, sector, changedFields, prevHash, currHash, snapshot = {}) {
+  if (!changedFields || changedFields.length === 0) return
+
+  const sectorLabel = sector.charAt(0).toUpperCase() + sector.slice(1)
+  const fieldStr = changedFields.slice(0, 3).join(', ')
+  const hashStr = `${prevHash?.slice(0, 4) || '...'}... → ${currHash?.slice(0, 4) || '...'}...`
+
+  // Determine priority based on sector and fields
+  let level = 'info'
+  if (sector === 'futures' && (changedFields.includes('funding') || changedFields.includes('basis'))) {
+    level = 'alert'
+  } else if (sector === 'options' && changedFields.includes('dvol')) {
+    level = 'alert'
+  }
+
+  await sendNotification({
+    type: 'sector_change',
+    asset,
+    sector,
+    level,
+    title: `◈ [${sectorLabel}] Signal change · ${asset}`,
+    body: `${fieldStr}${changedFields.length > 3 ? ` +${changedFields.length - 3}` : ''} (${hashStr})`,
+    tag: `sector_${sector}_${asset}`,
+    data: {
+      page: sector === 'futures' ? 'derivatives' : sector === 'options' ? 'options' : 'analysis',
+      asset,
+      sector,
+      changedFields
+    },
+  })
+}
+
 // ── N1 — Mouvement de prix ────────────────────────────────────────────────────
 
 async function _checkPriceMove(asset, price, t) {
