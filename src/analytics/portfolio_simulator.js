@@ -33,15 +33,17 @@ function savePortfolio(portfolio) {
 
 /**
  * Applique un trade au portefeuille simulé et retourne l'état mis à jour.
+ * Accepte tous les trades avec données valides (y compris faible confiance).
  *
- * @param {{ entry: number, direction: 'LONG'|'SHORT' } | null} trade
+ * @param {{ entry: number, direction: 'LONG'|'SHORT', confidence?: number } | null} trade
  * @param {number} currentPrice  — prix de clôture simulé
  * @returns {{ balance: number, trades: Array }}
  */
 export function simulateTrade(trade, currentPrice) {
   const portfolio = loadPortfolio()
 
-  if (!trade || !currentPrice || !Number.isFinite(currentPrice)) {
+  // Valide le trade object et le prix (accepte toute confiance >= 0)
+  if (!trade?.entry || !currentPrice || !Number.isFinite(currentPrice)) {
     return portfolio
   }
 
