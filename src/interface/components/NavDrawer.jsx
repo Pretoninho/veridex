@@ -167,6 +167,16 @@ function IconMonitor() {
   )
 }
 
+function IconAnalytics() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="3" y1="12" x2="21" y2="12"/>
+      <polyline points="3 6 9 13 15 7 21 13"/>
+    </svg>
+  )
+}
+
 // ── Items de navigation ───────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
@@ -179,6 +189,7 @@ const NAV_ITEMS = [
   { id: 'assistant',     label: 'Assistant',         sub: 'Décision · Trade · Simulation', Icon: IconAssistant      },
   { id: 'onchain',       label: 'On-Chain',          sub: 'Mempool · Exchange Flows',      Icon: IconOnChain        },
   { id: 'audit',         label: 'Audit',             sub: 'Journal · Anomalies · Hashes',  Icon: IconAudit          },
+  { id: 'analytics',     label: 'Analytics',         sub: 'Patterns · Performance · Trends', Icon: IconAnalytics     },
   { id: 'notifications', label: 'Notifications',     sub: 'Alertes push · Seuils',         Icon: IconNotifications  },
   { id: 'calibration',   label: 'Calibration',        sub: 'Signaux · Patterns · Seuils',   Icon: IconCalibration    },
   { id: 'fingerprint',  label: 'Fingerprint Debug',   sub: 'Patterns · Stats · Monitoring', Icon: IconFingerprint    },

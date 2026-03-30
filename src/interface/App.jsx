@@ -14,6 +14,7 @@ import TrackerPage    from './pages/TrackerPage.jsx'
 import CalibrationPage from './pages/CalibrationPage.jsx'
 import FingerprintDebug from './pages/FingerprintDebug.jsx'
 import MonitorPage      from './pages/MonitorPage.jsx'
+import AnalyticsPage    from './pages/AnalyticsPage.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
 import AuditBanner    from './components/AuditBanner.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
@@ -52,6 +53,7 @@ const PAGE_NAMES = {
   assistant:     'Assistant',
   onchain:       'On-Chain',
   audit:         'Audit',
+  analytics:     'Analytics',
   notifications: 'Notifications',
   calibration:   'Calibration',
   fingerprint:   'Fingerprint Debug',
@@ -294,6 +296,7 @@ export default function App() {
         {tab === 'assistant'     && <AssistantPage          asset={asset} />}
         {tab === 'onchain'       && <OnChainPage            asset={asset} />}
         {tab === 'audit'         && <AuditPage />}
+        {tab === 'analytics'     && <AnalyticsPage         asset={asset} clockSync={clockSync} />}
         {tab === 'notifications' && <NotificationSettingsPage />}
         {tab === 'calibration'   && <CalibrationPage />}
         {tab === 'fingerprint'   && <FingerprintDebug />}
