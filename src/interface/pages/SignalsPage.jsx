@@ -660,7 +660,7 @@ export default function SignalsPage({ asset }) {
                 fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--sans)',
                 fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12,
               }}>
-                Positionnement croisé
+                Positionnement institutionnel
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -677,33 +677,7 @@ export default function SignalsPage({ asset }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Retail */}
-                  <tr style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '8px 0', fontSize: 12, color: 'var(--text)' }}>
-                      Retail <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>(Binance)</span>
-                    </td>
-                    <td style={{ textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--text)' }}>
-                      {positioning.lsRatio != null ? positioning.lsRatio.toFixed(2) : '—'}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {positioning.lsRatio != null ? (
-                        <span style={{
-                          fontSize: 11, fontFamily: 'var(--sans)', fontWeight: 700,
-                          borderRadius: 6, padding: '2px 8px',
-                          background: positioning.lsRatio > 1.2 ? 'rgba(240,71,107,.12)'
-                            : positioning.lsRatio < 0.8 ? 'rgba(0,200,150,.12)'
-                            : 'rgba(255,255,255,.06)',
-                          color: positioning.lsRatio > 1.2 ? 'var(--put)'
-                            : positioning.lsRatio < 0.8 ? 'var(--call)'
-                            : 'var(--text-muted)',
-                        }}>
-                          {positioning.lsRatio > 1.2 ? 'Long 🔴'
-                            : positioning.lsRatio < 0.8 ? 'Short 🟢'
-                            : 'Neutre'}
-                        </span>
-                      ) : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>N/A</span>}
-                    </td>
-                  </tr>
+                  {/* v2.0: Retail (Binance) removed - L/S ratio no longer available */}
                   {/* Institutionnels */}
                   <tr style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '8px 0', fontSize: 12, color: 'var(--text)' }}>
