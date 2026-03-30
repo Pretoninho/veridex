@@ -2,83 +2,74 @@
  * signals/economic_calendar.js
  *
  * Récupère le calendrier des annonces macro "High" importance
- * depuis le flux public Forex Factory (aucune clé API requise).
+ * depuis l'API TradingEconomics.
  *
- * Sources :
- *   https://nfs.faireconomy.media/ff_calendar_thisweek.json
- *   https://nfs.faireconomy.media/ff_calendar_nextweek.json
+ * Source : https://api.tradingeconomics.com/calendar
  *
  * Cache localStorage : 1 heure (CACHE_TTL)
  * En cas d'erreur réseau, retourne le cache précédent ou []
  */
 
 const TE_BASE_URL = 'https://api.tradingeconomics.com'
+const TE_API_KEY  = 'Y1t0ZJPeDAM9PbUHUUcljxZGELNZ7bra0Hjmf2HGRfrJBsBPUxu5FlJqeoavlmDObDaMB09QLz44Z'
 const CACHE_KEY   = '84ab6a198c374ee:j0mgn1w2o9q0mcv'
 const CACHE_TTL   = 60 * 60 * 1_000  // 1 heure
 const TIMEOUT_MS  = 10_000
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Mapping pays → devise ────────────────────────────────────────────────────
+
+const COUNTRY_TO_CURRENCY = {
+  'united states':              'USD',
+  'euro area':                  'EUR',
+  'euro zone':                  'EUR',
+  'european monetary union':    'EUR',
+  'germany':                    'EUR',
+  'france':                     'EUR',
+  'italy':                      'EUR',
+  'spain':                      'EUR',
+  'united kingdom':             'GBP',
+  'japan':                      'JPY',
+  'canada':                     'CAD',
+  'australia':                  'AUD',
+  'new zealand':                'NZD',
+  'switzerland':                'CHF',
+  'china':                      'CNY',
+  'hong kong':                  'HKD',
+  'singapore':                  'SGD',
+  'south korea':                'KRW',
+  'mexico':                     'MXN',
+  'brazil':                     'BRL',
+  'india':                      'INR',
+  'russia':                     'RUB',
+  'south africa':               'ZAR',
+  'norway':                     'NOK',
+  'sweden':                     'SEK',
+  'denmark':                    'DKK',
+}
+
+function _countryToCurrency(country) {
+  if (!country) return '?'
+  return COUNTRY_TO_CURRENCY[country.toLowerCase()] ?? country.slice(0, 3).toUpperCase()
+}
+
+// ── Normalisation ─────────────────────────────────────────────────────────────
 
 /**
- * Détecte si une date UTC (en ms) est en heure d'été US (EDT = UTC-4).
- * EDT : 2e dimanche de mars → 1er dimanche de novembre.
+ * Mappe l'importance TradingEconomics (1, 2, 3) → entier 0–3.
  */
-function _isUSEDT(dateMs) {
-  const d = new Date(dateMs)
-  const y = d.getUTCFullYear()
-  const m = d.getUTCMonth() // 0-based
-
-  if (m < 2 || m > 10) return false   // jan, fév, nov, déc → EST
-  if (m > 2 && m < 10) return true    // avr-oct → EDT
-
-  if (m === 2) {
-    // Début EDT : 2e dimanche de mars
-    const dow = new Date(Date.UTC(y, 2, 1)).getUTCDay()
-    const secondSun = (dow === 0 ? 1 : 8 - dow) + 7
-    return d.getUTCDate() >= secondSun
-  }
-  // m === 10 : fin EDT → 1er dimanche de novembre
-  const dow = new Date(Date.UTC(y, 10, 1)).getUTCDay()
-  const firstSun = dow === 0 ? 1 : 8 - dow
-  return d.getUTCDate() < firstSun
+function _impactLevel(importance) {
+  const n = parseInt(importance, 10)
+  if (n >= 1 && n <= 3) return n
+  return 0
 }
 
 /**
- * Convertit une chaîne heure ET (ex: "8:30am", "2:00pm", "All Day") en ms depuis minuit.
- * Retourne null si l'heure ne peut pas être parsée (ex: "All Day", "Tentative").
- */
-function _parseTimeMs(timeStr) {
-  if (!timeStr) return null
-  const m = /^(\d{1,2}):(\d{2})(am|pm)$/i.exec(timeStr.trim())
-  if (!m) return null
-  let h = parseInt(m[1], 10)
-  const min = parseInt(m[2], 10)
-  const ampm = m[3].toLowerCase()
-  if (ampm === 'pm' && h !== 12) h += 12
-  if (ampm === 'am' && h === 12) h = 0
-  return (h * 60 + min) * 60 * 1_000
-}
-
-/**
- * Mappe l'impact FF ("High", "Medium", "Low", "Holiday") sur un entier 0–3.
- */
-function _impactLevel(impact) {
-  switch ((impact ?? '').toLowerCase()) {
-    case 'high':    return 3
-    case 'medium':  return 2
-    case 'low':     return 1
-    default:        return 0
-  }
-}
-
-/**
- * Normalise un événement Forex Factory au format interne.
+ * Normalise un événement TradingEconomics au format interne.
  *
- * FF format :
- *   { title, country, date, time, impact, forecast, previous, actual }
+ * TE format :
+ *   { Date, Country, Category, Event, Importance, Actual, Previous, Forecast, TEForecast }
  *
- * - `date` : ISO-8601 UTC minuit (ex: "2025-03-07T00:00:00.000Z")
- * - `time` : heure US Eastern (ex: "8:30am") — peut être "All Day" ou absent
+ * - `Date` : ISO-8601 UTC sans 'Z' (ex: "2025-03-07T13:30:00")
  *
  * @param {object} ev
  * @returns {{ ts: number|null, date: string, country: string, currency: string,
@@ -86,30 +77,30 @@ function _impactLevel(impact) {
  *             previous: string|null, forecast: string|null }}
  */
 function _normalize(ev) {
-  const dateStr  = ev.date  ?? null
-  const timeStr  = ev.time  ?? null
-  const dateMs   = dateStr  ? new Date(dateStr).getTime() : null
-  const timeMs   = _parseTimeMs(timeStr)
-
+  // TradingEconomics renvoie des dates UTC sans le suffixe 'Z'
+  const dateStr = ev.Date ?? null
   let ts = null
-  if (dateMs != null && timeMs != null) {
-    const offsetMs = (_isUSEDT(dateMs) ? 4 : 5) * 3_600_000
-    ts = dateMs + timeMs + offsetMs
-  } else if (dateMs != null) {
-    // Événements "All Day" : utiliser minuit UTC de la date
-    ts = dateMs
+  if (dateStr) {
+    const parsed = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z').getTime()
+    ts = Number.isFinite(parsed) ? parsed : null
   }
+
+  const country  = ev.Country  ?? ''
+  const currency = _countryToCurrency(country)
+  const forecast = ev.TEForecast ?? ev.Forecast ?? null
+  const actual   = ev.Actual   ?? null
+  const previous = ev.Previous ?? null
 
   return {
     ts,
     date:       dateStr ?? '',
-    country:    ev.country   ?? '?',
-    currency:   ev.country   ?? '?',   // FF utilise "country" = code devise (USD, EUR…)
-    event:      ev.title     ?? '?',
-    importance: _impactLevel(ev.impact),
-    actual:     ev.actual    != null && ev.actual    !== '' ? String(ev.actual)   : null,
-    previous:   ev.previous  != null && ev.previous  !== '' ? String(ev.previous) : null,
-    forecast:   ev.forecast  != null && ev.forecast  !== '' ? String(ev.forecast) : null,
+    country,
+    currency,
+    event:      ev.Event ?? ev.Category ?? '?',
+    importance: _impactLevel(ev.Importance),
+    actual:     actual   != null && actual   !== '' ? String(actual)   : null,
+    previous:   previous != null && previous !== '' ? String(previous) : null,
+    forecast:   forecast != null && forecast !== '' ? String(forecast) : null,
   }
 }
 
@@ -143,10 +134,11 @@ export function cacheEconomicEvents(events) {
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 
 /**
- * Charge un flux FF (thisweek ou nextweek) avec timeout.
+ * Charge le calendrier économique TradingEconomics pour une plage de dates.
  * Retourne [] en cas d'erreur.
  */
-async function _fetchFeed(url) {
+async function _fetchFeed(d1, d2) {
+  const url = `${TE_BASE_URL}/calendar/country/all/${d1}/${d2}?c=${TE_API_KEY}&f=json`
   const ctrl  = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
   try {
@@ -163,8 +155,17 @@ async function _fetchFeed(url) {
 }
 
 /**
- * Interroge les flux publics Forex Factory pour obtenir le calendrier
- * de la semaine courante et de la semaine suivante.
+ * Formate une date en "YYYY-MM-DD".
+ */
+function _fmtDate(d) {
+  const y  = d.getUTCFullYear()
+  const m  = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+/**
+ * Interroge l'API TradingEconomics pour la semaine courante + la semaine suivante.
  * Filtre uniquement les événements High importance (importance >= 3).
  * Déduplique par clé ts|currency|event.
  * Retourne [] silencieusement en cas d'erreur totale.
@@ -172,16 +173,19 @@ async function _fetchFeed(url) {
  * @returns {Promise<Array>}
  */
 export async function fetchEconomicCalendar() {
-  const [thisWeek, nextWeek] = await Promise.all([
-    _fetchFeed(`${FF_BASE_URL}/ff_calendar_thisweek.json`),
-    _fetchFeed(`${FF_BASE_URL}/ff_calendar_nextweek.json`),
-  ])
+  const now   = new Date()
+  const d1    = _fmtDate(now)
+  // Fenêtre de 14 jours pour couvrir la semaine courante + suivante
+  const end   = new Date(now.getTime() + 14 * 24 * 3600 * 1000)
+  const d2    = _fmtDate(end)
 
-  const seen = new Set()
+  const raw = await _fetchFeed(d1, d2)
+
+  const seen   = new Set()
   const events = []
 
-  for (const raw of [...thisWeek, ...nextWeek]) {
-    const ev = _normalize(raw)
+  for (const item of raw) {
+    const ev = _normalize(item)
     if (ev.importance < 3 || ev.ts == null) continue
     const key = `${ev.ts}|${ev.currency}|${ev.event}`
     if (seen.has(key)) continue
@@ -194,7 +198,7 @@ export async function fetchEconomicCalendar() {
 
 /**
  * Retourne les événements du cache s'ils sont frais (< CACHE_TTL),
- * sinon fetch depuis Forex Factory et met à jour le cache.
+ * sinon fetch depuis TradingEconomics et met à jour le cache.
  *
  * @returns {Promise<Array>}
  */
