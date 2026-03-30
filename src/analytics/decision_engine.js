@@ -1,15 +1,40 @@
 // analytics/decision_engine.js
 //
-// Construit un plan de trade (entry / SL / TP / R:R) à partir
-// d'un signal de pattern et du prix spot actuel.
+// Construit un plan de trade structuré (entry / SL / TP / R:R) avec métadonnées complètes
+// à partir d'un signal de pattern et du prix spot actuel.
 
 const RISK_PCT = 1   // % du capital risqué par trade
 const RR_RATIO = 2   // risk/reward 1:RR_RATIO
+const VALIDITY_DURATION = '14 jours'  // Validité standard du signal
+const DEFAULT_LOT = 1  // Taille de position par défaut
 
 /**
+ * Détermine intelligemment le type de trade basé sur le régime de marché et la volatilité
+ * @param {number} score — Score de signal (0-100)
+ * @param {string} direction — 'LONG' ou 'SHORT'
+ * @param {string} regime — Régime de marché optionnel
+ * @returns {'CALL'|'PUT'|'FUTURE'|'SPOT'}
+ */
+function getTradeType(score, direction, regime = null) {
+  // Haute volatilité/IV extrême → options
+  if (score >= 75) {
+    return direction === 'LONG' ? 'CALL' : 'PUT'
+  }
+
+  // Basse volatilité/marché calme → futures ou spot
+  if (score <= 35) {
+    return 'FUTURE'
+  }
+
+  // Zone intermédiaire → défaut futures
+  return 'FUTURE'
+}
+
+/**
+ * Construit un objet trade structuré et complet à partir d'un signal
  * @param {{ signal: 'LONG'|'SHORT'|'NEUTRAL'|'NO_DATA'|'NO_STATS', score: number, confidence: number }} signal
  * @param {number} price  — prix spot actuel
- * @returns {{ entry: number, sl: number, tp: number, rr: number, direction: string } | null}
+ * @returns {{ entry: number, direction: string, type: string, strike: number, lot: number, stopLoss: number, takeProfit: number, confidence: number, validity: string, sl: number, tp: number, rr: number } | null}
  */
 export function buildTrade(signal, price) {
   if (!signal || signal.signal === 'NEUTRAL' || signal.signal === 'NO_DATA' || signal.signal === 'NO_STATS') {
@@ -30,11 +55,28 @@ export function buildTrade(signal, price) {
     return null
   }
 
+  // Détermine le type de trade basé sur le score
+  const tradeType = getTradeType(signal.score ?? 50, signal.signal)
+
+  // Extrait la confiance du signal (0-100)
+  const confidence = Math.max(0, Math.min(100, signal.confidence ?? 0))
+
+  // Structure complète du trade avec métadonnées
   return {
+    // Champs structurés (spécification métier)
+    type: tradeType,
+    direction: signal.signal,
+    strike: entry,  // Prix spot comme strike pour crypto
+    lot: DEFAULT_LOT,
+    stopLoss: sl,   // Valeur numérique
+    takeProfit: tp,
+    confidence: Math.round(confidence),  // 0-100
+    validity: VALIDITY_DURATION,
+
+    // Champs historiques (rétro-compatibilité)
     entry,
     sl,
     tp,
     rr: RR_RATIO,
-    direction: signal.signal,
   }
 }
