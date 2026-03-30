@@ -58,11 +58,33 @@ const COLORS = {
 const toSec = (ms) => Math.floor(ms / 1000)
 
 /**
- * Déduit la couleur et la forme d'un marker à partir d'une entrée d'audit.
+ * Retourne le timestamp (en secondes) de la bougie la plus proche d'un instant donné.
+ * Lightweight-charts exige que les markers soient placés exactement sur un temps de bougie.
+ * @param {number} tSec  - timestamp en secondes
+ * @param {Array}  candles - [{time (s), ...}] trié ASC
+ * @returns {number|null}
  */
-function markerFromAudit(entry) {
-  const nw = entry.newsWindow ?? {}
-  const tSec = toSec(entry.timestamp)
+function snapToCandle(tSec, candles) {
+  if (!candles.length) return null
+  let best = candles[0].time
+  let bestDiff = Math.abs(tSec - best)
+  for (let i = 1; i < candles.length; i++) {
+    const diff = Math.abs(tSec - candles[i].time)
+    if (diff < bestDiff) { bestDiff = diff; best = candles[i].time }
+    if (candles[i].time > tSec) break   // tableau trié, on peut s'arrêter
+  }
+  return best
+}
+
+/**
+ * Déduit la couleur et la forme d'un marker à partir d'une entrée d'audit.
+ * Supporte les deux noms de champ : entry.ts (nouveau) et entry.timestamp (ancien).
+ */
+function markerFromAudit(entry, candles) {
+  const nw   = entry.newsWindow ?? {}
+  const tsMs = entry.ts ?? entry.timestamp
+  const snapped = snapToCandle(toSec(tsMs), candles)
+  if (snapped == null) return null
 
   let color    = COLORS.neutral
   let shape    = 'circle'
@@ -78,7 +100,7 @@ function markerFromAudit(entry) {
     text  = `~${Math.round(Math.abs(nw.minutesAway))}m`
   }
 
-  return { time: tSec, position, color, shape, text, size: 1 }
+  return { time: snapped, position, color, shape, text, size: 1 }
 }
 
 // ── Composant ─────────────────────────────────────────────────────────────────
@@ -200,12 +222,15 @@ export default function PriceChartWithPatterns({
 
     // Filtrer par asset et par plage temporelle visible
     const markers = auditLog
-      .filter(e =>
-        (!e.asset || e.asset === asset) &&
-        toSec(e.timestamp) >= candleStart &&
-        toSec(e.timestamp) <= candleEnd
-      )
-      .map(markerFromAudit)
+      .filter(e => {
+        const tsMs = e.ts ?? e.timestamp
+        return (!e.asset || e.asset === asset) &&
+          tsMs != null &&
+          toSec(tsMs) >= candleStart &&
+          toSec(tsMs) <= candleEnd
+      })
+      .map(e => markerFromAudit(e, candles))
+      .filter(Boolean)
       .sort((a, b) => a.time - b.time)
 
     if (markers.length === 0) {
