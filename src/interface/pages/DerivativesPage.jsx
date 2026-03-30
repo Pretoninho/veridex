@@ -138,34 +138,13 @@ function TableHead({ cols, firstLeft = true }) {
 
 // ── Hook countdown funding ────────────────────────────────────────────────────
 
-function useFundingCountdown() {
-  const [countdown, setCountdown] = useState(() => getNextFundingTime())
-  useEffect(() => {
-    const timer = setInterval(() => setCountdown(getNextFundingTime()), 60_000)
-    return () => clearInterval(timer)
-  }, [])
-  return countdown
-}
-
-function countdownColor(msRemaining) {
-  if (msRemaining < 15 * 60_000)       return '#ff4d6d'  // < 15 min → rouge
-  if (msRemaining < 60 * 60_000)       return '#ffa800'  // < 1 h    → orange
-  if (msRemaining < 2 * 60 * 60_000)   return '#ffa800'  // < 2 h    → orange
-  return 'var(--call)'                                    // > 2 h    → vert
-}
 
 export default function DerivativesPage({ asset }) {
   const [state, setState] = useState({
     spot:         null,
-    cSpot:        null,   // Coinbase spot fiat
     dFunding:     null,
-    bFunding:     null,
     dFundingHist: null,
-    sentiment:    null,
-    takerVol:     null,
     dOI:          null,
-    bOI:          null,
-    liquidations: null,
     futures:      [],
   })
   const [loading,    setLoading]    = useState(false)
@@ -184,19 +163,12 @@ export default function DerivativesPage({ asset }) {
     setLoading(true)
     try {
       const [
-        spotRes, cSpotRes, dFundRes, bFundRes, dFundHistRes,
-        sentRes, tvRes, dOIRes, bOIRes, liqRes, instrRes,
+        spotRes, dFundRes, dFundHistRes, dOIRes, instrRes,
       ] = await Promise.allSettled([
         deribit.getSpot(asset),
-        coinbase.getSpot(asset),
         deribit.getFundingRate(asset),
-        binance.getPremiumIndex(asset),
         deribit.getFundingRateHistory(asset, 30),
-        binance.getLongShortRatio(asset),
-        binance.getTakerVolume(asset),
         deribit.getOpenInterest(asset),
-        binance.getOpenInterest(asset),
-        binance.getLiquidations(asset),
         deribit.getInstruments(asset, 'future'),
       ])
 
@@ -237,15 +209,9 @@ export default function DerivativesPage({ asset }) {
 
       setState({
         spot:         spotRes.status      === 'fulfilled' ? spotRes.value      : null,
-        cSpot:        cSpotRes.status     === 'fulfilled' ? cSpotRes.value     : null,
         dFunding:     dFundRes.status     === 'fulfilled' ? dFundRes.value     : null,
-        bFunding:     bFundRes.status     === 'fulfilled' ? bFundRes.value     : null,
         dFundingHist: dFundHistRes.status === 'fulfilled' ? dFundHistRes.value : null,
-        sentiment:    sentRes.status      === 'fulfilled' ? sentRes.value      : null,
-        takerVol:     tvRes.status        === 'fulfilled' ? tvRes.value        : null,
         dOI:          dOIRes.status       === 'fulfilled' ? dOIRes.value       : null,
-        bOI:          bOIRes.status       === 'fulfilled' ? bOIRes.value       : null,
-        liquidations: liqRes.status       === 'fulfilled' ? liqRes.value       : null,
         futures:      futureRows,
       })
       setLastUpdate(new Date())
@@ -255,14 +221,7 @@ export default function DerivativesPage({ asset }) {
     if (isMounted.current) setLoading(false)
   }
 
-  const { spot, cSpot, dFunding, bFunding, dFundingHist, sentiment, takerVol,
-          dOI, bOI, liquidations, futures } = state
-
-  const { hoursRemaining, minutesRemaining, msRemaining } = useFundingCountdown()
-  const fundingCountdown = hoursRemaining > 0
-    ? `${hoursRemaining}h ${minutesRemaining}m`
-    : `${minutesRemaining}m`
-  const fundingColor = countdownColor(msRemaining)
+  const { spot, dFunding, dFundingHist, dOI, futures } = state
 
   const avgFunding30 = dFundingHist?.history?.length
     ? dFundingHist.history.reduce((s, r) => s + (safe(r.rateAnn) ?? 0), 0) / dFundingHist.history.length
@@ -271,18 +230,6 @@ export default function DerivativesPage({ asset }) {
   const bestBasisAnn = futures
     .filter(r => !r.isPerp && safe(r.basisAnn) !== null)
     .reduce((best, r) => (best === null || r.basisAnn > best ? r.basisAnn : best), null)
-
-  // Exchanges pour le tableau funding
-  const fundingRows = [
-    { name: 'Deribit', color: 'var(--accent)', rate8h: dFunding?.rate8h, rateAnn: dFunding?.rateAnn, avg: avgFunding30 },
-    { name: 'Binance', color: '#F0B90B',       rate8h: bFunding?.rate8h, rateAnn: bFunding?.rateAnn, avg: null },
-  ]
-
-  // Exchanges pour le tableau OI
-  const oiRows = [
-    { name: 'Deribit', type: 'Options', color: 'var(--accent)', callOI: dOI?.callOI, putOI: dOI?.putOI, pcr: dOI?.putCallRatio, total: null },
-    { name: 'Binance', type: 'Futures', color: '#F0B90B',       callOI: null,         putOI: null,        pcr: null,              total: bOI?.total },
-  ]
 
   return (
     <div className="page-wrap">
@@ -304,20 +251,6 @@ export default function DerivativesPage({ asset }) {
       {/* Cards résumé */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <Card
-          label="Long/Short ratio"
-          value={sentiment?.ratio != null ? fmtNum(sentiment.ratio, 3) : '—'}
-          sub={`L ${fmtNum(sentiment?.longPct, 1)}% · S ${fmtNum(sentiment?.shortPct, 1)}%`}
-          color={sentiment?.bullish == null ? 'var(--text)' : sentiment.bullish ? 'var(--call)' : 'var(--put)'}
-          badge={sentiment?.bullish == null ? null : sentiment.bullish ? 'BULL' : 'BEAR'}
-        />
-        <Card
-          label="Taker Buy/Sell"
-          value={takerVol?.ratio != null ? fmtNum(takerVol.ratio, 3) : '—'}
-          sub="Ratio acheteurs / vendeurs"
-          color={takerVol?.bullish == null ? 'var(--text)' : takerVol.bullish ? 'var(--call)' : 'var(--put)'}
-          badge={takerVol?.bullish == null ? null : takerVol.bullish ? 'BULL' : 'BEAR'}
-        />
-        <Card
           label="Basis max /an"
           value={bestBasisAnn != null ? fmtPct(bestBasisAnn) : '—'}
           sub="Meilleure échéance Deribit"
@@ -328,12 +261,6 @@ export default function DerivativesPage({ asset }) {
           value={spot?.price != null ? fmtPrice(spot.price, asset) : '—'}
           sub="Deribit index"
           color="var(--accent)"
-        />
-        <Card
-          label={`${asset} / USD`}
-          value={cSpot?.price != null ? fmtPrice(cSpot.price, asset) : '—'}
-          sub="Coinbase fiat"
-          color="var(--text)"
         />
       </div>
 
