@@ -241,13 +241,14 @@ class SourceWebSocket {
 
   _startHeartbeat() {
     this._clearTimers()
+    // OPTIMISATION: Un seul setInterval pour les deux responsabilités (heartbeat + watchdog)
+    // au lieu de deux setInterval concurrents sur le même interval
     this.heartbeatTimer = setInterval(() => {
+      // 1. Send heartbeat
       this._send(this.config.heartbeatMethod, {})
-    }, this.config.heartbeatInterval)
 
-    this.watchdogTimer = setInterval(() => {
-      if (!this.lastMessageAt) return
-      if (Date.now() - this.lastMessageAt > this.config.staleThreshold) {
+      // 2. Check watchdog (même interval)
+      if (this.lastMessageAt && Date.now() - this.lastMessageAt > this.config.staleThreshold) {
         try { this.ws?.close() } catch (_) {}
       }
     }, this.config.heartbeatInterval)
@@ -255,10 +256,8 @@ class SourceWebSocket {
 
   _clearTimers() {
     clearInterval(this.heartbeatTimer)
-    clearInterval(this.watchdogTimer)
     clearTimeout(this.reconnectTimer)
     this.heartbeatTimer = null
-    this.watchdogTimer = null
     this.reconnectTimer = null
   }
 }
