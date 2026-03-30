@@ -69,17 +69,13 @@ export const DEFAULT_CALIBRATION = {
   move_big:         3.0,
   spread_tight_max: FINGERPRINT_BUCKETING.spread.tight,   // 0.1
   spread_wide_min:  FINGERPRINT_BUCKETING.spread.wide,    // 0.5
-  ls_short_max:     FINGERPRINT_BUCKETING.lsRatio.shortHeavy, // 0.8
-  ls_long_min:      FINGERPRINT_BUCKETING.lsRatio.longHeavy,  // 1.2
+  // v2.0: ls_short_max and ls_long_min removed (Binance L/S ratio deprecated)
   basis_back_max:   FINGERPRINT_BUCKETING.basis.backwardation, // -2
   basis_flat_max:   FINGERPRINT_BUCKETING.basis.contango,      // 2
   basis_high_min:   FINGERPRINT_BUCKETING.basis.highContango,  // 10
 
-  // --- Positioning – L/S Ratio ---
-  ls_bullish:       POSITIONING.lsRatio.bullish,       // 1.2
-  ls_bearish:       POSITIONING.lsRatio.bearish,       // 0.8
-  ls_strong_bull:   POSITIONING.lsRatio.strongBullish, // 1.5
-  ls_strong_bear:   POSITIONING.lsRatio.strongBearish, // 0.7
+  // v2.0: Positioning – L/S Ratio removed (Binance deprecated)
+  // Kept only P/C Ratio (Deribit-only)
 
   // --- Positioning – P/C Ratio ---
   pc_bullish:       POSITIONING.pcRatio.bullish,       // 0.85

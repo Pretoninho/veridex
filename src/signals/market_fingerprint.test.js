@@ -165,11 +165,7 @@ describe('createFingerprint', () => {
     expect(createFingerprint({ spreadPct: 0.05 }).config.spreadBucket).toBe('tight')
   })
 
-  it('classe le lsRatio correctement', () => {
-    expect(createFingerprint({ lsRatio: 1.5 }).config.lsBucket).toBe('long_heavy')
-    expect(createFingerprint({ lsRatio: 1.0 }).config.lsBucket).toBe('balanced')
-    expect(createFingerprint({ lsRatio: 0.7 }).config.lsBucket).toBe('short_heavy')
-  })
+  // v2.0: lsRatio test removed (Binance L/S ratio deprecated)
 
   it('classe le basis correctement', () => {
     expect(createFingerprint({ basisPct: 12 }).config.basisBucket).toBe('high_contango')
