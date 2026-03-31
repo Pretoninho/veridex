@@ -79,8 +79,26 @@ async function fetchAllData(asset) {
   })
 }
 
+async function fetchMultiTimeframeData(asset) {
+  const normalizedAsset = asset.toUpperCase()
+  const [data4h, data1h, data5m] = await Promise.all([
+    deribit.getTimeframeData(normalizedAsset, '4h'),
+    deribit.getTimeframeData(normalizedAsset, '1h'),
+    deribit.getTimeframeData(normalizedAsset, '5m'),
+  ])
+
+  return {
+    asset: normalizedAsset,
+    data_4h: data4h,
+    data_1h: data1h,
+    data_5m: data5m,
+    timestamp: Date.now(),
+  }
+}
+
 module.exports = {
   fetchAllData,
+  fetchMultiTimeframeData,
   // Re-export providers for direct use if needed
   deribit,
 }
