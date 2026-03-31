@@ -32,18 +32,26 @@ router.get('/', async (req, res) => {
     const marketData = await getUnifiedData(asset)
     const signal     = computeSignal({ ...marketData, asset })
 
+    // [FUTURE] Add multi_timeframe support here with separate data fetches for 4h/1h/5min
+    // For now, return a placeholder structure compatible with frontend
+    const multiTFPlaceholder = {
+      regime_4h: { type: 'NEUTRAL', confidence: 0 },
+      setup_1h: { type: 'NEUTRAL', confidence: 0 },
+      entry_5min: { signal: 'WAIT', confidence: 0, action: 'WAIT' },
+      alignment: { htf_mtf: false, mtf_ltf: false, all_aligned: false },
+      interpretation: { action: 'WAIT', reason: 'Multi-timeframe data not yet implemented', confidence: 0 }
+    }
+
     const cacheKey = `signal:${asset}`
     const changed  = _signalCache.setIfChanged(cacheKey, signal)
 
     // Return the cached version (unchanged) to avoid serving duplicate recomputed signals.
-    // If the TTL expired and the cache entry is gone, setIfChanged will have stored
-    // the fresh value (changed = true) and we serve that directly.
     if (!changed) {
       const cached = _signalCache.get(cacheKey)
-      if (cached) return res.json({ ...cached, cached: true })
+      if (cached) return res.json({ ...cached, cached: true, multi_timeframe: multiTFPlaceholder })
     }
 
-    res.json(signal)
+    res.json({ ...signal, multi_timeframe: multiTFPlaceholder })
   } catch (err) {
     console.error(`[signals] Error computing signal for ${asset}:`, err?.message)
     res.status(502).json({ error: 'Failed to fetch market data', detail: err?.message })
