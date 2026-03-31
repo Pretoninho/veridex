@@ -441,3 +441,74 @@ async function _checkFundingFixing(t) {
     }
   }
 }
+
+// ── Multi-Timeframe Notifications ─────────────────────────────────────────────
+
+/**
+ * Types de notifications multi-timeframe (N9-N13)
+ */
+export const NOTIFICATION_TYPES_MTF = {
+  HTF_REGIME_DETECTED: 'N9',      // 4H régime change
+  MTF_SETUP_DETECTED: 'N10',      // 1H setup détecté
+  MTF_SETUP_INVALIDATED: 'N11',   // 1H setup perdu
+  LTF_ENTRY_READY: 'N12',         // 5min entrée prête
+  ALIGNMENT_LOST: 'N13'           // Alignement rompu
+}
+
+/**
+ * Crée les notifications pour changements multi-timeframe
+ * @param {string} asset — 'BTC' | 'ETH'
+ * @param {Object} prevMTF — état multi-timeframe précédent
+ * @param {Object} currMTF — état multi-timeframe courant
+ * @returns {Array} notifications à envoyer
+ */
+export function checkMultiTimeframeNotifications(asset, prevMTF, currMTF) {
+  if (!prevMTF || !currMTF) return []
+  const notifications = []
+
+  // N9: Changement régime 4H
+  if (prevMTF.regime4h?.type !== currMTF.regime4h?.type) {
+    notifications.push({
+      type: NOTIFICATION_TYPES_MTF.HTF_REGIME_DETECTED,
+      severity: 'ALERT',
+      title: `📊 Régime 4H: ${prevMTF.regime4h?.type} → ${currMTF.regime4h?.type}`,
+      body: `HTF passe en ${currMTF.regime4h?.type}`,
+      data: { page: 'signals', asset }
+    })
+  }
+
+  // N10: Setup 1H détecté
+  if (currMTF.setup1h?.type !== 'NEUTRAL' && prevMTF.setup1h?.type === 'NEUTRAL') {
+    notifications.push({
+      type: NOTIFICATION_TYPES_MTF.MTF_SETUP_DETECTED,
+      severity: 'ALERT',
+      title: `⚙️ Setup 1H: ${currMTF.setup1h?.type}`,
+      body: currMTF.setup1h?.type === 'COMPRESSION' ? 'Compression détectée' : 'Spike détecté',
+      data: { page: 'signals', asset }
+    })
+  }
+
+  // N13: Alignement perdu
+  if (prevMTF.alignment?.all_aligned && !currMTF.alignment?.all_aligned) {
+    notifications.push({
+      type: NOTIFICATION_TYPES_MTF.ALIGNMENT_LOST,
+      severity: 'ALERT',
+      title: '❌ Alignement perdu',
+      body: 'HTF→MTF→LTF plus validé',
+      data: { page: 'signals', asset }
+    })
+  }
+
+  // N12: Entrée prête (entry_ready)
+  if (!prevMTF.ready_to_trade && currMTF.ready_to_trade) {
+    notifications.push({
+      type: NOTIFICATION_TYPES_MTF.LTF_ENTRY_READY,
+      severity: 'CRITICAL',
+      title: '🚀 ENTRÉE PRÊTE',
+      body: `Tous critères alignés. Action: ${currMTF.ready_to_trade ? 'EXECUTE' : 'WAIT'}`,
+      data: { page: 'signals', asset }
+    })
+  }
+
+  return notifications
+}
