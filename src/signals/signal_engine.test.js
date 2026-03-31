@@ -7,6 +7,7 @@ import {
   calcGlobalScore,
   getSignal,
   computeSignal,
+  evaluateSetupEntry,
   hashMarketState,
   dvolFilter,
 } from './signal_engine.js'
@@ -237,6 +238,56 @@ describe('computeSignal', () => {
     expect(result.global).toBeNull()
     expect(result.dvolFactor).toBe(1)
     expect(result.signal).toBeNull()
+  })
+})
+
+describe('evaluateSetupEntry', () => {
+  it('BREAKOUT + range tight + volume low => COMPRESSION', () => {
+    const result = evaluateSetupEntry({
+      regime: 'BREAKOUT',
+      range: 'tight',
+      volume: { low: true }
+    })
+
+    expect(result.setup).toBe('COMPRESSION')
+    expect(result.validations.setup_compression_valid).toBe(true)
+  })
+
+  it('MEAN_REVERSION + spike + oi_delta>0 + abs(funding)>0.02 => EXCESS', () => {
+    const result = evaluateSetupEntry({
+      regime: 'MEAN_REVERSION',
+      spike: true,
+      oi_delta: 1200,
+      funding: -0.03
+    })
+
+    expect(result.setup).toBe('EXCESS')
+    expect(result.validations.setup_excess_valid).toBe(true)
+  })
+
+  it('COMPRESSION + breakout_confirmed + volume_increasing => ENTER_BREAKOUT', () => {
+    const result = evaluateSetupEntry({
+      regime: 'BREAKOUT',
+      range: { tight: true },
+      volume: { low: true, increasing: true },
+      breakout_level: { confirmed: true }
+    })
+
+    expect(result.entry).toBe('ENTER_BREAKOUT')
+    expect(result.validations.entry_breakout_valid).toBe(true)
+  })
+
+  it('EXCESS + rejection/absorption => ENTER_MEAN_REVERSION', () => {
+    const result = evaluateSetupEntry({
+      regime: 'MEAN_REVERSION',
+      spike: true,
+      oi_delta: 10,
+      funding: 0.05,
+      price_action: { rejection: true }
+    })
+
+    expect(result.entry).toBe('ENTER_MEAN_REVERSION')
+    expect(result.validations.entry_mean_reversion_valid).toBe(true)
   })
 })
 

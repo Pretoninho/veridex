@@ -3,8 +3,9 @@
 const express = require('express')
 const router  = express.Router()
 
-const { getUnifiedData } = require('../services/dataCore')
+const { getUnifiedData, getUnifiedDataMultiTimeframe } = require('../services/dataCore')
 const { computeSignal }  = require('../services/signalEngine')
+const { computeMultiTimeframeRules } = require('../services/multiTimeframeRules')
 const { SmartCache }     = require('../utils/cache')
 const { buildSignalPayload } = require('../services/multiTimeframeService')
 

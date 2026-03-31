@@ -12,7 +12,7 @@
 
 'use strict'
 
-const { fetchAllData } = require('../data_core/index')
+const { fetchAllData, fetchMultiTimeframeData } = require('../data_core/index')
 
 /**
  * Retourne les données de marché unifiées pour un asset.
@@ -38,4 +38,8 @@ async function getUnifiedData(asset) {
   return data
 }
 
-module.exports = { getUnifiedData }
+async function getUnifiedDataMultiTimeframe(asset) {
+  return fetchMultiTimeframeData(asset)
+}
+
+module.exports = { getUnifiedData, getUnifiedDataMultiTimeframe }

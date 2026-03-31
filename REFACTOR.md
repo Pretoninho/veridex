@@ -1,290 +1,158 @@
-# 🔄 Refonte Veridex - Simplification & Optimisation
+# 🔄 Refonte Veridex — État consolidé (mars 2026)
 
-**Date**: Mars 2026  
-**Branche**: `claude/plan-app-redesign-12VEM`  
-**Status**: ✅ Prête à merger
+Ce document remplace les notes partielles et décrit **l’état réel actuel** des modules actifs, des modules retirés, des points d’entrée supportés, et des pratiques de maintenance anti-dérive.
 
 ---
 
-## 📋 Vue d'ensemble
+## 1) Périmètre officiellement supporté
 
-Refonte drastique de Veridex pour simplifier l'application et améliorer les performances. L'app passe de **18 pages complexes** à **3 pages essentielles**, avec une réduction de **50+ fichiers** et **-15% de bundle**.
+### Frontend
 
-### 🎯 Objectifs Atteints
+- **Point d’entrée runtime**: `src/main.jsx`
+- **Shell UI**: `src/interface/App.jsx`
+- **Pages supportées**:
+  - `src/interface/pages/LandingPage.jsx`
+  - `src/interface/pages/MarketPage.jsx`
+  - `src/interface/pages/DerivativesPage.jsx`
+  - `src/interface/pages/SignalsPage.jsx`
+  - `src/interface/pages/MaintenancePage.jsx` (uniquement si `VITE_MAINTENANCE_MODE=true`)
 
-- ✅ Réduction cognitive load: **18 → 3 pages**
-- ✅ Optimisation bundle: **262 KB → 222 KB (-15%)**
-- ✅ Simplification signal engine: **6 → 4 composantes**
-- ✅ Suppression modules avancés redondants
-- ✅ Intégration DVOL dans Dérivés
-- ✅ Zéro imports orphelins
+### Backend
 
----
+- **Point d’entrée runtime**: `backend/server.js`
+- **Routes supportées**:
+  - `GET /health`
+  - `GET /signals?asset=BTC|ETH`
+  - `GET /signals?assets=BTC,ETH`
+  - `GET /market?asset=BTC|ETH`
 
-## 📊 Métriques Finales
+### Couche métier active
 
-| Métrique | Avant | Après | Δ |
-|----------|-------|-------|---|
-| **Pages actives** | 18 | 3 | -83% |
-| **Fichiers supprimés** | - | 53+ | - |
-| **Bundle JS** | 262 KB | 222 KB | -15% |
-| **Bundle gzip** | 81.5 KB | 69.2 KB | -15% |
-| **Composants UI** | 22 | 8 | -64% |
-| **Lignes modules** | 6500+ | ~500 | -92% |
-
----
-
-## 🗑️ Supprimé (53+ fichiers)
-
-### Pages entièrement supprimées (12)
-- ❌ OptionsDataPage.jsx
-- ❌ VolPage.jsx
-- ❌ TrackerPage.jsx (IV Live)
-- ❌ TradePage.jsx
-- ❌ AssistantPage.jsx
-- ❌ OnChainPage.jsx
-- ❌ AuditPage.jsx
-- ❌ AnalyticsPage.jsx
-- ❌ NotificationSettingsPage.jsx
-- ❌ CalibrationPage.jsx
-- ❌ FingerprintDebug.jsx
-- ❌ MonitorPage.jsx
-
-### Modules supprimés (36 fichiers)
-- ❌ `src/analytics/` complet (18 fichiers)
-  - decision_engine.js
-  - market_regime.js
-  - monte_carlo.js
-  - portfolio_simulator.js
-  - pattern_cluster.js
-  - etc.
-- ❌ `backend/backtest/` complet
-- ❌ Providers on-chain supprimés
-  - src/data/providers/onchain.js
-  - backend/data_core/providers/onchain.js
-- ❌ Modules signaux avancés (15 fichiers)
-  - pattern_clustering.js
-  - pattern_session.js
-  - pattern_session_manager.js
-  - market_fingerprint.js
-  - pattern_audit.js
-  - snapshot_importer.js
-  - snapshot_generator.js
-  - onchain_signals.js
-  - positioning_score.js
-  - probability_engine.js
-  - convergence.js
-  - economic_calendar.js
-  - insight_generator.js
-  - etc.
-
-### Composants UI supprimés (17)
-- ❌ ExportDetectedPatternsButton.jsx
-- ❌ PatternAuditLog.jsx
-- ❌ PatternAnalyticsKPICard.jsx
-- ❌ PatternAnalyticsFilterControls.jsx
-- ❌ PatternAnalyticsTable.jsx
-- ❌ PatternAnalyticsTrajectoryChart.jsx
-- ❌ PatternAnalyticsSectorMetrics.jsx
-- ❌ PatternAnalyticsExportButton.jsx
-- ❌ MaxPainChart.jsx
-- ❌ SnapshotManager.jsx
-- ❌ HashJournal.jsx
-- ❌ NotificationTestPanel.jsx
-- ❌ CalibrationProfileSelector.jsx
-- ❌ CalibrationDebugPanel.jsx
-- ❌ EconomicCalendarPanel.jsx
-- ❌ pattern_analytics.js (API)
-- ❌ useFingerprintDebug.js (hook)
+- `backend/services/dataCore.js`
+- `backend/services/signalEngine.js`
+- `backend/data/providers.js`
+- `backend/utils/cache.js`
+- `src/signals/`
+- `src/data/`
+- `src/core/`
 
 ---
 
-## ✅ Pages Conservées (3)
+## 2) Modules présents mais non « entrypoints produit »
 
-### 1. **Market** 
-Données spot Deribit essentielles
-- Prix spot
-- Liquidité
-- OI
+Ces modules existent encore dans le dépôt mais ne sont pas des points d’entrée officiels:
 
-### 2. **Dérivés** ⭐ (DVOL intégré)
-Données futures et perpétuels
-- **DVOL**: Volatilité implicite courant + IV Rank + Min/Max 30j
-- Funding rate (8h, annualisé, moyenne 30j)
-- Structure à terme futures
-- Basis annualisé
-- Open Interest
+- `src/engine/index.js` (façade DataCore historique)
+- `src/data/index.js` (barrel export de la couche data)
+- `src/signals/index.js` (barrel export signaux)
+- `src/core/index.js` (barrel export calculs)
 
-### 3. **Signaux**
-Score composite simplifié (4 composantes)
-- **S1**: IV (35%)
-- **S2**: Funding (25%)
-- **S3**: Basis (25%)
-- **S4**: IV/RV (15%)
-- Score global (0-100)
-- Max Pain (si instruments disponibles)
+Ils restent utilisables pour factorisation interne, mais le support produit est défini par `src/main.jsx` et `backend/server.js`.
 
 ---
 
-## 🔧 Architecture Simplifiée
+## 3) Modules archivés / supprimés (chemins exacts)
 
-### Frontend Structure
-```
-src/
-├── interface/pages/
-│   ├── MarketPage.jsx        ✅ Garder
-│   ├── DerivativesPage.jsx   ✅ Garder + DVOL intégré
-│   └── SignalsPage.jsx       ✅ Garder + 4-composantes
-├── signals/
-│   ├── signal_engine.js      ✅ 6→4 composantes
-│   ├── signal_interpreter.js ✅ Garder
-│   ├── notification_*        ✅ Garder essentiels
-│   └── settlement_tracker.js ✅ Garder
-├── data/
-│   ├── providers/deribit.js  ✅ Deribit only
-│   └── cache.js              ✅ Optimisé
-└── core/
-    └── volatility/max_pain.js ✅ Garder
+> État vérifié: ces chemins ne sont plus présents dans le dépôt courant.
+
+### Dossiers
+
+- `src/analytics/`
+- `backend/backtest/`
+
+### Providers retirés
+
+- `src/data/providers/onchain.js`
+- `backend/data_core/providers/onchain.js`
+
+### Pages retirées
+
+- `src/interface/pages/OptionsDataPage.jsx`
+- `src/interface/pages/VolPage.jsx`
+- `src/interface/pages/TrackerPage.jsx`
+- `src/interface/pages/TradePage.jsx`
+- `src/interface/pages/AssistantPage.jsx`
+- `src/interface/pages/OnChainPage.jsx`
+- `src/interface/pages/AuditPage.jsx`
+- `src/interface/pages/AnalyticsPage.jsx`
+- `src/interface/pages/NotificationSettingsPage.jsx`
+- `src/interface/pages/CalibrationPage.jsx`
+- `src/interface/pages/FingerprintDebug.jsx`
+- `src/interface/pages/MonitorPage.jsx`
+
+---
+
+## 4) Contrat d’architecture (version actuelle)
+
+```txt
+src/main.jsx
+  -> interface/App.jsx
+     -> pages: Landing / Market / Derivatives / Signals
+     -> MaintenancePage (flag env)
+
+backend/server.js
+  -> /health
+  -> /signals
+  -> /market
 ```
 
-### Backend API
-```
-GET /health
-GET /signals?asset=BTC    (4-composantes)
-GET /market?asset=BTC     (données brutes Deribit)
-```
+Contraintes métier:
+- Scope asset supporté: `BTC`, `ETH`
+- Source de données runtime principale: Deribit
+- Signal engine produit: modèle 4 composantes
 
 ---
 
-## 🧪 Validation
+## 5) Checklist maintenance — détection de fichiers orphelins
 
-### ✅ Checklist de Test
-- [x] Build compile sans erreurs
-- [x] 0 imports orphelins
-- [x] Les 3 pages actives marchent
-- [x] DVOL affiché dans Dérivés avec IV Rank
-- [x] Signaux affiche 4 composantes (s1, s2, s3, s4)
-- [x] Switch BTC/ETH synchronisé
-- [x] Bundle < 230 KB (216 KB ✅)
-- [x] Tests unitaires passent
+Checklist à exécuter avant merge de toute PR touchant architecture/modules.
 
-### 📝 Script de Test
+### 5.1 Imports vers modules supprimés
+
 ```bash
-./test-refactor.sh
+rg "from .*onchain|from .*analytics|pattern_clustering|market_fingerprint|snapshot_" src backend
 ```
 
-Vérifie:
-1. Suppression de 12 pages ✅
-2. Présence des 3 onglets ✅
-3. DVOL intégré ✅
-4. Aucun import orphelin ✅
-5. Build OK ✅
-6. Tests OK ✅
+- Résultat attendu: aucun import runtime.
 
----
+### 5.2 Vérification des entrées supportées
 
-## 🚀 Déploiement
-
-### Pré-merge
 ```bash
-# Vérifier la build
+rg "createRoot\(|registerSW\(" src/main.jsx
+rg "app.use\('/signals'|app.use\('/market'|app.get\('/health'" backend/server.js
+```
+
+- Permet de confirmer que les points d’entrée documentés sont bien ceux branchés.
+
+### 5.3 Détection candidats orphelins
+
+```bash
+rg --files src backend | rg "\.(js|jsx)$"
+```
+
+Pour chaque module suspect, vérifier explicitement:
+
+```bash
+rg "<ModuleName>|from '.*<module_name>'|require\('.*<module_name>'\)" src backend
+```
+
+### 5.4 Santé globale
+
+```bash
+npm test
 npm run build
-
-# Vérifier les tests
-npm run test
-
-# Valider avec script
 ./test-refactor.sh
 ```
 
-### Merge
-```bash
-git checkout main
-git merge --no-ff claude/plan-app-redesign-12VEM
-git push origin main
-```
-
-### Post-merge (optionnel)
-- [ ] Nettoyer les branches feature
-- [ ] Mettre à jour la version dans package.json
-- [ ] Créer une release GitHub
+- Tout échec = blocage merge.
 
 ---
 
-## 📈 Résultats Performance
+## 6) Évolution future (règle anti-dérive)
 
-**Bundle Size Reduction**
-- Avant: 262 KB (81.5 KB gzippé)
-- Après: 222 KB (69.2 KB gzippé)
-- **Gain: -15%**
+À chaque ajout/suppression de module:
 
-**Code Cleanup**
-- 53+ fichiers supprimés
-- ~500 lignes de dépendances avancées éliminées
-- Architecture simplifié: Deribit only
-
-**Cognitive Load**
-- Pages: 18 → 3 (-83%)
-- Composants: 22 → 8 (-64%)
-
----
-
-## 🔄 Commits de Refonte
-
-```
-cca6b69 Cleanup: Nettoyer exports orphelins
-e091053 Cleanup: Supprimer 17 composants orphelins
-7a916cc Phase 5: Intégrer DVOL dans Dérivés
-5b836f6 Simplifier SignalsPage: 878→209 lignes
-26b13d0 Phase 3: Supprimer modules analytics/onchain (36 fichiers)
-03967d1 Nettoyer App.jsx
-ca92e10 Phase 2: Supprimer 12 pages
-```
-
----
-
-## ⚠️ Notes Importantes
-
-### Ce qui a changé
-- ✅ Les 3 pages principales fonctionnent et sont optimisées
-- ✅ DVOL est maintenant visible dans Dérivés (plus d'IV Live séparé)
-- ✅ Signal Engine: 6 composantes → 4 (sans on-chain ni positionnement)
-- ✅ Suppression complète des analyses avancées (Monte Carlo, patterns, clustering)
-
-### Ce qui reste compatible
-- ✅ Même API Deribit (REST only)
-- ✅ Même cache system (SmartCache)
-- ✅ Même notification engine (core)
-- ✅ Même settlement tracker
-
-### Limitations intentionnelles
-- ❌ Pas de patterns/clustering
-- ❌ Pas d'insights IA avancés
-- ❌ Pas de Monte Carlo/portfolio simulator
-- ❌ Pas d'on-chain data
-- ❌ Pas de calibration UI avancée
-
----
-
-## 🎯 Prochaines Améliorations (Post-merge)
-
-Si nécessaire dans le futur:
-1. Ajouter tests e2e avec Playwright
-2. Optimiser davantage les images/assets
-3. Implémenter code splitting par page
-4. Ajouter analytics basiques
-5. Améliorer la documentation
-
----
-
-## 📞 Support
-
-Pour des questions sur la refonte:
-1. Voir les commits dans `claude/plan-app-redesign-12VEM`
-2. Exécuter `./test-refactor.sh` pour valider
-3. Consulter les fichiers modifiés dans git diff
-
----
-
-**Refonte complétée avec succès** ✅  
-Prête à merger vers `main`
+1. Mettre à jour **README.md** (état actif + points d’entrée).
+2. Mettre à jour **REFACTOR.md** (section supprimés/archivés).
+3. Ajouter un check automatisé si possible (`test-refactor.sh` ou CI).
+4. Vérifier qu’aucun « barrel export » ne réintroduit un module non supporté.
