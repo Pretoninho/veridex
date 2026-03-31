@@ -419,3 +419,78 @@ export function interpretSignal(computedSignal, rawData) {
 
   return { expert }
 }
+
+/**
+ * Interprète les signaux multi-timeframe avec validation hiérarchique.
+ * Retourne une action recommandée basée sur l'alignement HTF→MTF→LTF.
+ *
+ * @param {{
+ *   regime4h: {type, confidence},
+ *   setup1h: {type, confidence},
+ *   entry5min: {signal, confidence, action},
+ *   alignment: {htf_mtf, mtf_ltf, all_aligned}
+ * }} multiTFSignal
+ * @returns {{
+ *   action: 'BUY_BREAKOUT'|'SELL_REVERSION'|'WAIT_FOR_LTF_TRIGGER'|'WAIT',
+ *   reason: string,
+ *   confidence: number,
+ *   strategy?: 'VOLATILITY_EXPANSION'|'VOLATILITY_CONTRACTION'
+ * }}
+ */
+export function interpretMultiTimeframeSignal(multiTFSignal) {
+  const { regime4h, setup1h, entry5min, alignment } = multiTFSignal
+
+  // Si alignement n'existe pas ou n'est pas complet
+  if (!alignment || !alignment.all_aligned) {
+    const reason = !alignment
+      ? 'Données multi-timeframe indisponibles'
+      : `Alignement cassé: 4H=${regime4h?.type}, 1H=${setup1h?.type}, 5min=${entry5min?.signal}`
+
+    return {
+      action: 'WAIT',
+      reason,
+      confidence: 0
+    }
+  }
+
+  // Alignement OK mais entrée pas prête
+  if (entry5min.action !== 'EXECUTE') {
+    const minConfidence = Math.min(regime4h.confidence, setup1h.confidence)
+
+    return {
+      action: 'WAIT_FOR_LTF_TRIGGER',
+      reason: `✓ Setup confirmé (4H→1H alignés). En attente signal 5min... (confiance ${Math.round(minConfidence * 100)}%)`,
+      confidence: minConfidence
+    }
+  }
+
+  // Tous les critères validés — déterminer l'action
+  if (regime4h.type === 'BREAKOUT' && setup1h.type === 'COMPRESSION' && entry5min.signal === 'BREAKOUT') {
+    const minConfidence = Math.min(regime4h.confidence, setup1h.confidence, entry5min.confidence)
+
+    return {
+      action: 'BUY_BREAKOUT',
+      reason: `🔥 BREAKOUT CONFIRMÉ: 4H compression → 1H setup → 5min cassure (confiance ${Math.round(minConfidence * 100)}%)`,
+      confidence: minConfidence,
+      strategy: 'VOLATILITY_EXPANSION'
+    }
+  }
+
+  if (regime4h.type === 'MEAN_REVERSION' && setup1h.type === 'SPIKE' && entry5min.signal === 'REJECTION') {
+    const minConfidence = Math.min(regime4h.confidence, setup1h.confidence, entry5min.confidence)
+
+    return {
+      action: 'SELL_REVERSION',
+      reason: `💧 REVERSION CONFIRMÉE: 4H spike → 1H spike → 5min rejection (confiance ${Math.round(minConfidence * 100)}%)`,
+      confidence: minConfidence,
+      strategy: 'VOLATILITY_CONTRACTION'
+    }
+  }
+
+  // Cas par défaut : alignement OK mais pas de pattern reconnu
+  return {
+    action: 'WAIT',
+    reason: `Alignement OK mais pattern non-reconnu: 4H=${regime4h.type}, 1H=${setup1h.type}, 5m=${entry5min.signal}`,
+    confidence: Math.min(regime4h.confidence, setup1h.confidence, entry5min.confidence)
+  }
+}
