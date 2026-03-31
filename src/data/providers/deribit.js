@@ -122,21 +122,124 @@ export async function getOrderBook(instrumentName, depth = 1) {
 }
 
 /**
- * Données DVOL (indice de volatilité implicite, équivalent VIX) — 30j.
+ * Données DVOL (indice de volatilité implicite, équivalent VIX) — 30j multi-résolution
+ * Retourne {dvol_1h, dvol_4h, dvol_1d} avec historiques par timeframe
  * @param {'BTC'|'ETH'} asset
+ * @returns {Promise<{dvol_1h, dvol_4h, dvol_1d}>}
  */
 export async function getDVOL(asset) {
   const end = Date.now()
   const start = end - 30 * 24 * 3600 * 1000
+
+  // Récupérer données 1H brutes (720 points = 30 jours)
   const result = await apiFetch('get_volatility_index_data', {
     currency: asset,
     start_timestamp: start,
     end_timestamp: end,
     resolution: 3600,
   })
-  const normalized = normalizeDeribitDVOL(asset, result)
-  if (normalized) dataStore.set(CacheKey.dvol('deribit', asset), normalized)
-  return normalized
+
+  if (!result?.data?.length) return null
+
+  const rawData1h = result.data // [[ts, open, high, low, close], ...]
+
+  // Normaliser 1H (7 jours historique)
+  const dvol_1h = _normalizeDVOLTimeframe(asset, rawData1h, '1h', 168)
+
+  // Agréger en 4H et normaliser
+  const rawData4h = _aggregate4H(rawData1h)
+  const dvol_4h = _normalizeDVOLTimeframe(asset, rawData4h, '4h', 210)
+
+  // Agréger en 1D et normaliser
+  const rawData1d = _aggregate1D(rawData1h)
+  const dvol_1d = _normalizeDVOLTimeframe(asset, rawData1d, '1d', 180)
+
+  // Persister chaque timeframe en cache
+  if (dvol_1h) dataStore.set(CacheKey.dvol_1h('deribit', asset), dvol_1h)
+  if (dvol_4h) dataStore.set(CacheKey.dvol_4h('deribit', asset), dvol_4h)
+  if (dvol_1d) dataStore.set(CacheKey.dvol_1d('deribit', asset), dvol_1d)
+
+  // Garder aussi le 1H brut pour compatibilité
+  if (dvol_1h) dataStore.set(CacheKey.dvol('deribit', asset), dvol_1h)
+
+  return { dvol_1h, dvol_4h, dvol_1d }
+}
+
+/**
+ * Agrège les bougies 1H en bougies 4H (4 bougies → 1 candle OHLC)
+ * @param {number[][]} rawData1h — [[ts, open, high, low, close], ...]
+ * @returns {number[][]}
+ */
+function _aggregate4H(rawData1h) {
+  const result = []
+  for (let i = 0; i < rawData1h.length; i += 4) {
+    const chunk = rawData1h.slice(i, i + 4)
+    if (chunk.length === 0) continue
+
+    // OHLC: open du 1er, high max, low min, close du dernier
+    const candle = [
+      chunk[0][0],                                  // timestamp du 1er
+      chunk[0][1],                                  // open du 1er
+      Math.max(...chunk.map(c => c[2])),           // high max
+      Math.min(...chunk.map(c => c[3])),           // low min
+      chunk[chunk.length - 1][4],                  // close du dernier
+    ]
+    result.push(candle)
+  }
+  return result
+}
+
+/**
+ * Agrège les bougies 1H en bougies 1D (24 bougies → 1 candle OHLC)
+ * @param {number[][]} rawData1h — [[ts, open, high, low, close], ...]
+ * @returns {number[][]}
+ */
+function _aggregate1D(rawData1h) {
+  const result = []
+  for (let i = 0; i < rawData1h.length; i += 24) {
+    const chunk = rawData1h.slice(i, i + 24)
+    if (chunk.length === 0) continue
+
+    // OHLC: open du 1er, high max, low min, close du dernier
+    const candle = [
+      chunk[0][0],                                  // timestamp du 1er
+      chunk[0][1],                                  // open du 1er
+      Math.max(...chunk.map(c => c[2])),           // high max
+      Math.min(...chunk.map(c => c[3])),           // low min
+      chunk[chunk.length - 1][4],                  // close du dernier
+    ]
+    result.push(candle)
+  }
+  return result
+}
+
+/**
+ * Normalise les données DVOL pour un timeframe donné
+ * @param {string} asset — 'BTC' | 'ETH'
+ * @param {number[][]} rawData — [[ts, open, high, low, close], ...]
+ * @param {string} timeframe — '1h' | '4h' | '1d'
+ * @param {number} historyPoints — nombre de points historique à garder
+ * @returns {Object} — {source, asset, current, monthMin, monthMax, history, timestamp}
+ */
+function _normalizeDVOLTimeframe(asset, rawData, timeframe, historyPoints) {
+  if (!rawData?.length) return null
+
+  const latest = rawData[rawData.length - 1][4]
+  const monthMin = Math.min(...rawData.map(r => r[3]))
+  const monthMax = Math.max(...rawData.map(r => r[2]))
+  const history = rawData.slice(-historyPoints).map(r => [r[0], r[4]])
+
+  return {
+    source: 'deribit',
+    asset: asset.toUpperCase(),
+    timeframe,
+    current: latest,
+    monthMin,
+    monthMax,
+    history,
+    timestamp: Date.now(),
+    raw: rawData,
+  }
 }
 
 /**

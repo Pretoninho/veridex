@@ -17,6 +17,26 @@ import { get as idbGet, set as idbSet } from 'idb-keyval'
 const DEFAULT_MAX_HISTORY = 100  // entrées par clé
 const DEFAULT_TTL_MS = 60_000   // 1 min — après ça, la donnée est "stale"
 
+// ── TTL par timeframe (multi-timeframe support) ─────────────────────────────────
+const TIMEFRAME_TTL_MS = {
+  '1d': 24 * 3600 * 1000,    // 24h
+  '4h': 4 * 3600 * 1000,     // 4h
+  '1h': 60 * 60 * 1000,      // 1h
+  '8h': 8 * 3600 * 1000,     // 8h (funding)
+  '5min': 5 * 60 * 1000,     // 5min
+  'spot': 10 * 1000,         // 10s
+}
+
+// ── Historique max par timeframe ─────────────────────────────────────────────────
+const MAX_HISTORY_BY_TIMEFRAME = {
+  '1d': 180,    // 6 mois (180 jours)
+  '4h': 210,    // 35 jours (210 × 4h)
+  '1h': 720,    // 30 jours (720 × 1h)
+  '8h': 90,     // 30 jours (90 × 8h)
+  '5min': 288,  // 24h (288 × 5min)
+  'spot': 50,   // Minimal
+}
+
 // ── Hash FNV-1a 32 bits ───────────────────────────────────────────────────────
 
 /**
@@ -169,9 +189,30 @@ export async function clearCacheChangeLog() {
 // ── SmartCache ────────────────────────────────────────────────────────────────
 
 /**
+ * Extrait le timeframe d'une clé de cache.
+ * Format : 'source:asset:type' ou 'source:asset:type:timeframe'
+ * Exemples :
+ *   'deribit:BTC:dvol:1h' → '1h'
+ *   'deribit:BTC:dvol:4h' → '4h'
+ *   'deribit:BTC:dvol' → null (pas de timeframe)
+ *   'deribit:BTC:funding:1h' → '1h'
+ * @param {string} key
+ * @returns {string|null}
+ */
+function _extractTimeframe(key) {
+  const parts = key.split(':')
+  if (parts.length < 4) return null
+  const lastPart = parts[parts.length - 1]
+  // Vérifie si le dernier segment est un timeframe connu
+  return TIMEFRAME_TTL_MS[lastPart] ? lastPart : null
+}
+
+/**
  * SmartCache — cache avec détection de changement par hash FNV-1a.
  * Permet d'éviter les re-renders React inutiles en ne signalant
  * que les données réellement modifiées.
+ *
+ * Support multi-timeframe : TTL et historique variables selon timeframe.
  */
 export class SmartCache {
   constructor() {
@@ -200,17 +241,24 @@ export class SmartCache {
 
   /**
    * Stocke une valeur et retourne true si elle a changé.
+   * Supporte TTL et historique dynamiques selon timeframe.
    * @param {string} key
    * @param {any} data
+   * @param {number} [ttl] — TTL override optionnel (ms)
    * @returns {boolean} true si les données sont différentes du dernier set
    */
-  set(key, data) {
+  set(key, data, ttl = null) {
     const newHash = hashData(data)
     const existing = this._entries.get(key)
     const changed = !existing || existing.hash !== newHash
 
     const now = Date.now()
-    this._entries.set(key, { hash: newHash, data, timestamp: now })
+    const timeframe = _extractTimeframe(key)
+    const effectiveTTL = ttl || TIMEFRAME_TTL_MS[timeframe] || DEFAULT_TTL_MS
+    const maxHistory = MAX_HISTORY_BY_TIMEFRAME[timeframe] || DEFAULT_MAX_HISTORY
+
+    this._entries.set(key, { hash: newHash, data, timestamp: now, ttl: effectiveTTL })
+
     if (changed) {
       this._changedAt.set(key, now)
       const entry = { key, hash: newHash, ts: now, type: 'cache_change' }
@@ -571,6 +619,14 @@ export const CacheKey = {
   optionsOI:       (source, asset) => `${source}:${asset}:optionsOI`,
   optionsMark:     (source, asset) => `${source}:${asset}:optionsMark`,
   dvol:            (source, asset) => `${source}:${asset}:dvol`,
+  dvol_1h:         (source, asset) => `${source}:${asset}:dvol:1h`,
+  dvol_4h:         (source, asset) => `${source}:${asset}:dvol:4h`,
+  dvol_1d:         (source, asset) => `${source}:${asset}:dvol:1d`,
+  funding_1h:      (source, asset) => `${source}:${asset}:funding:1h`,
+  funding_4h:      (source, asset) => `${source}:${asset}:funding:4h`,
+  funding_1d:      (source, asset) => `${source}:${asset}:funding:1d`,
+  basis_1h:        (source, asset) => `${source}:${asset}:basis:1h`,
+  basis_4h:        (source, asset) => `${source}:${asset}:basis:4h`,
   instruments:     (source, asset) => `${source}:${asset}:instruments`,
   rv:              (source, asset) => `${source}:${asset}:rv`,
   trades:          (source, asset) => `${source}:${asset}:trades`,

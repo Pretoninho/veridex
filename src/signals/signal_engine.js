@@ -276,6 +276,170 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
   }
 }
 
+// ── Multi-Timeframe Signal Engine ─────────────────────────────────────────────
+
+/**
+ * Détecte le régime de marché 4H (HTF — Higher TimeFrame)
+ * BREAKOUT: marché en compression, volatilité basse
+ * MEAN_REVERSION: marché en excès, volatilité haute
+ * @param {Object} signal4h — résultat computeSignal() pour timeframe 4h
+ * @returns {{type: 'BREAKOUT'|'MEAN_REVERSION'|'NEUTRAL', confidence: number, isCompatible: function}}
+ */
+export function detectRegime4h(signal4h) {
+  const { scores: {s2: funding4h}, global: scoreGlobal4h, dvolFactor } = signal4h
+
+  // Logique : DVOL bas + score bas = compression (attend cassure)
+  const isCompressionMode = dvolFactor < 0.8 && scoreGlobal4h != null && scoreGlobal4h < 50
+
+  // Logique : DVOL haut + score haut = excès (attend reversion)
+  const isExcessMode = dvolFactor > 1.0 && scoreGlobal4h != null && scoreGlobal4h > 60
+
+  const regimeType = isCompressionMode ? 'BREAKOUT' : isExcessMode ? 'MEAN_REVERSION' : 'NEUTRAL'
+
+  // Confiance basée sur l'écart du score par rapport au neutre (50)
+  const confidence = scoreGlobal4h != null ? Math.abs(scoreGlobal4h - 50) / 50 : 0
+
+  return {
+    type: regimeType,
+    confidence,
+    isCompatible: (setup1h) => {
+      // BREAKOUT régime attend setup COMPRESSION
+      // MEAN_REVERSION régime attend setup SPIKE
+      if (regimeType === 'BREAKOUT') return setup1h.type === 'COMPRESSION'
+      if (regimeType === 'MEAN_REVERSION') return setup1h.type === 'SPIKE'
+      return true  // NEUTRAL accepte tout
+    }
+  }
+}
+
+/**
+ * Détecte le setup 1H (MTF — Middle TimeFrame)
+ * COMPRESSION: range étroit, volatilité stable
+ * SPIKE: mouvement violent, volatilité extrême
+ * @param {Object} signal1h — résultat computeSignal() pour timeframe 1h
+ * @returns {{type: 'COMPRESSION'|'SPIKE'|'NEUTRAL', confidence: number, isCompatible: function}}
+ */
+export function detectSetup1h(signal1h) {
+  const { global: score1h, dvolFactor } = signal1h
+
+  // COMPRESSION: volatilité stable (dvolFactor bas) + score bas
+  const isCompression = dvolFactor < 0.9 && score1h != null && score1h < 55
+
+  // SPIKE: volatilité extrême (dvolFactor haut) ou score très haut
+  const isSpike = dvolFactor > 1.1 || (score1h != null && score1h > 65)
+
+  const setupType = isSpike ? 'SPIKE' : isCompression ? 'COMPRESSION' : 'NEUTRAL'
+
+  // Confiance basée sur l'écart du score
+  const confidence = score1h != null ? Math.abs(score1h - 50) / 50 : 0
+
+  return {
+    type: setupType,
+    confidence,
+    timestamp: Date.now(),
+    isCompatible: (entry5min) => {
+      // Si COMPRESSION, entrée doit être BREAKOUT
+      // Si SPIKE, entrée doit être REJECTION
+      if (setupType === 'COMPRESSION') return entry5min.signal === 'BREAKOUT'
+      if (setupType === 'SPIKE') return entry5min.signal === 'REJECTION'
+      return true
+    }
+  }
+}
+
+/**
+ * Détecte le signal d'entry 5min (LTF — Lower TimeFrame)
+ * BREAKOUT: score monte (> 60)
+ * REJECTION: score baisse (< 40)
+ * @param {Object} signal5min — résultat computeSignal() pour timeframe 5min
+ * @returns {{signal: 'BREAKOUT'|'REJECTION'|'WAIT', confidence: number, action: 'EXECUTE'|'WAIT'}}
+ */
+export function detectEntry5min(signal5min) {
+  const { global: score5min } = signal5min
+
+  // Micro-signals : mouvement 5min
+  let entrySignal = 'WAIT'
+  if (score5min != null) {
+    if (score5min > 60) entrySignal = 'BREAKOUT'
+    else if (score5min < 40) entrySignal = 'REJECTION'
+  }
+
+  // Action : exécuter si score extrême
+  const action = (score5min != null && (score5min > 65 || score5min < 35)) ? 'EXECUTE' : 'WAIT'
+
+  // Confiance
+  const confidence = score5min != null ? Math.abs(score5min - 50) / 50 : 0
+
+  return {
+    signal: entrySignal,
+    confidence,
+    action
+  }
+}
+
+/**
+ * Calcule le signal complet multi-timeframe avec validation hiérarchique.
+ * Retourne scores + régimes + alignement pour HTF→MTF→LTF
+ *
+ * @param {{
+ *   data_4h: {dvol, funding, rv, basisAvg},
+ *   data_1h: {dvol, funding, rv, basisAvg},
+ *   data_5min: {dvol, funding, rv, basisAvg},
+ *   asset?: string
+ * }} inputs
+ * @returns {{
+ *   asset: string,
+ *   signals: { '4h': Object, '1h': Object, '5min': Object },
+ *   regime4h: Object,
+ *   setup1h: Object,
+ *   entry5min: Object,
+ *   alignment: { htf_mtf: boolean, mtf_ltf: boolean, all_aligned: boolean },
+ *   ready_to_trade: boolean
+ * }}
+ */
+export function computeSignalMultiTimeframe({
+  data_4h,
+  data_1h,
+  data_5min,
+  asset = 'BTC'
+}) {
+  // Calculer scores pour chaque timeframe
+  const signal4h = computeSignal({ ...data_4h, asset })
+  const signal1h = computeSignal({ ...data_1h, asset })
+  const signal5min = computeSignal({ ...data_5min, asset })
+
+  // Analyser régimes
+  const regime4h = detectRegime4h(signal4h)
+  const setup1h = detectSetup1h(signal1h)
+  const entry5min = detectEntry5min(signal5min)
+
+  // Validation hiérarchique
+  const htf_mtf = regime4h.isCompatible(setup1h)
+  const mtf_ltf = setup1h.isCompatible(entry5min)
+  const all_aligned = htf_mtf && mtf_ltf
+
+  // Prêt à trader ssi alignement + entry action EXECUTE
+  const ready_to_trade = all_aligned && entry5min.action === 'EXECUTE'
+
+  return {
+    asset,
+    signals: {
+      '4h': signal4h,
+      '1h': signal1h,
+      '5min': signal5min
+    },
+    regime4h,
+    setup1h,
+    entry5min,
+    alignment: {
+      htf_mtf,
+      mtf_ltf,
+      all_aligned
+    },
+    ready_to_trade
+  }
+}
+
 // ── Sector-specific hashing helpers ────────────────────────────────────────────
 
 /**
