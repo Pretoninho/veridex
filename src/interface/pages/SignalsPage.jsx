@@ -155,6 +155,87 @@ function AlignmentCard({ alignment }) {
   )
 }
 
+function ExecutionPlanCard({ multiTimeframe }) {
+  const execution = multiTimeframe?.execution
+  const risk = multiTimeframe?.risk
+  const optionsOverlay = multiTimeframe?.options_overlay
+
+  if (!execution && !risk && !optionsOverlay) return null
+
+  const position = execution?.position ?? 'WAIT'
+  const positionColor =
+    position === 'LONG' ? 'var(--call)' :
+    position === 'SHORT' ? 'var(--put)' :
+    'var(--text-muted)'
+
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,.03)',
+      border: '1px solid rgba(255,255,255,.08)',
+      borderRadius: 8,
+      padding: '12px',
+      marginBottom: 12,
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>
+        EXECUTION PLAN
+      </div>
+
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>
+        Position:{' '}
+        <span style={{ fontFamily: 'var(--mono)', fontWeight: 700, color: positionColor }}>
+          {position}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>
+        Leverage:{' '}
+        <span style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>
+          x{risk?.leverage ?? '—'}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>
+        TP / SL:{' '}
+        <span style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>
+          {risk?.tp != null ? `${risk.tp}%` : '—'} / {risk?.sl != null ? `${risk.sl}%` : '—'}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+        Options overlay:{' '}
+        <span style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>
+          {optionsOverlay?.strategy ?? '—'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function RuleTraceCard({ trace }) {
+  if (!Array.isArray(trace) || trace.length === 0) return null
+
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,.03)',
+      border: '1px solid rgba(255,255,255,.08)',
+      borderRadius: 8,
+      padding: '12px',
+      marginBottom: 12,
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600 }}>
+        RULE TRACE
+      </div>
+      {trace.map((item, idx) => (
+        <div key={`${item.rule}-${idx}`} style={{ marginBottom: idx < trace.length - 1 ? 8 : 0, fontSize: 12 }}>
+          <div style={{ color: item.passed ? 'var(--call)' : 'var(--put)', fontWeight: 700 }}>
+            {item.passed ? '✓' : '✗'} {item.rule}
+          </div>
+          <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+            {item.detail}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /**
  * Affiche le score composite de 4 composantes simplifiées:
  * s1 IV (35%), s2 Funding (25%), s3 Basis (25%), s4 IV/RV (15%)
@@ -346,6 +427,8 @@ export default function SignalsPage({ asset }) {
           <SetupCard setup={multi_timeframe.setup_1h} />
           <EntryCard entry={multi_timeframe.entry_5min} />
           <AlignmentCard alignment={multi_timeframe.alignment} />
+          <ExecutionPlanCard multiTimeframe={multi_timeframe} />
+          <RuleTraceCard trace={multi_timeframe.rule_trace} />
         </div>
       )}
 

@@ -71,6 +71,59 @@ function computeMultiTimeframeFromSignal(signalResult) {
   const htf_mtf = regime4h.isCompatible(setup1h)
   const mtf_ltf = setup1h.isCompatible(entry5min)
   const all_aligned = htf_mtf && mtf_ltf
+  const shouldExecute = all_aligned && entry5min.action === 'EXECUTE'
+
+  const bias =
+    regime4h.type === 'BREAKOUT' ? 'LONG' :
+    regime4h.type === 'MEAN_REVERSION' ? 'SHORT' :
+    'FLAT'
+
+  const riskProfile =
+    global == null ? { leverage: 1, tp: null, sl: null } :
+    global >= 75 ? { leverage: 3, tp: 3.5, sl: 1.4 } :
+    global >= 60 ? { leverage: 2, tp: 2.6, sl: 1.1 } :
+    { leverage: 1, tp: 1.8, sl: 0.9 }
+
+  const executionPosition =
+    !shouldExecute || bias === 'FLAT' ? 'WAIT' :
+    bias === 'LONG' ? 'LONG' :
+    'SHORT'
+
+  const optionsStrategy =
+    executionPosition === 'LONG' ? 'CALL_DEBIT_SPREAD' :
+    executionPosition === 'SHORT' ? 'PUT_DEBIT_SPREAD' :
+    'DELTA_NEUTRAL_CALENDAR'
+
+  const rule_trace = [
+    {
+      rule: 'HTF_MTF_COMPATIBILITY',
+      passed: htf_mtf,
+      detail: htf_mtf
+        ? 'Regime 4H compatible avec setup 1H.'
+        : 'Regime 4H en conflit avec setup 1H.',
+    },
+    {
+      rule: 'MTF_LTF_COMPATIBILITY',
+      passed: mtf_ltf,
+      detail: mtf_ltf
+        ? 'Setup 1H compatible avec entry 5min.'
+        : 'Setup 1H en conflit avec entry 5min.',
+    },
+    {
+      rule: 'ENTRY_EXECUTABLE',
+      passed: entry5min.action === 'EXECUTE',
+      detail: entry5min.action === 'EXECUTE'
+        ? 'Le trigger LTF autorise l’exécution.'
+        : 'Le trigger LTF impose une attente.',
+    },
+    {
+      rule: 'GLOBAL_SCORE_RISK_BUCKET',
+      passed: global != null,
+      detail: global != null
+        ? `Score global ${global}/100 → levier x${riskProfile.leverage}.`
+        : 'Score global indisponible, mode défensif.',
+    },
+  ]
 
   return {
     regime_4h: regime4h,
@@ -81,6 +134,14 @@ function computeMultiTimeframeFromSignal(signalResult) {
       mtf_ltf,
       all_aligned,
     },
+    execution: {
+      position: executionPosition,
+    },
+    risk: riskProfile,
+    options_overlay: {
+      strategy: optionsStrategy,
+    },
+    rule_trace,
   }
 }
 
@@ -227,6 +288,10 @@ export async function fetchSignals(asset) {
       setup_1h: null,
       entry_5min: null,
       alignment: { htf_mtf: false, mtf_ltf: false, all_aligned: false },
+      execution: { position: 'WAIT' },
+      risk: { leverage: 1, tp: null, sl: null },
+      options_overlay: { strategy: 'DELTA_NEUTRAL_CALENDAR' },
+      rule_trace: [],
     }
   }
 
