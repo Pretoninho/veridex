@@ -260,7 +260,7 @@ export default function SignalsPage({ asset }) {
     )
   }
 
-  const { scores, global, signal: signalInfo, timestamp } = signal
+  const { scores, global, signal: signalInfo, timestamp, spot, multi_timeframe, noviceData, maxPain } = signal
   const getGlobalColor = (g) => {
     if (g == null) return 'var(--text-muted)'
     if (g >= 70) return 'var(--call)'
@@ -337,15 +337,15 @@ export default function SignalsPage({ asset }) {
       </div>
 
       {/* Multi-Timeframe Analysis */}
-      {signal.multi_timeframe && (
+      {multi_timeframe && (
         <div style={{ marginBottom: 20 }}>
           <h3 style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px 0', fontWeight: 700, letterSpacing: '0.5px' }}>
             ANALYSE MULTI-TIMEFRAME
           </h3>
-          <RegimeCard regime={signal.multi_timeframe.regime_4h} />
-          <SetupCard setup={signal.multi_timeframe.setup_1h} />
-          <EntryCard entry={signal.multi_timeframe.entry_5min} />
-          <AlignmentCard alignment={signal.multi_timeframe.alignment} />
+          <RegimeCard regime={multi_timeframe.regime_4h} />
+          <SetupCard setup={multi_timeframe.setup_1h} />
+          <EntryCard entry={multi_timeframe.entry_5min} />
+          <AlignmentCard alignment={multi_timeframe.alignment} />
         </div>
       )}
 
@@ -361,7 +361,7 @@ export default function SignalsPage({ asset }) {
       </div>
 
       {/* Info novice */}
-      {signal.noviceData && (
+      {noviceData && (
         <div style={{
           background: 'rgba(255,255,255,.03)',
           border: '1px solid rgba(255,255,255,.08)',
@@ -374,17 +374,17 @@ export default function SignalsPage({ asset }) {
           <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text-bright)' }}>
             Contexte
           </div>
-          {signal.noviceData.funding != null && (
+          {noviceData.funding != null && (
             <div>
               Funding: <span style={{ fontFamily: 'var(--mono)', color: 'var(--text-bright)' }}>
-                {(signal.noviceData.funding * 100).toFixed(2)}%
+                {(noviceData.funding * 100).toFixed(2)}%
               </span>
             </div>
           )}
-          {signal.noviceData.estimatedGain != null && (
+          {noviceData.estimatedGain != null && (
             <div>
               Gain estimé: <span style={{ fontFamily: 'var(--mono)', color: 'var(--text-bright)' }}>
-                {signal.noviceData.estimatedGain.toFixed(1)}%
+                {noviceData.estimatedGain.toFixed(1)}%
               </span>
             </div>
           )}
@@ -392,7 +392,7 @@ export default function SignalsPage({ asset }) {
       )}
 
       {/* Max Pain si disponible */}
-      {signal.maxPain && (
+      {maxPain && (
         <div style={{
           background: 'rgba(255,255,255,.02)',
           border: '1px solid rgba(255,255,255,.06)',
@@ -404,10 +404,10 @@ export default function SignalsPage({ asset }) {
         }}>
           <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--text-muted)' }}>Max Pain</div>
           <div>
-            Prix: ${signal.maxPain.price?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '—'}
+            Prix: ${maxPain.price?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '—'}
           </div>
           <div>
-            Prochaine échéance: {signal.maxPain.expiry || '—'}
+            Prochaine échéance: {maxPain.expiry || '—'}
           </div>
         </div>
       )}
