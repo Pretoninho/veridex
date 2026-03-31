@@ -198,7 +198,7 @@ function ScoreBar({ label, score, weight }) {
   )
 }
 
-export default function SignalsPage({ asset, clockSync }) {
+export default function SignalsPage({ asset }) {
   const [signal, setSignal] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -260,7 +260,7 @@ export default function SignalsPage({ asset, clockSync }) {
     )
   }
 
-  const { scores, global, signal: signalInfo, spot, timestamp } = signal
+  const { scores, global, signal: signalInfo, timestamp } = signal
   const getGlobalColor = (g) => {
     if (g == null) return 'var(--text-muted)'
     if (g >= 70) return 'var(--call)'

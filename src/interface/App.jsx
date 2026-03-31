@@ -5,7 +5,6 @@ import MarketPage     from './pages/MarketPage.jsx'
 import DerivativesPage from './pages/DerivativesPage.jsx'
 import SignalsPage    from './pages/SignalsPage.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
-import AuditBanner    from './components/AuditBanner.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
 import VLogo          from './components/VLogo.jsx'
 import { getSignalHistory } from '../signals/signal_engine.js'
@@ -110,8 +109,8 @@ export default function App() {
       {/* Contenu des pages */}
       <div className="app-content">
         {tab === 'market'  && <MarketPage      asset={asset} />}
-        {tab === 'deriv'   && <DerivativesPage asset={asset} clockSync={clockSync} />}
-        {tab === 'signals' && <SignalsPage     asset={asset} clockSync={clockSync} />}
+        {tab === 'deriv'   && <DerivativesPage asset={asset} />}
+        {tab === 'signals' && <SignalsPage     asset={asset} />}
         <VersionBar version={version} forceUpdate={forceUpdate} />
       </div>
 

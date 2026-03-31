@@ -12,7 +12,6 @@
  *   activeAsset   : string
  *   onAssetChange : (asset: string) => void
  *   signalScore   : number | null
- *   auditAlerts   : number
  *   nextFunding   : string | null
  */
 
@@ -42,15 +41,6 @@ function IconDeriv() {
   )
 }
 
-function IconOptions() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-    </svg>
-  )
-}
-
 function IconSignals() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -65,135 +55,12 @@ function IconSignals() {
   )
 }
 
-function IconOnChain() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-    </svg>
-  )
-}
-
-function IconAudit() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-    </svg>
-  )
-}
-
-function IconNotifications() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-    </svg>
-  )
-}
-
-function IconVol() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="2 20 7 10 12 15 16 6 22 20"/>
-    </svg>
-  )
-}
-
-function IconTracker() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="1"/>
-      <circle cx="12" cy="12" r="5"/>
-      <circle cx="12" cy="12" r="9"/>
-    </svg>
-  )
-}
-
-function IconAssistant() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-      <path d="M2 17l10 5 10-5"/>
-      <path d="M2 12l10 5 10-5"/>
-    </svg>
-  )
-}
-
-function IconCalibration() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3"/>
-      <line x1="12" y1="2" x2="12" y2="5"/>
-      <line x1="12" y1="19" x2="12" y2="22"/>
-      <line x1="2" y1="12" x2="5" y2="12"/>
-      <line x1="19" y1="12" x2="22" y2="12"/>
-      <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/>
-      <line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
-      <line x1="19.78" y1="4.22" x2="17.66" y2="6.34"/>
-      <line x1="6.34" y1="17.66" x2="4.22" y2="19.78"/>
-    </svg>
-  )
-}
-
-function IconFingerprint() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2C6.48 2 2 6.48 2 12"/>
-      <path d="M12 6c3.31 0 6 2.69 6 6"/>
-      <path d="M12 10c1.1 0 2 .9 2 2"/>
-      <path d="M12 14c-1.1 0-2-.9-2-2 0-1.1.9-2 2-2"/>
-      <path d="M6 12c0-3.31 2.69-6 6-6"/>
-      <path d="M12 18c-3.31 0-6-2.69-6-6"/>
-      <path d="M18 12c0 3.31-2.69 6-6 6"/>
-      <path d="M22 12c0 5.52-4.48 10-10 10"/>
-    </svg>
-  )
-}
-
-function IconMonitor() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-    </svg>
-  )
-}
-
-function IconAnalytics() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="3" y1="12" x2="21" y2="12"/>
-      <polyline points="3 6 9 13 15 7 21 13"/>
-    </svg>
-  )
-}
-
 // ── Items de navigation ───────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { id: 'market',        label: 'Market',           sub: 'Prix · VWAP · Spread',          Icon: IconMarket         },
-  { id: 'deriv',         label: 'Dérivés',           sub: 'Funding · OI · Term Structure', Icon: IconDeriv          },
-  { id: 'options',       label: 'Options',           sub: 'IV · Greeks · DVOL',            Icon: IconOptions        },
-  { id: 'signals',       label: 'Signaux',           sub: 'Score · Expert · Simple',       Icon: IconSignals        },
-  { id: 'vol',           label: 'Volatilité',        sub: 'IV/RV · Greeks · Skew · Smile', Icon: IconVol            },
-  { id: 'tracker',       label: 'IV Live',           sub: 'Tracker temps réel · Alertes',  Icon: IconTracker        },
-  { id: 'assistant',     label: 'Assistant',         sub: 'Décision · Trade · Simulation', Icon: IconAssistant      },
-  { id: 'onchain',       label: 'On-Chain',          sub: 'Mempool · Exchange Flows',      Icon: IconOnChain        },
-  { id: 'audit',         label: 'Audit',             sub: 'Journal · Anomalies · Hashes',  Icon: IconAudit          },
-  { id: 'analytics',     label: 'Analytics',         sub: 'Patterns · Performance · Trends', Icon: IconAnalytics     },
-  { id: 'notifications', label: 'Notifications',     sub: 'Alertes push · Seuils',         Icon: IconNotifications  },
-  { id: 'calibration',   label: 'Calibration',        sub: 'Signaux · Patterns · Seuils',   Icon: IconCalibration    },
-  { id: 'fingerprint',  label: 'Fingerprint Debug',   sub: 'Patterns · Stats · Monitoring', Icon: IconFingerprint    },
-  { id: 'monitor',      label: 'Monitoring',           sub: 'Graphique · Patterns · Macro',  Icon: IconMonitor        },
+  { id: 'market',  label: 'Market',  sub: 'Prix · Liquidité · OI',           Icon: IconMarket  },
+  { id: 'deriv',   label: 'Dérivés', sub: 'Funding · Basis · DVOL · Futures', Icon: IconDeriv   },
+  { id: 'signals', label: 'Signaux', sub: 'Score 4-composantes · Alertes',    Icon: IconSignals },
 ]
 
 // ── Composant ─────────────────────────────────────────────────────────────────
@@ -202,7 +69,7 @@ export default function NavDrawer({
   isOpen, onClose,
   activePage, onNavigate,
   activeAsset, onAssetChange,
-  signalScore, auditAlerts, nextFunding,
+  signalScore, nextFunding,
 }) {
   const [isClosing, setIsClosing] = useState(false)
   const touchStartX   = useRef(0)
@@ -265,7 +132,6 @@ export default function NavDrawer({
     if (id === 'market')                        return { label: 'Live',              variant: 'live'   }
     if (id === 'deriv'   && nextFunding)         return { label: nextFunding,         variant: 'timing' }
     if (id === 'signals' && signalScore != null) return { label: String(signalScore), variant: 'score'  }
-    if (id === 'audit'   && auditAlerts > 0)     return { label: String(auditAlerts), variant: 'alert'  }
     return null
   }
 

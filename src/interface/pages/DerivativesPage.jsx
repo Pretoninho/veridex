@@ -136,9 +136,6 @@ function TableHead({ cols, firstLeft = true }) {
 
 // ── Page principale ───────────────────────────────────────────────────────────
 
-// ── Hook countdown funding ────────────────────────────────────────────────────
-
-
 export default function DerivativesPage({ asset }) {
   const [state, setState] = useState({
     spot:         null,
