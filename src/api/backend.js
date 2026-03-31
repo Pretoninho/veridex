@@ -26,7 +26,7 @@ const buildSignalCacheKey = (assetCode, kind) =>
 function pickDvolCurrentTimeframe(dvolPayload) {
   if (!dvolPayload) return null
   if (dvolPayload.current != null) return dvolPayload
-  return dvolPayload.dvol_1h ?? dvolPayload.dvol_4h ?? dvolPayload.dvol_1d ?? null
+  return dvolPayload.dvol_4h ?? dvolPayload.dvol_1h ?? dvolPayload.dvol_1d ?? null
 }
 
 /**
@@ -37,7 +37,7 @@ function pickDvolCurrentTimeframe(dvolPayload) {
  * @param {Object} signalResult — result from computeSignal()
  * @returns {Object} — {regime_4h, setup_1h, entry_5min, alignment}
  */
-function computeMultiTimeframeFromSignal(signalResult) {
+function computeMultiTimeframeFromSignal(signalResult, dvolCurrent4h = null) {
   const { scores: {s1, s2, s3, s4}, global } = signalResult
 
   // Create synthetic timeframe signals by applying decreasing confidence factors
@@ -63,7 +63,7 @@ function computeMultiTimeframeFromSignal(signalResult) {
   }
 
   // Detect multi-timeframe patterns
-  const regime4h = detectRegime4h(signal4h)
+  const regime4h = detectRegime4h(signal4h, dvolCurrent4h)
   const setup1h = detectSetup1h(signal1h)
   const entry5min = detectEntry5min(signal5min)
 
@@ -121,6 +121,7 @@ export async function fetchMarket(asset) {
   const spot    = spotResult.status    === 'fulfilled' ? spotResult.value?.price ?? null : null
   const dvolRaw = dvolResult.status    === 'fulfilled' ? dvolResult.value    : null
   const dvol    = pickDvolCurrentTimeframe(dvolRaw)
+  const dvol4hCurrent = dvolRaw?.dvol_4h?.current ?? null
   const funding = fundingResult.status === 'fulfilled' ? fundingResult.value : null
   const rv      = rvResult.status      === 'fulfilled' ? rvResult.value      : null
   const oi      = oiResult.status      === 'fulfilled' ? oiResult.value      : null
@@ -139,6 +140,7 @@ export async function fetchMarket(asset) {
     asset:     a,
     spot,
     dvol,
+    dvol4hCurrent,
     funding:   funding ? { ...funding, avgAnn7d } : null,
     rv,
     basisAvg,
@@ -218,7 +220,7 @@ export async function fetchSignals(asset) {
   const signalResult = { scores, global, signal, noviceData, maxPain, dvolFactor: signalInputs.dvol?.current ? 1 : 0.85 }
   let multi_timeframe = null
   try {
-    multi_timeframe = computeMultiTimeframeFromSignal(signalResult)
+    multi_timeframe = computeMultiTimeframeFromSignal(signalResult, market.dvol4hCurrent ?? null)
   } catch (err) {
     console.error('[fetchSignals] Multi-timeframe computation error:', err)
     // Ne jamais bloquer le signal principal — retourner une structure vide

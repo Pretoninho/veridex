@@ -80,6 +80,174 @@ async function getDVOL(asset) {
   return normalizeDeribitDVOL(asset, result)
 }
 
+const TIMEFRAME_CONFIG = {
+  '4h': { resolution: 14_400, windowMs: 14 * 24 * 3600 * 1000 },
+  '1h': { resolution: 3_600, windowMs: 7 * 24 * 3600 * 1000 },
+  '5m': { resolution: 300, windowMs: 2 * 24 * 3600 * 1000 },
+}
+
+function _pctDelta(from, to) {
+  if (!isFinite(from) || !isFinite(to) || from === 0) return null
+  return ((to - from) / from) * 100
+}
+
+function _computeCandlesMetrics(candles) {
+  if (!candles?.length) {
+    return {
+      trend: { direction: 'NEUTRAL', slopePct: null },
+      range: { pct: null },
+      spike: { detected: false, strength: 0 },
+      price_action: { last: null, changePct: null },
+      volume: { last: null, avg: null, ratio: null },
+      breakout_flags: { up: false, down: false },
+      oi_delta: { value: null, pct: null },
+    }
+  }
+
+  const closes = candles.map(c => c.close).filter(Number.isFinite)
+  const highs = candles.map(c => c.high).filter(Number.isFinite)
+  const lows = candles.map(c => c.low).filter(Number.isFinite)
+  const volumes = candles.map(c => c.volume).filter(Number.isFinite)
+  const oiSeries = candles.map(c => c.openInterest).filter(Number.isFinite)
+
+  const lastClose = closes.at(-1) ?? null
+  const firstClose = closes[0] ?? null
+  const changePct = _pctDelta(firstClose, lastClose)
+
+  const slopePct = closes.length >= 8
+    ? _pctDelta(closes[Math.max(0, closes.length - 8)], lastClose)
+    : changePct
+
+  const direction = slopePct == null
+    ? 'NEUTRAL'
+    : slopePct > 0.75
+    ? 'UP'
+    : slopePct < -0.75
+    ? 'DOWN'
+    : 'SIDEWAYS'
+
+  const maxHigh = highs.length ? Math.max(...highs) : null
+  const minLow = lows.length ? Math.min(...lows) : null
+  const rangePct = (isFinite(maxHigh) && isFinite(minLow) && isFinite(lastClose) && lastClose !== 0)
+    ? ((maxHigh - minLow) / lastClose) * 100
+    : null
+
+  const recentCandles = candles.slice(-20)
+  const recentHigh = Math.max(...recentCandles.map(c => c.high).filter(Number.isFinite))
+  const recentLow = Math.min(...recentCandles.map(c => c.low).filter(Number.isFinite))
+  const prevClose = closes.length > 1 ? closes[closes.length - 2] : null
+
+  const lastCandle = candles.at(-1)
+  const candleRanges = candles
+    .map(c => (isFinite(c.high) && isFinite(c.low) && c.low !== 0 ? (c.high - c.low) / c.low : null))
+    .filter(Number.isFinite)
+  const avgCandleRange = candleRanges.length
+    ? candleRanges.reduce((s, x) => s + x, 0) / candleRanges.length
+    : null
+  const lastCandleRange = isFinite(lastCandle?.high) && isFinite(lastCandle?.low) && lastCandle.low !== 0
+    ? (lastCandle.high - lastCandle.low) / lastCandle.low
+    : null
+  const spikeDetected = isFinite(lastCandleRange) && isFinite(avgCandleRange)
+    ? lastCandleRange > avgCandleRange * 1.8
+    : false
+
+  const avgVol = volumes.length ? volumes.reduce((s, x) => s + x, 0) / volumes.length : null
+  const lastVol = volumes.at(-1) ?? null
+  const volRatio = isFinite(avgVol) && avgVol > 0 && isFinite(lastVol) ? lastVol / avgVol : null
+
+  const oiFirst = oiSeries[0] ?? null
+  const oiLast = oiSeries.at(-1) ?? null
+  const oiPct = _pctDelta(oiFirst, oiLast)
+
+  return {
+    trend: { direction, slopePct },
+    range: { pct: rangePct },
+    spike: { detected: spikeDetected, strength: (lastCandleRange ?? 0) / (avgCandleRange || 1) },
+    oi_delta: { value: isFinite(oiFirst) && isFinite(oiLast) ? oiLast - oiFirst : null, pct: oiPct },
+    price_action: { last: lastClose, prev: prevClose, changePct },
+    volume: { last: lastVol, avg: avgVol, ratio: volRatio },
+    breakout_flags: {
+      up: isFinite(lastClose) && isFinite(recentHigh) ? lastClose >= recentHigh : false,
+      down: isFinite(lastClose) && isFinite(recentLow) ? lastClose <= recentLow : false,
+    },
+  }
+}
+
+async function getDVOLForTimeframe(asset, timeframe) {
+  const cfg = TIMEFRAME_CONFIG[timeframe]
+  if (!cfg) throw new Error(`Unsupported timeframe "${timeframe}"`)
+
+  const end = Date.now()
+  const start = end - cfg.windowMs
+  const result = await apiFetch('get_volatility_index_data', {
+    currency: asset,
+    start_timestamp: start,
+    end_timestamp: end,
+    resolution: cfg.resolution,
+  })
+  return normalizeDeribitDVOL(asset, result)
+}
+
+async function getPerpChartData(asset, timeframe) {
+  const cfg = TIMEFRAME_CONFIG[timeframe]
+  if (!cfg) throw new Error(`Unsupported timeframe "${timeframe}"`)
+
+  const end = Date.now()
+  const start = end - cfg.windowMs
+  const result = await apiFetch('get_tradingview_chart_data', {
+    instrument_name: `${asset}-PERPETUAL`,
+    start_timestamp: start,
+    end_timestamp: end,
+    resolution: String(cfg.resolution),
+  })
+
+  const ticks = Array.isArray(result?.ticks) ? result.ticks : []
+  const open = Array.isArray(result?.open) ? result.open : []
+  const high = Array.isArray(result?.high) ? result.high : []
+  const low = Array.isArray(result?.low) ? result.low : []
+  const close = Array.isArray(result?.close) ? result.close : []
+  const volume = Array.isArray(result?.volume) ? result.volume : []
+  const openInterest = Array.isArray(result?.open_interest) ? result.open_interest : []
+
+  return ticks.map((ts, i) => ({
+    timestamp: ts,
+    open: Number(open[i]),
+    high: Number(high[i]),
+    low: Number(low[i]),
+    close: Number(close[i]),
+    volume: Number(volume[i]),
+    openInterest: Number(openInterest[i]),
+  })).filter(c => Number.isFinite(c.close) && Number.isFinite(c.high) && Number.isFinite(c.low))
+}
+
+async function getTimeframeData(asset, timeframe) {
+  const [dvolResult, fundingResult, candlesResult] = await Promise.allSettled([
+    getDVOLForTimeframe(asset, timeframe),
+    getFundingRate(asset),
+    getPerpChartData(asset, timeframe),
+  ])
+
+  const dvol = dvolResult.status === 'fulfilled' ? dvolResult.value : null
+  const funding = fundingResult.status === 'fulfilled' ? fundingResult.value : null
+  const candles = candlesResult.status === 'fulfilled' ? candlesResult.value : []
+  const metrics = _computeCandlesMetrics(candles)
+
+  return {
+    timeframe,
+    dvol,
+    trend: metrics.trend,
+    range: metrics.range,
+    spike: metrics.spike,
+    oi_delta: metrics.oi_delta,
+    funding,
+    price_action: metrics.price_action,
+    volume: metrics.volume,
+    breakout_flags: metrics.breakout_flags,
+    candles,
+    timestamp: Date.now(),
+  }
+}
+
 async function getFundingRate(asset) {
   const instrument = `${asset}-PERPETUAL`
   const results = await apiFetch('get_book_summary_by_instrument', {
@@ -280,6 +448,9 @@ module.exports = {
   getOpenInterest,
   getRealizedVol,
   getMarketSnapshot,
+  getDVOLForTimeframe,
+  getPerpChartData,
+  getTimeframeData,
   getTicker,
   getFundingRateHistory,
   getDailySettlement,

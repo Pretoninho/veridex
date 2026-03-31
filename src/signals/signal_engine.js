@@ -283,18 +283,24 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
  * BREAKOUT: marché en compression, volatilité basse
  * MEAN_REVERSION: marché en excès, volatilité haute
  * @param {Object} signal4h — résultat computeSignal() pour timeframe 4h
- * @returns {{type: 'BREAKOUT'|'MEAN_REVERSION'|'NEUTRAL', confidence: number, isCompatible: function}}
+ * @param {number|null} [dvolCurrent4h=null] — valeur DVOL réelle du timeframe 4h
+ * @returns {{type: 'BREAKOUT'|'MEAN_REVERSION'|'NEUTRAL', confidence: number, rule_triggered: string, isCompatible: function}}
  */
-export function detectRegime4h(signal4h) {
-  const { scores: {s2: funding4h}, global: scoreGlobal4h, dvolFactor } = signal4h
+export function detectRegime4h(signal4h, dvolCurrent4h = null) {
+  const { global: scoreGlobal4h } = signal4h
 
-  // Logique : DVOL bas + score bas = compression (attend cassure)
-  const isCompressionMode = dvolFactor < 0.8 && scoreGlobal4h != null && scoreGlobal4h < 50
+  let regimeType = 'NEUTRAL'
+  let ruleTriggered = 'otherwise => NEUTRAL'
 
-  // Logique : DVOL haut + score haut = excès (attend reversion)
-  const isExcessMode = dvolFactor > 1.0 && scoreGlobal4h != null && scoreGlobal4h > 60
-
-  const regimeType = isCompressionMode ? 'BREAKOUT' : isExcessMode ? 'MEAN_REVERSION' : 'NEUTRAL'
+  if (dvolCurrent4h != null && Number.isFinite(dvolCurrent4h)) {
+    if (dvolCurrent4h < 40) {
+      regimeType = 'BREAKOUT'
+      ruleTriggered = '< 40 => BREAKOUT'
+    } else if (dvolCurrent4h > 70) {
+      regimeType = 'MEAN_REVERSION'
+      ruleTriggered = '> 70 => MEAN_REVERSION'
+    }
+  }
 
   // Confiance basée sur l'écart du score par rapport au neutre (50)
   const confidence = scoreGlobal4h != null ? Math.abs(scoreGlobal4h - 50) / 50 : 0
@@ -302,6 +308,7 @@ export function detectRegime4h(signal4h) {
   return {
     type: regimeType,
     confidence,
+    rule_triggered: ruleTriggered,
     isCompatible: (setup1h) => {
       // BREAKOUT régime attend setup COMPRESSION
       // MEAN_REVERSION régime attend setup SPIKE
