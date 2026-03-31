@@ -189,11 +189,39 @@ export async function fetchSignals(asset) {
   }
   if (!nextHash) nextHash = hashData(signalInputs)
 
-  const { scores, global, signal, noviceData, maxPain } = computeSignal(signalInputs)
+  let scores, global, signal, noviceData, maxPain
+  try {
+    const result = computeSignal(signalInputs)
+    scores = result.scores
+    global = result.global
+    signal = result.signal
+    noviceData = result.noviceData
+    maxPain = result.maxPain
+  } catch (err) {
+    console.error('[fetchSignals] computeSignal error:', err)
+    // Retourner un signal par défaut sûr
+    scores = { s1: null, s2: null, s3: null, s4: null }
+    global = null
+    signal = null
+    noviceData = { asset: assetCode, spotPrice: market.spot ?? null, score: null, funding: null, estimatedGain: null }
+    maxPain = null
+  }
 
   // Compute multi-timeframe signals for hierarchical analysis
   const signalResult = { scores, global, signal, noviceData, maxPain, dvolFactor: signalInputs.dvol?.current ? 1 : 0.85 }
-  const multi_timeframe = computeMultiTimeframeFromSignal(signalResult)
+  let multi_timeframe = null
+  try {
+    multi_timeframe = computeMultiTimeframeFromSignal(signalResult)
+  } catch (err) {
+    console.error('[fetchSignals] Multi-timeframe computation error:', err)
+    // Ne jamais bloquer le signal principal — retourner une structure vide
+    multi_timeframe = {
+      regime_4h: null,
+      setup_1h: null,
+      entry_5min: null,
+      alignment: { htf_mtf: false, mtf_ltf: false, all_aligned: false },
+    }
+  }
 
   const result = {
     asset:     assetCode,

@@ -3,7 +3,7 @@ import { fetchSignals } from '../../api/backend.js'
 import { getSignalHistory, saveSignal } from '../../signals/signal_engine.js'
 
 function RegimeCard({ regime }) {
-  if (!regime) return null
+  if (!regime || !regime.type) return null
   const iconMap = {
     'BREAKOUT': '📈',
     'MEAN_REVERSION': '📉',
@@ -36,7 +36,7 @@ function RegimeCard({ regime }) {
 }
 
 function SetupCard({ setup }) {
-  if (!setup) return null
+  if (!setup || !setup.type) return null
   const iconMap = {
     'COMPRESSION': '📦',
     'SPIKE': '⚡',
@@ -69,7 +69,7 @@ function SetupCard({ setup }) {
 }
 
 function EntryCard({ entry }) {
-  if (!entry) return null
+  if (!entry || !entry.signal) return null
   const isExecutable = entry.action === 'EXECUTE'
   const iconMap = {
     'BREAKOUT': '🔥',
@@ -112,7 +112,7 @@ function EntryCard({ entry }) {
 }
 
 function AlignmentCard({ alignment }) {
-  if (!alignment) return null
+  if (!alignment || typeof alignment.all_aligned !== 'boolean') return null
   const allAligned = alignment.all_aligned
 
   return (
@@ -134,14 +134,14 @@ function AlignmentCard({ alignment }) {
       }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>4H→1H</div>
-          <div style={{ fontWeight: 700, color: alignment.htf_mtf ? 'var(--call)' : 'var(--put)' }}>
-            {alignment.htf_mtf ? '✓' : '✗'}
+          <div style={{ fontWeight: 700, color: (alignment.htf_mtf ?? false) ? 'var(--call)' : 'var(--put)' }}>
+            {(alignment.htf_mtf ?? false) ? '✓' : '✗'}
           </div>
         </div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>1H→5M</div>
-          <div style={{ fontWeight: 700, color: alignment.mtf_ltf ? 'var(--call)' : 'var(--put)' }}>
-            {alignment.mtf_ltf ? '✓' : '✗'}
+          <div style={{ fontWeight: 700, color: (alignment.mtf_ltf ?? false) ? 'var(--call)' : 'var(--put)' }}>
+            {(alignment.mtf_ltf ?? false) ? '✓' : '✗'}
           </div>
         </div>
         <div style={{ textAlign: 'center' }}>
