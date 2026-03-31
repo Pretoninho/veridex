@@ -12,7 +12,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "start": "node backend/server.js",
+    "postinstall": "cd backend && npm install"
   },
   "dependencies": {
     "chart.js": "^4.4.1",
