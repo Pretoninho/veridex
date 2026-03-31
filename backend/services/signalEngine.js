@@ -311,6 +311,11 @@ function computeSignal({ dvol, funding, rv, basisAvg, onChainScore = null, spot 
   const global = calcGlobalScore(s1, s2, s3, s4, s5, s6)
   const positioning = interpretPositioning(lsRatio, pcRatio, s6)
 
+  // Calculate dvolFactor for multi-timeframe analysis
+  const dvolFactor = dvol != null
+    ? dvol.current / ((dvol.monthMin + dvol.monthMax) / 2)
+    : 1
+
   return {
     asset: asset.toUpperCase(),
     spot,
@@ -318,6 +323,7 @@ function computeSignal({ dvol, funding, rv, basisAvg, onChainScore = null, spot 
     global,
     signal: getSignal(global),
     positioning,
+    dvolFactor,
     timestamp: Date.now(),
   }
 }
