@@ -23,7 +23,6 @@ import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { fnv1a } from '../data/data_store/cache.js'
 import { calculateGainExample } from './signal_interpreter.js'
 import { calculateMaxPainByExpiry, interpretMaxPain } from '../core/volatility/max_pain.js'
-import { calcPositioningScore, interpretPositioning } from './positioning_score.js'
 import { TIMING, STORAGE_LIMITS, getComponentWeights } from '../config/signal_calibration.js'
 import { getCalibration } from './signal_calibration.js'
 import { hashSector } from '../utils/sector_hasher.js'
@@ -146,19 +145,15 @@ export function scoreIVvsRV(dvol, rv) {
  * @param {number|null} [s6] — score positionnement croisé (optionnel)
  * @returns {number|null}  — 0 à 100
  */
-export function calcGlobalScore(s1, s2, s3, s4, s5, s6) {
-  const hasS5 = s5 != null
-  const hasS6 = s6 != null
-  const cal = getCalibration()
-  const { w1, w2, w3, w4, w5, w6 } = getComponentWeights(hasS5, hasS6, cal)
+export function calcGlobalScore(s1, s2, s3, s4) {
+  // Poids fixes pour 4 composantes simplifiées (35%-25%-25%-15%)
+  const WEIGHTS = { w1: 0.35, w2: 0.25, w3: 0.25, w4: 0.15 }
 
   let total = 0, weights = 0
-  if (s1 != null) { total += s1 * w1; weights += w1 }
-  if (s2 != null) { total += s2 * w2; weights += w2 }
-  if (s3 != null) { total += s3 * w3; weights += w3 }
-  if (s4 != null) { total += s4 * w4; weights += w4 }
-  if (s5 != null) { total += s5 * w5; weights += w5 }
-  if (s6 != null) { total += s6 * w6; weights += w6 }
+  if (s1 != null) { total += s1 * WEIGHTS.w1; weights += WEIGHTS.w1 }
+  if (s2 != null) { total += s2 * WEIGHTS.w2; weights += WEIGHTS.w2 }
+  if (s3 != null) { total += s3 * WEIGHTS.w3; weights += WEIGHTS.w3 }
+  if (s4 != null) { total += s4 * WEIGHTS.w4; weights += WEIGHTS.w4 }
   return weights > 0 ? Math.round(total / weights) : null
 }
 
@@ -230,18 +225,14 @@ export function getSignal(score) {
  *   asset?: string
  * }} inputs
  */
-export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset, instruments = [],
-  lsRatio = null, pcRatio = null }) {
+export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot, asset, instruments = [] }) {
   const s1 = scoreIV(dvol)
   const s2 = scoreFunding(funding)
   const s3 = scoreBasis(basisAvg)
   const s4 = scoreIVvsRV(dvol, rv)
-  const s5 = onChainScore ?? null
-  const s6 = calcPositioningScore(lsRatio, pcRatio)
-  const rawGlobal  = calcGlobalScore(s1, s2, s3, s4, s5, s6)
+  const rawGlobal  = calcGlobalScore(s1, s2, s3, s4)
   const dvolFactor = dvolFilter(dvol?.current ?? null)
   const global     = rawGlobal != null ? Math.round(rawGlobal * dvolFactor) : null
-  const positioning = interpretPositioning(lsRatio, pcRatio, s6)
 
   const fundingAnn = funding?.rateAnn ?? funding?.avgAnn7d ?? null
 
@@ -276,13 +267,12 @@ export function computeSignal({ dvol, funding, rv, basisAvg, onChainScore, spot,
   }
 
   return {
-    scores:     { s1, s2, s3, s4, s5, s6 },
+    scores:     { s1, s2, s3, s4 },
     global,
     dvolFactor,
     signal:     getSignal(global),
     noviceData,
     maxPain:    maxPainResult,
-    positioning,
   }
 }
 

@@ -3,10 +3,6 @@ import { fetchSignals, fetchMarket } from '../../api/backend.js'
 import { saveSignal, hashMarketState } from '../../signals/signal_engine.js'
 import { smartCache } from '../../data/data_store/cache.js'
 import { interpretSignal, buildStrategySignature, buildMarketRegime } from '../../signals/signal_interpreter.js'
-import { generateInsight }    from '../../signals/insight_generator.js'
-import { getAllPatterns, computeAdvancedStats } from '../../signals/market_fingerprint.js'
-import { computeConfluence }  from '../../analytics/signal_confluence.js'
-import { clusterPatterns }    from '../../analytics/pattern_cluster.js'
 
 // ── Hook rafraîchissement automatique ────────────────────────────────────────
 

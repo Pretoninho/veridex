@@ -2,10 +2,9 @@
  * src/api/backend.js
  *
  * Frontend-only aggregator — computes market data and signals directly in the
- * browser using the existing provider / signal-engine layer.
+ * browser using Deribit providers and signal-engine.
  *
- * Exports the same function signatures as the former backend client so that
- * all call-sites (SignalsPage, etc.) require zero changes.
+ * Simplified version for Veridex refactor (no on-chain, patterns, or advanced analytics).
  */
 
 import {
@@ -17,25 +16,15 @@ import {
   getFundingRateHistory,
   getBasisAvg,
 } from '../data/providers/deribit.js'
-import {
-  getOnChainSnapshot,
-  getFearGreedIndex,
-  getHashRateHistory,
-} from '../data/providers/onchain.js'
-import { normalizeOnChain } from '../data/normalizers/format_data.js'
 import { computeSignal } from '../signals/signal_engine.js'
 import { hashData, smartCache } from '../data/data_store/cache.js'
-import { createFingerprint, recordPattern, updateOutcomes, getAllPatterns, getPatternStats } from '../signals/market_fingerprint.js'
-import { savePatternAuditEntry } from '../signals/pattern_audit.js'
-import { getCachedEconomicEvents } from '../signals/economic_calendar.js'
-import { isInNewsWindow } from '../signals/inNewsWindow.js'
 
 const SIGNAL_CACHE_VERSION = 1
 const buildSignalCacheKey = (assetCode, kind) =>
   `signals:${assetCode}:v${SIGNAL_CACHE_VERSION}:${kind}`
 
 /**
- * Fetch raw normalized market data for the given asset directly from providers.
+ * Fetch raw normalized market data for the given asset directly from Deribit provider.
  *
  * @param {string} asset  e.g. 'BTC' or 'ETH'
  * @returns {Promise<{
@@ -43,9 +32,8 @@ const buildSignalCacheKey = (assetCode, kind) =>
  *   spot: number|null,
  *   dvol: object|null,
  *   funding: object|null,
- *   rv: object|null,
+ *   rv: number|null,
  *   basisAvg: number|null,
- *   lsRatio: number|null,
  *   pcRatio: number|null,
  *   timestamp: number,
  * }>}
@@ -92,59 +80,43 @@ export async function fetchMarket(asset) {
     funding:   funding ? { ...funding, avgAnn7d } : null,
     rv,
     basisAvg,
-    pcRatio:   oi?.putCallRatio    ?? null,
+    pcRatio:   oi?.putCallRatio ?? null,
     timestamp: Date.now(),
   }
 }
 
 /**
  * Fetch the computed market signal for the given asset, built entirely in the
- * browser from live provider data.
+ * browser from live Deribit provider data.
+ *
+ * Simplified version: 4-component signal (IV, Funding, Basis, IV/RV)
  *
  * @param {string} asset  e.g. 'BTC' or 'ETH'
  * @returns {Promise<{
  *   asset: string,
  *   spot: number|null,
- *   scores: { s1, s2, s3, s4, s5, s6 },
+ *   scores: { s1, s2, s3, s4 },
  *   global: number|null,
  *   signal: { label: string, action: string }|null,
- *   positioning: object|null,
  *   timestamp: number,
  * }>}
  */
 export async function fetchSignals(asset) {
   const assetCode = asset.toUpperCase()
 
-  const [marketResult, onchainResult, fearGreedResult, hashRateResult] =
-    await Promise.allSettled([
-      fetchMarket(assetCode),
-      getOnChainSnapshot(assetCode),
-      getFearGreedIndex(),
-      getHashRateHistory(),
-    ])
+  const marketResult = await Promise.allSettled([
+    fetchMarket(assetCode),
+  ]).then(r => r[0])
 
-  const market    = marketResult.status    === 'fulfilled' ? marketResult.value    : {}
-  const snapshot  = onchainResult.status   === 'fulfilled' ? onchainResult.value   : null
-  const fearGreed = fearGreedResult.status === 'fulfilled' ? fearGreedResult.value : null
-  const hashRate  = hashRateResult.status  === 'fulfilled' ? hashRateResult.value  : null
-
-  const onChainNorm = normalizeOnChain({
-    blockchain:      snapshot?.blockchain ?? null,
-    mempool:         snapshot?.mempool    ?? null,
-    fearGreed,
-    hashRateHistory: hashRate,
-    exchangeFlows:   null,
-  })
+  const market = marketResult.status === 'fulfilled' ? marketResult.value : {}
 
   const signalInputs = {
-    dvol:         market.dvol         ?? null,
-    funding:      market.funding      ?? null,
-    rv:           market.rv           ?? null,
-    basisAvg:     market.basisAvg     ?? null,
-    onChainScore: onChainNorm.composite.onChainScore,
-    spot:         market.spot         ?? null,
-    asset:        assetCode,
-    pcRatio:      market.pcRatio      ?? null,
+    dvol:      market.dvol      ?? null,
+    funding:   market.funding   ?? null,
+    rv:        market.rv        ?? null,
+    basisAvg:  market.basisAvg  ?? null,
+    spot:      market.spot      ?? null,
+    asset:     assetCode,
   }
 
   const inputKey  = buildSignalCacheKey(assetCode, 'inputs')
@@ -162,90 +134,48 @@ export async function fetchSignals(asset) {
   }
   if (!nextHash) nextHash = hashData(signalInputs)
 
-  const { scores, global, signal, noviceData, maxPain, positioning } = computeSignal(signalInputs)
+  const { scores, global, signal, noviceData, maxPain } = computeSignal(signalInputs)
 
   const result = {
-    asset:      assetCode,
-    spot:       market.spot ?? null,
+    asset:     assetCode,
+    spot:      market.spot ?? null,
     scores,
     global,
     signal,
     noviceData,
     maxPain,
-    positioning,
-    timestamp:  Date.now(),
+    timestamp: Date.now(),
   }
 
   smartCache.set(inputKey, { hash: nextHash, inputs: signalInputs })
   smartCache.set(resultKey, result)
 
-  // Enregistre le fingerprint du marché actuel dans IndexedDB (fire-and-forget)
-  if (market.spot != null) {
-    const dvol = market.dvol
-    const ivRank = (dvol != null && dvol.monthMax > dvol.monthMin)
-      ? ((dvol.current - dvol.monthMin) / (dvol.monthMax - dvol.monthMin)) * 100
-      : null
-    const fingerprint = createFingerprint({
-      ivRank,
-      fundingPct: market.funding != null ? (market.funding.rateAnn ?? 0) / 100 : null,
-      spreadPct:  null,
-      basisPct:   market.basisAvg ?? null,
-    })
-    // Vérifie la fenêtre news (T±30min autour d'une annonce macro High)
-    const { events: ecoEvents }    = getCachedEconomicEvents()
-    const newsWindowResult         = isInNewsWindow(Date.now(), ecoEvents)
-
-    // recordPattern écrit en premier, puis updateOutcomes lit le record mis à jour —
-    // les deux chaînes sont séquentielles pour éviter un conflit d'écriture sur la même clé IndexedDB.
-    recordPattern(fingerprint, market.spot)
-      .then(() => Promise.all([
-        getPatternStats(fingerprint.hash),
-        // Met à jour les outcomes de tous les patterns connus avec le prix actuel
-        getAllPatterns().then(patterns =>
-          Promise.all(patterns.map(p => updateOutcomes(p.hash, market.spot).catch(() => {})))
-        ),
-      ]))
-      .then(([stats]) => {
-        savePatternAuditEntry({
-          asset:       assetCode,
-          hash:        fingerprint.hash,
-          config:      fingerprint.config,
-          inputs: {
-            ivRank:     ivRank,
-            fundingAnn: market.funding?.rateAnn ?? null,
-            basisPct:   market.basisAvg ?? null,
-          },
-          spot:        market.spot,
-          occurrences: stats?.occurrences ?? 1,
-          newsWindow: {
-            inWindow:    newsWindowResult.inWindow,
-            minutesAway: newsWindowResult.minutesAway,
-            isPre:       newsWindowResult.isPre,
-            isPost:      newsWindowResult.isPost,
-            event:       newsWindowResult.nearestEvent
-              ? { ts: newsWindowResult.nearestEvent.ts, event: newsWindowResult.nearestEvent.event, currency: newsWindowResult.nearestEvent.currency }
-              : null,
-          },
-        })
-
-        // Démarre une session de suivi PatternSession si aucune session active n'existe déjà pour ce hash
-        const sessionManager = window.__veridexTrackers?.[assetCode]?.sessionManager
-        if (sessionManager) {
-          const hasActive = sessionManager.activeSessions.some(
-            s => s.patternHash === fingerprint.hash
-          )
-          if (!hasActive) {
-            sessionManager.onPatternDetected(
-              fingerprint.hash,
-              'composite',
-              Date.now(),
-              { durationMs: 3_600_000 }
-            )
-          }
-        }
-      })
-      .catch(() => {})
-  }
-
   return result
+}
+
+/**
+ * Save a computed signal to history (simple localStorage-based)
+ */
+export function saveSignal(signal) {
+  try {
+    const history = JSON.parse(localStorage.getItem('veridex_signal_history') || '[]')
+    history.push(signal)
+    // Keep only last 100 signals
+    if (history.length > 100) history.shift()
+    localStorage.setItem('veridex_signal_history', JSON.stringify(history))
+  } catch (err) {
+    console.warn('[saveSignal] Error:', err)
+  }
+}
+
+/**
+ * Load signal history from localStorage
+ */
+export function loadSignalHistory() {
+  try {
+    return JSON.parse(localStorage.getItem('veridex_signal_history') || '[]')
+  } catch (err) {
+    console.warn('[loadSignalHistory] Error:', err)
+    return []
+  }
 }
