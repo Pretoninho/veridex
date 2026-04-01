@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { version } from '../../package.json'
 import LandingPage    from './pages/LandingPage.jsx'
 import MarketPage     from './pages/MarketPage.jsx'
@@ -12,6 +12,35 @@ import { syncServerClocks, SYNC_INTERVAL_MS } from '../data/providers/clock_sync
 import { setCachedClockSync } from '../data/data_store/cache.js'
 import MaintenancePage          from './pages/MaintenancePage.jsx'
 import './App.css'
+
+// ── ErrorBoundary ─────────────────────────────────────────────────────────────
+
+export class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 12, color: '#ff4d6d', background: '#060a0f', minHeight: '100vh' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Une erreur est survenue</div>
+          <div style={{ opacity: 0.7, marginBottom: 16, wordBreak: 'break-all' }}>{String(this.state.error)}</div>
+          <button
+            onClick={() => { window.location.reload() }}
+            style={{ padding: '8px 16px', background: 'rgba(255,77,109,.15)', border: '1px solid rgba(255,77,109,.4)', borderRadius: 6, color: '#ff4d6d', cursor: 'pointer', fontFamily: 'monospace', fontSize: 11 }}
+          >
+            Recharger l'application
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 // ── Mode maintenance ──────────────────────────────────────────────────────────
 

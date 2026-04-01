@@ -438,6 +438,9 @@ export function interpretSignal(computedSignal, rawData) {
  * }}
  */
 export function interpretMultiTimeframeSignal(multiTFSignal) {
+  if (!multiTFSignal) {
+    return { action: 'WAIT', reason: 'Données multi-timeframe indisponibles', confidence: 0 }
+  }
   const { regime4h, setup1h, entry5min, alignment } = multiTFSignal
 
   // Si alignement n'existe pas ou n'est pas complet

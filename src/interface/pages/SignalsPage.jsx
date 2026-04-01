@@ -599,7 +599,7 @@ export default function SignalsPage({ asset }) {
           {noviceData.funding != null && (
             <div>
               Funding: <span style={{ fontFamily: 'var(--mono)', color: 'var(--text-bright)' }}>
-                {(noviceData.funding * 100).toFixed(2)}%
+                {noviceData.funding.toFixed(2)}%
               </span>
             </div>
           )}

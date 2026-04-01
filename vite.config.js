@@ -54,7 +54,7 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'deribit-api',
-              networkTimeoutSeconds: 2,
+              networkTimeoutSeconds: 8,
               expiration: { maxEntries: 80, maxAgeSeconds: 30 },
             }
           }
