@@ -54,7 +54,28 @@ function _initSqlite() {
 
 async function _initPostgres(connectionString) {
   const { Pool } = require('pg')
-  _pgPool = new Pool({ connectionString, max: 10 })
+
+  // SSL is required on Railway and most managed Postgres providers.
+  // `rejectUnauthorized: false` is intentional: Railway's Postgres uses a
+  // self-signed certificate that cannot be verified against standard CA bundles.
+  // To use full certificate validation, set PGSSLMODE=verify-full and provide
+  // PGSSLROOTCERT pointing to the provider's CA certificate bundle.
+  // Set PGSSLMODE=disable only for plain local Postgres (no SSL).
+  const sslMode = process.env.PGSSLMODE
+  let sslOption
+  if (sslMode === 'disable') {
+    sslOption = false
+  } else if (sslMode === 'verify-full') {
+    sslOption = { rejectUnauthorized: true }
+  } else {
+    // Default: require SSL but allow self-signed certs (Railway-compatible)
+    sslOption = { rejectUnauthorized: false }
+  }
+  _pgPool = new Pool({
+    connectionString,
+    max: 10,
+    ssl: sslOption,
+  })
   _isPg   = true
 
   // PostgreSQL-compatible schema (uses SERIAL instead of INTEGER PRIMARY KEY AUTOINCREMENT)
@@ -110,6 +131,27 @@ async function _initPostgres(connectionString) {
   await _pgPool.query(pgSchema)
 
   console.log('[dataStore] PostgreSQL initialized')
+}
+
+/**
+ * Verify the database connection by running a lightweight SELECT 1.
+ * Returns an object with { ok: boolean, latencyMs: number, error?: string }.
+ */
+async function testConnection() {
+  if (!_isPg && !_db) {
+    return { ok: false, error: 'Database not initialized' }
+  }
+  const start = Date.now()
+  try {
+    if (_isPg) {
+      await _pgPool.query('SELECT 1')
+    } else {
+      _db.prepare('SELECT 1').all()
+    }
+    return { ok: true, latencyMs: Date.now() - start }
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - start, error: err?.message }
+  }
 }
 
 // ── CRUD helpers ──────────────────────────────────────────────────────────────
@@ -179,4 +221,4 @@ function isReady() {
   return _isPg ? _pgPool !== null : _db !== null
 }
 
-module.exports = { initDatabase, insert, query, run, isReady }
+module.exports = { initDatabase, testConnection, insert, query, run, isReady }
