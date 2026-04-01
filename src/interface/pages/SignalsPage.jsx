@@ -629,7 +629,7 @@ export default function SignalsPage({ asset }) {
             Prix: ${maxPain.price?.toLocaleString('en-US', { maximumFractionDigits: 0 }) || '—'}
           </div>
           <div>
-            Prochaine échéance: {maxPain.expiry || '—'}
+            Prochaine échéance: {maxPain.expiryStr || (maxPain.expiry instanceof Date ? maxPain.expiry.toLocaleDateString('fr-FR') : '—')}
           </div>
         </div>
       )}
