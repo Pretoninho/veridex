@@ -7,7 +7,7 @@
  * Source : Deribit uniquement
  */
 import { useState, useEffect, useRef } from 'react'
-import * as deribit  from '../../data/providers/deribit.js'
+import { fetchDerivatives } from '../../api/backend.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -152,6 +152,7 @@ export default function DerivativesPage({ asset }) {
     futures:      [],
   })
   const [loading,    setLoading]    = useState(false)
+  const [error,      setError]      = useState(null)
   const [lastUpdate, setLastUpdate] = useState(null)
   const isMounted = useRef(true)
 
@@ -165,67 +166,35 @@ export default function DerivativesPage({ asset }) {
   const load = async () => {
     if (!isMounted.current) return
     setLoading(true)
+    setError(null)
     try {
-      const [
-        spotRes, dvolRes, dFundRes, dFundHistRes, dOIRes, instrRes,
-      ] = await Promise.allSettled([
-        deribit.getSpot(asset),
-        deribit.getDVOL(asset),
-        deribit.getFundingRate(asset),
-        deribit.getFundingRateHistory(asset, 30),
-        deribit.getOpenInterest(asset),
-        deribit.getInstruments(asset, 'future'),
-      ])
-
+      const data = await fetchDerivatives(asset)
       if (!isMounted.current) return
 
-      const spotPrice   = spotRes.status === 'fulfilled' ? spotRes.value?.price : null
-      const instruments = instrRes.status === 'fulfilled' ? (instrRes.value ?? []) : []
+      const futures = Array.isArray(data?.futures)
+        ? data.futures.map((r) => ({
+            ...r,
+            expiry: r.isPerp ? 'PERP' : (r.expiryTs ? fmtExpiry(r.expiryTs) : '—'),
+            days: r.isPerp ? null : (r.days ?? (r.expiryTs ? daysUntil(r.expiryTs) : null)),
+          }))
+        : []
 
-      // ── Structure à terme futures Deribit ────────────────────────────────
-      const futureRows = []
-      if (instruments.length > 0 && spotPrice) {
-        const tickerResults = await Promise.allSettled(
-          instruments.slice(0, 10).map(f => deribit.getTicker(f.instrument_name))
-        )
-        instruments.slice(0, 10).forEach((f, idx) => {
-          try {
-            const ticker = tickerResults[idx]?.status === 'fulfilled' ? tickerResults[idx].value : null
-            if (!ticker?.price) return
-            const isPerp   = f.instrument_name.includes('PERPETUAL')
-            const days     = isPerp ? null : daysUntil(f.expiration_timestamp)
-            const basis    = spotPrice ? (ticker.price - spotPrice) / spotPrice * 100 : null
-            const basisAnn = (!isPerp && basis != null && days) ? basis / days * 365 : null
-            futureRows.push({
-              name: f.instrument_name,
-              expiry: isPerp ? 'PERP' : fmtExpiry(f.expiration_timestamp),
-              price: ticker.price, days, basis, basisAnn, isPerp,
-            })
-          } catch (_) {}
-        })
-        futureRows.sort((a, b) => {
-          if (a.isPerp) return -1
-          if (b.isPerp) return 1
-          return (a.days ?? 9999) - (b.days ?? 9999)
-        })
-      }
-
-      if (!isMounted.current) return
-
-      const dvolRaw = dvolRes.status === 'fulfilled' ? dvolRes.value : null
-      const dvol = pickDvolCurrentTimeframe(dvolRaw)
+      const dvol = pickDvolCurrentTimeframe(data?.dvol)
 
       setState({
-        spot:         spotRes.status      === 'fulfilled' ? spotRes.value      : null,
+        spot:         data?.spot ?? null,
         dvol,
-        dFunding:     dFundRes.status     === 'fulfilled' ? dFundRes.value     : null,
-        dFundingHist: dFundHistRes.status === 'fulfilled' ? dFundHistRes.value : null,
-        dOI:          dOIRes.status       === 'fulfilled' ? dOIRes.value       : null,
-        futures:      futureRows,
+        dFunding:     data?.funding ?? null,
+        dFundingHist: data?.fundingHistory ?? null,
+        dOI:          data?.oi ?? null,
+        futures,
       })
       setLastUpdate(new Date())
     } catch (err) {
-      console.warn('DerivativesPage load error:', err)
+      if (isMounted.current) {
+        console.warn('DerivativesPage load error:', err)
+        setError(err?.message || 'Erreur de chargement des dérivés')
+      }
     }
     if (isMounted.current) setLoading(false)
   }
@@ -360,6 +329,12 @@ export default function DerivativesPage({ asset }) {
           </div>
         ))}
       </div>
+
+      {error && (
+        <div style={{ marginTop: 10, color: 'var(--put)', fontSize: 11 }}>
+          {error}
+        </div>
+      )}
 
       {/* ── Open Interest — 3 sous-sections ── */}
       <SectionTitle>Open Interest</SectionTitle>

@@ -34,6 +34,16 @@ export async function fetchSignals(asset) {
   return fetchJson(`/signals?asset=${encodeURIComponent(assetCode)}`)
 }
 
+export async function fetchMarket(asset) {
+  const assetCode = asset.toUpperCase()
+  return fetchJson(`/market?asset=${encodeURIComponent(assetCode)}`)
+}
+
+export async function fetchDerivatives(asset) {
+  const assetCode = asset.toUpperCase()
+  return fetchJson(`/market/derivatives?asset=${encodeURIComponent(assetCode)}`)
+}
+
 export function saveSignal(signal) {
   try {
     const history = JSON.parse(localStorage.getItem('veridex_signal_history') || '[]')

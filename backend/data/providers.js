@@ -136,6 +136,32 @@ function normalizeBinanceSentiment(asset, raw) {
   }
 }
 
+function normalizeDeribitFundingHistory(asset, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null
+
+  const history = rows
+    .map((row) => {
+      const rate8hRaw = row.interest_8h != null ? Number(row.interest_8h) : null
+      const rate8h = Number.isFinite(rate8hRaw) ? rate8hRaw * 100 : null
+      const rateAnn = rate8h != null ? rate8h * 3 * 365 : null
+      return {
+        timestamp: Number(row.timestamp) || Date.now(),
+        rate8h,
+        rateAnn,
+      }
+    })
+    .filter((r) => r.rate8h != null)
+
+  if (!history.length) return null
+
+  return {
+    source: 'deribit',
+    asset: asset.toUpperCase(),
+    history,
+    timestamp: Date.now(),
+  }
+}
+
 // ── Deribit providers ─────────────────────────────────────────────────────────
 
 /**
@@ -173,6 +199,23 @@ async function getFundingRate(asset) {
   })
   const raw = Array.isArray(results) ? results[0] : results
   return normalizeDeribitFunding(asset, raw)
+}
+
+/**
+ * Funding history of the perpetual contract.
+ * @param {'BTC'|'ETH'} asset
+ * @param {number} [count=90]
+ */
+async function getFundingRateHistory(asset, count = 90) {
+  const end = Date.now()
+  const start = end - count * 8 * 3600 * 1000
+  const result = await deribitFetch('get_funding_rate_history', {
+    instrument_name: `${asset}-PERPETUAL`,
+    start_timestamp: start,
+    end_timestamp: end,
+    count,
+  })
+  return normalizeDeribitFundingHistory(asset, result)
 }
 
 /**
@@ -328,4 +371,77 @@ async function getMarketData(asset) {
   })
 }
 
-module.exports = { getMarketData }
+/**
+ * Snapshot data for derivatives page.
+ * @param {'BTC'|'ETH'} asset
+ */
+async function getDerivativesData(asset) {
+  const [spotResult, dvolResult, fundingResult, fundingHistResult, oiResult, instrumentsResult] =
+    await Promise.allSettled([
+      getSpot(asset),
+      getDVOL(asset),
+      getFundingRate(asset),
+      getFundingRateHistory(asset, 30),
+      getOpenInterest(asset),
+      getInstruments(asset, 'future'),
+    ])
+
+  const spot = spotResult.status === 'fulfilled' ? spotResult.value : null
+  const dvol = dvolResult.status === 'fulfilled' ? dvolResult.value : null
+  const funding = fundingResult.status === 'fulfilled' ? fundingResult.value : null
+  const fundingHistory = fundingHistResult.status === 'fulfilled' ? fundingHistResult.value : null
+  const oi = oiResult.status === 'fulfilled' ? oiResult.value : null
+  const instruments = instrumentsResult.status === 'fulfilled' ? (instrumentsResult.value ?? []) : []
+
+  const spotPrice = spot?.price ?? null
+  const futuresCandidates = instruments.slice(0, 10)
+
+  const futurePrices = await Promise.allSettled(
+    futuresCandidates.map((f) => getFuturePrice(f.instrument_name))
+  )
+
+  const futures = futuresCandidates
+    .map((f, idx) => {
+      const priceResult = futurePrices[idx]
+      const price = priceResult?.status === 'fulfilled' ? priceResult.value : null
+      if (!Number.isFinite(price)) return null
+
+      const isPerp = f.instrument_name.includes('PERPETUAL')
+      const days = isPerp ? null : Math.max(1, Math.round((f.expiration_timestamp - Date.now()) / 86400000))
+      const basis = Number.isFinite(spotPrice) && spotPrice > 0
+        ? ((price - spotPrice) / spotPrice) * 100
+        : null
+      const basisAnn = !isPerp && basis != null && days
+        ? (basis / days) * 365
+        : null
+
+      return {
+        name: f.instrument_name,
+        expiryTs: isPerp ? null : f.expiration_timestamp,
+        isPerp,
+        days,
+        price,
+        basis,
+        basisAnn,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.isPerp) return -1
+      if (b.isPerp) return 1
+      return (a.days ?? 9999) - (b.days ?? 9999)
+    })
+
+  return {
+    asset: asset.toUpperCase(),
+    spot,
+    dvol,
+    funding,
+    fundingHistory,
+    oi,
+    futures,
+    timestamp: Date.now(),
+  }
+}
+
+module.exports = { getMarketData, getDerivativesData }
