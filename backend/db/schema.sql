@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS tickers (
   funding    DECIMAL(8,4),
   oi         DECIMAL(20,2),
   skew       DECIMAL(8,4),
+  basis      DECIMAL(8,4),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

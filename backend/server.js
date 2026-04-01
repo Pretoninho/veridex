@@ -13,6 +13,7 @@ const analyticsRouter = require('./routes/analytics')
 
 const store                              = require('./workers/dataStore')
 const { startDataCollector, getCollectorStatus } = require('./workers/dataCollector')
+const wsClient                           = require('./workers/deribitWsClient')
 
 const app  = express()
 const PORT = process.env.PORT ?? 3000
@@ -28,6 +29,7 @@ app.use(express.static(path.join(__dirname, '../dist')))
 
 app.get('/health', (req, res) => {
   const includeCollector = req.query.include_collector === 'true'
+  const includeWs        = req.query.include_ws === 'true'
   const body = {
     status:      MAINTENANCE_MODE ? 'maintenance' : 'ok',
     maintenance: MAINTENANCE_MODE,
@@ -36,8 +38,21 @@ app.get('/health', (req, res) => {
   if (includeCollector) {
     body.collector = getCollectorStatus()
   }
+  // include_ws=true surfaces WebSocket connection status (superset of include_collector)
+  if (includeWs) {
+    body.ws        = wsClient.getStatus()
+    body.collector = body.collector ?? getCollectorStatus()
+  }
   res.status(MAINTENANCE_MODE ? 503 : 200).json(body)
 })
+
+// ── Debug routes (development only) ─────────────────────────────────────────
+
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/debug/ws/subscriptions', (_req, res) => {
+    res.json(wsClient.getStatus())
+  })
+}
 
 // Bloc toutes les routes API pendant la maintenance
 if (MAINTENANCE_MODE) {
