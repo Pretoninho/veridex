@@ -450,7 +450,7 @@ export default function SignalsPage({ asset }) {
     )
   }
 
-  if (error) {
+  if (error && !signal) {
     return (
       <div style={{ padding: '20px', color: 'var(--put)', fontSize: 12 }}>
         Erreur: {error}
@@ -476,6 +476,20 @@ export default function SignalsPage({ asset }) {
 
   return (
     <div style={{ padding: '16px', height: '100%', overflowY: 'auto' }}>
+
+      {error && (
+        <div style={{
+          marginBottom: 12,
+          padding: '10px 12px',
+          borderRadius: 8,
+          fontSize: 11,
+          color: 'var(--put)',
+          border: '1px solid rgba(255,77,109,.35)',
+          background: 'rgba(255,77,109,.08)',
+        }}>
+          Mise a jour temporairement indisponible: {error}
+        </div>
+      )}
 
       {/* Asset selector */}
       <div style={{ marginBottom: 20, display: 'flex', gap: 8 }}>
