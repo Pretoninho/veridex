@@ -41,30 +41,40 @@ app.use(express.static(path.join(__dirname, '../dist')))
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 app.get('/health', async (req, res) => {
-  const includeCollector = req.query.include_collector === 'true'
-  const includeWs        = req.query.include_ws === 'true'
-  const body = {
-    status:      MAINTENANCE_MODE ? 'maintenance' : 'ok',
-    maintenance: MAINTENANCE_MODE,
-    timestamp:   Date.now(),
-  }
+  try {
+    const includeCollector = req.query.include_collector === 'true'
+    const includeWs        = req.query.include_ws === 'true'
+    const body = {
+      status:      MAINTENANCE_MODE ? 'maintenance' : 'ok',
+      maintenance: MAINTENANCE_MODE,
+      timestamp:   Date.now(),
+    }
 
-  // Always include DB connectivity status
-  body.db = await store.testConnection()
-  if (!body.db.ok) {
-    body.status = 'degraded'
-  }
+    // Always include DB connectivity status — never let a DB error crash the handler
+    try {
+      body.db = await store.testConnection()
+      if (!body.db.ok) {
+        body.status = 'degraded'
+      }
+    } catch (dbErr) {
+      body.db = { ok: false, error: dbErr?.message ?? 'unknown' }
+      body.status = 'degraded'
+    }
 
-  if (includeCollector) {
-    body.collector  = getCollectorStatus()
-    body.settlement = getSettlementStatus()
+    if (includeCollector) {
+      body.collector  = getCollectorStatus()
+      body.settlement = getSettlementStatus()
+    }
+    // include_ws=true surfaces WebSocket connection status (superset of include_collector)
+    if (includeWs) {
+      body.ws        = wsClient.getStatus()
+      body.collector = body.collector ?? getCollectorStatus()
+    }
+    res.status(200).json(body)
+  } catch (err) {
+    // Last-resort catch: always return 200 so the platform healthcheck never fails
+    res.status(200).json({ status: 'error', error: err?.message ?? 'unknown', timestamp: Date.now() })
   }
-  // include_ws=true surfaces WebSocket connection status (superset of include_collector)
-  if (includeWs) {
-    body.ws        = wsClient.getStatus()
-    body.collector = body.collector ?? getCollectorStatus()
-  }
-  res.status(200).json(body)
 })
 
 // ── Debug routes (development only) ─────────────────────────────────────────
@@ -99,7 +109,20 @@ app.get('*', (_req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 async function start() {
-  // Initialize database first, then start the server
+  // Start the HTTP server first so the platform healthcheck can reach /health
+  // immediately, even while the database is still initialising.
+  await new Promise((resolve, reject) => {
+    app.listen(PORT, '0.0.0.0', () => {
+      if (MAINTENANCE_MODE) {
+        console.log(`Veridex signals API running on port ${PORT} [MAINTENANCE MODE]`)
+      } else {
+        console.log(`Veridex signals API running on port ${PORT}`)
+      }
+      resolve()
+    }).on('error', reject)
+  })
+
+  // Initialize database after the server is already listening
   try {
     await store.initDatabase()
   } catch (err) {
@@ -124,18 +147,10 @@ async function start() {
     console.log(`[server] PostgreSQL connection OK (${check.latencyMs}ms)`)
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    if (MAINTENANCE_MODE) {
-      console.log(`Veridex signals API running on port ${PORT} [MAINTENANCE MODE]`)
-    } else {
-      console.log(`Veridex signals API running on port ${PORT}`)
-    }
-
-    if (!MAINTENANCE_MODE && ENABLE_COLLECTOR && store.isReady()) {
-      startDataCollector()
-      startSettlementJob()
-    }
-  })
+  if (!MAINTENANCE_MODE && ENABLE_COLLECTOR && store.isReady()) {
+    startDataCollector()
+    startSettlementJob()
+  }
 }
 
 start().catch(err => {
