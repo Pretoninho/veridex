@@ -49,6 +49,38 @@ function _initSqlite() {
   const schema = fs.readFileSync(path.join(__dirname, '../db/schema.sql'), 'utf8')
   _db.exec(schema)
 
+  // Migration: add new columns to existing tables that predate the current schema.
+  // SQLite's ALTER TABLE does not support IF NOT EXISTS before 3.35.0, so each
+  // statement is wrapped in a try-catch — a "duplicate column" error is silently
+  // ignored while any other error is re-thrown.
+  const migrations = [
+    // signals table
+    `ALTER TABLE signals ADD COLUMN direction  VARCHAR(10)`,
+    `ALTER TABLE signals ADD COLUMN vol_source VARCHAR(10)`,
+    `ALTER TABLE signals ADD COLUMN vol_ann    DECIMAL(10,6)`,
+    `ALTER TABLE signals ADD COLUMN k          DECIMAL(5,3)`,
+    // outcomes table
+    `ALTER TABLE outcomes ADD COLUMN threshold_1h  DECIMAL(10,6)`,
+    `ALTER TABLE outcomes ADD COLUMN label_1h      VARCHAR(10)`,
+    `ALTER TABLE outcomes ADD COLUMN threshold_4h  DECIMAL(10,6)`,
+    `ALTER TABLE outcomes ADD COLUMN label_4h      VARCHAR(10)`,
+    `ALTER TABLE outcomes ADD COLUMN threshold_24h DECIMAL(10,6)`,
+    `ALTER TABLE outcomes ADD COLUMN label_24h     VARCHAR(10)`,
+    `ALTER TABLE outcomes ADD COLUMN updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+  ]
+
+  for (const sql of migrations) {
+    try {
+      _db.exec(sql)
+    } catch (err) {
+      // SQLite error code 1 with "duplicate column name" means the column
+      // already exists — safe to ignore.  Any other error is a real problem.
+      if (!err.message.includes('duplicate column name')) {
+        throw err
+      }
+    }
+  }
+
   console.log(`[dataStore] SQLite initialized at ${dbFile}`)
 }
 
