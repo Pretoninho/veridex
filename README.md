@@ -32,11 +32,17 @@ Plateforme PWA pour l’analyse des marchés crypto dérivés (focus Deribit, BT
   - `GET /signals?asset=BTC|ETH`
   - `GET /signals?assets=BTC,ETH`
   - `GET /market?asset=BTC|ETH`
+  - `GET /analytics/stats?asset=BTC&days=7`
+  - `GET /analytics/export?asset=BTC&type=signals&format=csv&days=30`
 - **Services actifs**:
   - `backend/services/dataCore.js`
   - `backend/services/signalEngine.js`
   - `backend/data/providers.js`
   - `backend/utils/cache.js`
+- **Workers actifs**:
+  - `backend/workers/dataStore.js` — couche de persistance SQLite/PostgreSQL
+  - `backend/workers/settlementJob.js` — settlement périodique des signaux (horizons 1h/4h/24h)
+  - `backend/workers/dataCollector.js` — collecte de tickers en temps réel
 
 ### Modules cœur actifs (frontend)
 
@@ -116,6 +122,9 @@ Backend (Express)
     -> /health
     -> /signals (dataCore + signalEngine)
     -> /market  (providers)
+    -> /analytics/stats  (settlement outcomes DB)
+    -> /analytics/export (CSV/JSON export)
+    -> workers: dataCollector, settlementJob (SQLite / PostgreSQL)
 ```
 
 ---
@@ -126,16 +135,40 @@ Backend (Express)
 - Node.js >= 24
 - npm >= 10
 
-### Dev
+### Dev (frontend + backend séparés)
 
 ```bash
-npm install
+# Installer les dépendances frontend et backend
+npm install          # installe aussi backend/node_modules via le hook postinstall
+
+# Démarrer le frontend Vite en mode dev (hot-reload)
 npm run dev
 
+# Dans un second terminal — démarrer le backend Express
 cd backend
-npm install
-npm run dev
+npm run dev          # node --watch server.js (rechargement auto)
 ```
+
+### Mode production complet (npm start)
+
+`npm start` sert le frontend compilé **et** l'API Express sur le même port.
+Il faut d'abord construire le frontend :
+
+```bash
+# 1. Installer les dépendances (frontend + backend)
+npm install
+
+# 2. Construire le frontend (génère dist/)
+npm run build
+
+# 3. Démarrer le serveur (API + frontend statique)
+npm start
+# ou avec le collecteur de données activé :
+ENABLE_COLLECTOR=true npm start
+```
+
+> **Note** : si vous omettez `npm run build`, le serveur démarre mais renvoie
+> `ENOENT: no such file or directory, stat 'dist/index.html'` sur les routes frontend.
 
 ### Build / tests
 
@@ -144,6 +177,18 @@ npm run build
 npm test
 ./test-refactor.sh
 ```
+
+### Configuration base de données (optionnel)
+
+Sans `DATABASE_URL`, le backend utilise automatiquement SQLite local (`backend/data/veridex.db`).
+Pour utiliser PostgreSQL, copiez `.env.example` en `.env` et renseignez `DATABASE_URL` :
+
+```bash
+cp .env.example .env
+# Modifier DATABASE_URL=postgresql://user:password@host:5432/veridex
+```
+
+Voir `.env.example` pour la liste complète des variables d'environnement disponibles.
 
 ---
 
@@ -182,6 +227,8 @@ rg "<NomModule>|from '.*<nom_module>'|require\('.*<nom_module>'\)" src backend
 curl -s http://localhost:3000/health
 curl -s "http://localhost:3000/signals?asset=BTC"
 curl -s "http://localhost:3000/market?asset=BTC"
+curl -s "http://localhost:3000/analytics/stats?asset=BTC&days=7"
+curl -s "http://localhost:3000/analytics/export?asset=BTC&type=signals&format=json&days=7"
 ```
 
 ### D. Garde-fous CI locaux
