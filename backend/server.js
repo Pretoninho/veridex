@@ -13,6 +13,21 @@ const analyticsRouter = require('./routes/analytics')
 
 const store                              = require('./workers/dataStore')
 const { startDataCollector, getCollectorStatus } = require('./workers/dataCollector')
+const { startSettlementJob, getSettlementStatus } = require('./workers/settlementJob')
+const wsClient                           = require('./workers/deribitWsClient')
+const { startSettlementJob, getSettlementStatus } = require('./workers/settlementJob')
+
+// ── Prod-strict: validate DATABASE_URL before anything else ──────────────────
+
+const IS_PROD_STRICT = process.env.NODE_ENV === 'production'
+
+if (IS_PROD_STRICT && !process.env.DATABASE_URL) {
+  console.error(
+    '[server] FATAL: NODE_ENV=production requires DATABASE_URL to be set. ' +
+    'Please configure a PostgreSQL connection string and restart.',
+  )
+  process.exit(1)
+}
 
 const app  = express()
 const PORT = process.env.PORT ?? 3000
@@ -26,18 +41,40 @@ app.use(express.static(path.join(__dirname, '../dist')))
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   const includeCollector = req.query.include_collector === 'true'
+  const includeWs        = req.query.include_ws === 'true'
   const body = {
     status:      MAINTENANCE_MODE ? 'maintenance' : 'ok',
     maintenance: MAINTENANCE_MODE,
     timestamp:   Date.now(),
   }
+
+  // Always include DB connectivity status
+  body.db = await store.testConnection()
+  if (!body.db.ok) {
+    body.status = 'degraded'
+  }
+
   if (includeCollector) {
-    body.collector = getCollectorStatus()
+    body.collector  = getCollectorStatus()
+    body.settlement = getSettlementStatus()
+  }
+  // include_ws=true surfaces WebSocket connection status (superset of include_collector)
+  if (includeWs) {
+    body.ws        = wsClient.getStatus()
+    body.collector = body.collector ?? getCollectorStatus()
   }
   res.status(MAINTENANCE_MODE ? 503 : 200).json(body)
 })
+
+// ── Debug routes (development only) ─────────────────────────────────────────
+
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/debug/ws/subscriptions', (_req, res) => {
+    res.json(wsClient.getStatus())
+  })
+}
 
 // Bloc toutes les routes API pendant la maintenance
 if (MAINTENANCE_MODE) {
@@ -67,8 +104,25 @@ async function start() {
   try {
     await store.initDatabase()
   } catch (err) {
-    console.error('[server] Database initialization failed:', err?.message)
-    // Non-fatal — server still starts without persistence
+    if (IS_PROD_STRICT) {
+      console.error('[server] FATAL: Database initialization failed:', err?.message)
+      process.exit(1)
+    }
+    console.error('[server] Database initialization failed (non-fatal in dev):', err?.message)
+  }
+
+  // In production, verify the DB connection with SELECT 1 before accepting traffic
+  if (IS_PROD_STRICT && store.isReady()) {
+    const check = await store.testConnection()
+    if (!check.ok) {
+      console.error(
+        '[server] FATAL: PostgreSQL connection test failed:',
+        check.error,
+        '— Check DATABASE_URL and network access.',
+      )
+      process.exit(1)
+    }
+    console.log(`[server] PostgreSQL connection OK (${check.latencyMs}ms)`)
   }
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -80,6 +134,7 @@ async function start() {
 
     if (!MAINTENANCE_MODE && ENABLE_COLLECTOR && store.isReady()) {
       startDataCollector()
+      startSettlementJob()
     }
   })
 }

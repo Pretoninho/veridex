@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS tickers (
   funding    DECIMAL(8,4),
   oi         DECIMAL(20,2),
   skew       DECIMAL(8,4),
+  basis      DECIMAL(8,4),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -27,6 +28,10 @@ CREATE TABLE IF NOT EXISTS signals (
   outcome_price     DECIMAL(20,8),
   outcome_timestamp BIGINT,
   pnl               DECIMAL(10,4),
+  direction         VARCHAR(10),
+  vol_source        VARCHAR(10),
+  vol_ann           DECIMAL(10,6),
+  k                 DECIMAL(5,3),
   created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -42,7 +47,14 @@ CREATE TABLE IF NOT EXISTS outcomes (
   move_1h_pct      DECIMAL(8,4),
   move_4h_pct      DECIMAL(8,4),
   move_24h_pct     DECIMAL(8,4),
-  settled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  threshold_1h     DECIMAL(10,6),
+  label_1h         VARCHAR(10),
+  threshold_4h     DECIMAL(10,6),
+  label_4h         VARCHAR(10),
+  threshold_24h    DECIMAL(10,6),
+  label_24h        VARCHAR(10),
+  settled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_outcomes_signal_id ON outcomes (signal_id);

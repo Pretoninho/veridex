@@ -54,7 +54,28 @@ function _initSqlite() {
 
 async function _initPostgres(connectionString) {
   const { Pool } = require('pg')
-  _pgPool = new Pool({ connectionString, max: 10 })
+
+  // SSL is required on Railway and most managed Postgres providers.
+  // `rejectUnauthorized: false` is intentional: Railway's Postgres uses a
+  // self-signed certificate that cannot be verified against standard CA bundles.
+  // To use full certificate validation, set PGSSLMODE=verify-full and provide
+  // PGSSLROOTCERT pointing to the provider's CA certificate bundle.
+  // Set PGSSLMODE=disable only for plain local Postgres (no SSL).
+  const sslMode = process.env.PGSSLMODE
+  let sslOption
+  if (sslMode === 'disable') {
+    sslOption = false
+  } else if (sslMode === 'verify-full') {
+    sslOption = { rejectUnauthorized: true }
+  } else {
+    // Default: require SSL but allow self-signed certs (Railway-compatible)
+    sslOption = { rejectUnauthorized: false }
+  }
+  _pgPool = new Pool({
+    connectionString,
+    max: 10,
+    ssl: sslOption,
+  })
   _isPg   = true
 
   // PostgreSQL-compatible schema (uses SERIAL instead of INTEGER PRIMARY KEY AUTOINCREMENT)
@@ -68,6 +89,7 @@ async function _initPostgres(connectionString) {
       funding    DECIMAL(8,4),
       oi         DECIMAL(20,2),
       skew       DECIMAL(8,4),
+      basis      DECIMAL(8,4),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -85,10 +107,15 @@ async function _initPostgres(connectionString) {
       outcome_price     DECIMAL(20,8),
       outcome_timestamp BIGINT,
       pnl               DECIMAL(10,4),
+      direction         VARCHAR(10),
+      vol_source        VARCHAR(10),
+      vol_ann           DECIMAL(10,6),
+      k                 DECIMAL(5,3),
       created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS idx_signals_asset_ts ON signals (asset, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_signals_asset_direction ON signals (asset, direction);
 
     CREATE TABLE IF NOT EXISTS outcomes (
       id               SERIAL PRIMARY KEY,
@@ -100,15 +127,57 @@ async function _initPostgres(connectionString) {
       move_1h_pct      DECIMAL(8,4),
       move_4h_pct      DECIMAL(8,4),
       move_24h_pct     DECIMAL(8,4),
-      settled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      threshold_1h     DECIMAL(10,6),
+      label_1h         VARCHAR(10),
+      threshold_4h     DECIMAL(10,6),
+      label_4h         VARCHAR(10),
+      threshold_24h    DECIMAL(10,6),
+      label_24h        VARCHAR(10),
+      settled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS idx_outcomes_signal_id ON outcomes (signal_id);
+
+    -- Migration: add new columns to existing tables (safe to run on each startup)
+    ALTER TABLE signals ADD COLUMN IF NOT EXISTS direction  VARCHAR(10);
+    ALTER TABLE signals ADD COLUMN IF NOT EXISTS vol_source VARCHAR(10);
+    ALTER TABLE signals ADD COLUMN IF NOT EXISTS vol_ann    DECIMAL(10,6);
+    ALTER TABLE signals ADD COLUMN IF NOT EXISTS k          DECIMAL(5,3);
+
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_1h  DECIMAL(10,6);
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_1h      VARCHAR(10);
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_4h  DECIMAL(10,6);
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_4h      VARCHAR(10);
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_24h DECIMAL(10,6);
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_24h     VARCHAR(10);
+    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
   `
 
   await _pgPool.query(pgSchema)
 
   console.log('[dataStore] PostgreSQL initialized')
+}
+
+/**
+ * Verify the database connection by running a lightweight SELECT 1.
+ * Returns an object with { ok: boolean, latencyMs: number, error?: string }.
+ */
+async function testConnection() {
+  if (!_isPg && !_db) {
+    return { ok: false, error: 'Database not initialized' }
+  }
+  const start = Date.now()
+  try {
+    if (_isPg) {
+      await _pgPool.query('SELECT 1')
+    } else {
+      _db.prepare('SELECT 1').all()
+    }
+    return { ok: true, latencyMs: Date.now() - start }
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - start, error: err?.message }
+  }
 }
 
 // ── CRUD helpers ──────────────────────────────────────────────────────────────
@@ -178,4 +247,4 @@ function isReady() {
   return _isPg ? _pgPool !== null : _db !== null
 }
 
-module.exports = { initDatabase, insert, query, run, isReady }
+module.exports = { initDatabase, testConnection, insert, query, run, isReady }
