@@ -4,6 +4,7 @@ import LandingPage    from './pages/LandingPage.jsx'
 import MarketPage     from './pages/MarketPage.jsx'
 import DerivativesPage from './pages/DerivativesPage.jsx'
 import SignalsPage    from './pages/SignalsPage.jsx'
+import PerformancePage from './pages/PerformancePage.jsx'
 import ClockStatus    from './components/ClockStatus.jsx'
 import NavDrawer      from './components/NavDrawer.jsx'
 import VLogo          from './components/VLogo.jsx'
@@ -49,9 +50,10 @@ const MAINTENANCE_MODE = import.meta.env.VITE_MAINTENANCE_MODE === 'true'
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const PAGE_NAMES = {
-  market:  'Market',
-  deriv:   'Dérivés',
-  signals: 'Signaux',
+  market:      'Market',
+  deriv:       'Dérivés',
+  signals:     'Signaux',
+  performance: 'Performance',
 }
 
 function getNextFundingCountdown() {
@@ -137,9 +139,10 @@ export default function App() {
 
       {/* Contenu des pages */}
       <div className="app-content">
-        {tab === 'market'  && <MarketPage      asset={asset} />}
-        {tab === 'deriv'   && <DerivativesPage asset={asset} />}
-        {tab === 'signals' && <SignalsPage     asset={asset} />}
+        {tab === 'market'      && <MarketPage      asset={asset} />}
+        {tab === 'deriv'       && <DerivativesPage asset={asset} />}
+        {tab === 'signals'     && <SignalsPage     asset={asset} />}
+        {tab === 'performance' && <PerformancePage asset={asset} />}
         <VersionBar version={version} forceUpdate={forceUpdate} />
       </div>
 

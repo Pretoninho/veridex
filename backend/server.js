@@ -14,6 +14,7 @@ const analyticsRouter = require('./routes/analytics')
 const store                              = require('./workers/dataStore')
 const { startDataCollector, getCollectorStatus } = require('./workers/dataCollector')
 const wsClient                           = require('./workers/deribitWsClient')
+const { startSettlementJob, getSettlementStatus } = require('./workers/settlementJob')
 
 // ── Prod-strict: validate DATABASE_URL before anything else ──────────────────
 
@@ -55,7 +56,8 @@ app.get('/health', async (req, res) => {
   }
 
   if (includeCollector) {
-    body.collector = getCollectorStatus()
+    body.collector  = getCollectorStatus()
+    body.settlement = getSettlementStatus()
   }
   // include_ws=true surfaces WebSocket connection status (superset of include_collector)
   if (includeWs) {
@@ -131,6 +133,7 @@ async function start() {
 
     if (!MAINTENANCE_MODE && ENABLE_COLLECTOR && store.isReady()) {
       startDataCollector()
+      startSettlementJob()
     }
   })
 }

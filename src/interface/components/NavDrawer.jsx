@@ -55,12 +55,23 @@ function IconSignals() {
   )
 }
 
+function IconPerformance() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18"/>
+      <polyline points="7 16 11 12 15 14 21 8"/>
+    </svg>
+  )
+}
+
 // ── Items de navigation ───────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { id: 'market',  label: 'Market',  sub: 'Prix · Liquidité · OI',           Icon: IconMarket  },
-  { id: 'deriv',   label: 'Dérivés', sub: 'Funding · Basis · DVOL · Futures', Icon: IconDeriv   },
-  { id: 'signals', label: 'Signaux', sub: 'Score 4-composantes · Alertes',    Icon: IconSignals },
+  { id: 'market',      label: 'Market',      sub: 'Prix · Liquidité · OI',              Icon: IconMarket      },
+  { id: 'deriv',       label: 'Dérivés',     sub: 'Funding · Basis · DVOL · Futures',   Icon: IconDeriv       },
+  { id: 'signals',     label: 'Signaux',     sub: 'Score 4-composantes · Alertes',      Icon: IconSignals     },
+  { id: 'performance', label: 'Performance', sub: 'Edge · Equity · Export · Validation', Icon: IconPerformance },
 ]
 
 // ── Composant ─────────────────────────────────────────────────────────────────
