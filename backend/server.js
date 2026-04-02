@@ -33,7 +33,25 @@ const PORT = process.env.PORT ?? 3000
 const MAINTENANCE_MODE    = process.env.MAINTENANCE_MODE === 'true'
 const ENABLE_COLLECTOR    = process.env.ENABLE_COLLECTOR === 'true'
 
-app.use(cors())
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'https://pretoninho.github.io',
+      'http://localhost:3000',
+      'http://localhost:5173',
+      /^https:\/\/veridex-.*\.railway\.app$/,  // Railway previews
+    ]
+    
+    if (!origin || allowedOrigins.some(ao => 
+      typeof ao === 'string' ? ao === origin : ao.test(origin)
+    )) {
+      callback(null, true)
+    } else {
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
+  credentials: true,
+}))
 app.use(express.json())
 app.use(express.static(path.join(__dirname, '../dist')))
 
