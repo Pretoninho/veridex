@@ -214,46 +214,48 @@ function _volSourceBreakdown(rows) {
 }
 
 /**
- * Build legacy (pnl-based) stats from all signal rows.
- * Wraps _computeMetrics by extracting the pnl column.
+ * Build stats from all signal rows, using the requested horizon's outcome return.
  *
- * @param {object[]} rows      - signal rows with optional pnl field
- * @param {number}   windowMs  - lookback window in ms (for exposure_time_pct)
- * @returns {{ total_signals: number, settled_signals: number, win_rate: number|null,
- *             avg_return: number|null, avg_gain: number|null, avg_loss: number|null,
- *             sharpe_ratio: number|null, max_drawdown: number|null,
- *             trade_count: number, exposure_time_pct: number|null,
- *             confidence_interval_95: [number,number]|null, equity_curve: number[] }}
- */
-function _computeStats(rows, windowMs = 0) {
-  const withPnl = rows.filter(r => r.pnl != null)
-  const returns = withPnl.map(r => Number(r.pnl))
-  return _computeMetrics(returns, windowMs, rows.length)
-}
-
-// ── Route ─────────────────────────────────────────────────────────────────────
-
-/**
- * Compute legacy (pnl-based) stats from a list of signal rows.
- * @param {object[]} rows       - signal rows from the DB query
- * @param {number}   [windowMs] - analysis window in milliseconds (for exposure_time_pct); defaults to 0
+ * Falls back gracefully:
+ *   1. Uses `pnl` from the signals row if present (legacy path).
+ *   2. Falls back to `move_{horizon}_pct` from the joined outcomes row.
+ *
+ * This ensures `settled_signals` > 0 once the settlement job has run and
+ * populated the `outcomes` table — even when `signals.pnl` is never set.
+ *
+ * @param {object[]} rows       - signal rows joined with outcomes (LEFT JOIN)
+ * @param {number}   [windowMs] - analysis window in ms (for exposure_time_pct); defaults to 0
+ * @param {string}   [horizon]  - '1h' | '4h' | '24h' (default '4h')
  * @returns {object}
  */
-function _computeStats(rows, windowMs) {
+function _computeStats(rows, windowMs = 0, horizon = '4h') {
+  const moveKey = `move_${horizon}_pct`
   const returns = rows
-    .map(r => (r.pnl != null ? Number(r.pnl) : null))
-    .filter(v => v != null && Number.isFinite(v))
+    .map(r => {
+      if (r.pnl != null && Number.isFinite(Number(r.pnl))) return Number(r.pnl)
+      if (r[moveKey] != null && Number.isFinite(Number(r[moveKey]))) return Number(r[moveKey])
+      return null
+    })
+    .filter(v => v !== null)
   return _computeMetrics(returns, windowMs ?? 0, rows.length)
 }
 
 /**
- * Build confusion matrix: counts per signal_type x outcome.
+ * Build confusion matrix: counts per signal_type × outcome label for the given horizon.
+ *
+ * Uses `label_{horizon}` from the outcomes table (already joined into rows).
+ * Falls back to 'UNSETTLED' when the outcome has not been settled yet.
+ *
+ * @param {object[]} rows    - signal+outcome joined rows
+ * @param {string}   horizon - '1h' | '4h' | '24h' (default '4h')
+ * @returns {object}
  */
-function _confusionMatrix(rows) {
+function _confusionMatrix(rows, horizon = '4h') {
+  const labelKey = `label_${horizon}`
   const matrix = {}
   for (const row of rows) {
     const type    = row.signal_type ?? 'UNKNOWN'
-    const outcome = row.outcome     ?? 'UNSETTLED'
+    const outcome = row[labelKey]   ?? 'UNSETTLED'
     if (!matrix[type]) matrix[type] = { WIN: 0, LOSS: 0, FLAT: 0, UNSETTLED: 0 }
     matrix[type][outcome] = (matrix[type][outcome] ?? 0) + 1
   }
@@ -301,8 +303,8 @@ router.get('/stats', async (req, res) => {
       [asset, since],
     )
 
-    // Legacy stats (pnl-based)
-    const legacyStats = _computeStats(rows, windowMs)
+    // Top-level stats: use the requested horizon's outcome return (fallback from pnl)
+    const legacyStats = _computeStats(rows, windowMs, horizon)
 
     // Directional signals only (direction != null) for horizon stats
     const directional = rows.filter(r => r.direction != null)
@@ -328,6 +330,9 @@ router.get('/stats', async (req, res) => {
 
       // Breakdown by vol source (DVOL / RV)
       by_vol_source: _volSourceBreakdown(directional),
+
+      // Confusion matrix: signal_type × outcome label
+      confusion_matrix: _confusionMatrix(rows, horizon),
 
       last_update: new Date().toISOString(),
       cached: false,
@@ -458,4 +463,13 @@ router.get('/export', async (req, res) => {
 })
 
 module.exports = router
+
+// Export computation helpers for unit testing (underscore prefix = internal API)
+module.exports._sharpe                = _sharpe
+module.exports._maxDrawdown           = _maxDrawdown
+module.exports._confidenceInterval95  = _confidenceInterval95
+module.exports._computeMetrics        = _computeMetrics
+module.exports._horizonStats          = _horizonStats
+module.exports._computeStats          = _computeStats
+module.exports._confusionMatrix       = _confusionMatrix
 
