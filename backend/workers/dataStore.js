@@ -41,6 +41,16 @@ function _initSqlite() {
     fs.mkdirSync(dbDir, { recursive: true })
   }
 
+  // Delete any existing database file so the app always starts with a fresh
+  // schema.  SQLite is stored on ephemeral container storage (no persistent
+  // volume), so there is no data worth preserving across deployments.  Stale
+  // files from previous deployments cause "column does not exist" errors when
+  // the schema has evolved but the old file is reused instead of recreated.
+  if (fs.existsSync(dbFile)) {
+    fs.unlinkSync(dbFile)
+    console.log(`[dataStore] Removed stale database file at ${dbFile}`)
+  }
+
   _db   = new Database(dbFile)
   _isPg = false
 
