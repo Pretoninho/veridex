@@ -47,18 +47,88 @@ let _errorCount = 0
 function _ts() { return new Date().toISOString() }
 
 /**
+ * Returns true when all three horizon labels on an outcome row are non-null
+ * (WIN, LOSS, or FLAT) — meaning there is nothing left to settle.
+ * @param {object|null|undefined} outcome
+ * @returns {boolean}
+ */
+function _isFullySettled(outcome) {
+  return outcome?.label_1h != null && outcome?.label_4h != null && outcome?.label_24h != null
+}
+
+/**
+ * Returns the first ticker row with timestamp >= targetTs from a pre-sorted
+ * array, or null if none exists. O(n) linear scan — array is small in practice.
+ *
+ * @param {Array<{timestamp: number, spot: number}>} sorted — ascending by timestamp
+ * @param {number} targetTs
+ * @returns {{spot: number}|null}
+ */
+function _findTickerAtOrAfter(sorted, targetTs) {
+  for (const tick of sorted) {
+    if (Number(tick.timestamp) >= targetTs) return tick
+  }
+  return null
+}
+
+/**
+ * For each unsettled (signal × horizon) pair, collect the minimum target
+ * timestamp per asset, then fetch all tickers for each asset in a single
+ * query.  Returns a Map<asset, sortedTickers[]>.
+ *
+ * @param {Array} signals
+ * @param {Map<number, object>} outcomeMap
+ * @param {number} now
+ * @returns {Promise<Map<string, Array<{timestamp: number, spot: number}>>>}
+ */
+async function _batchFetchTickers(signals, outcomeMap, now) {
+  // Collect the minimum targetTs needed per asset.
+  const assetMinTs = new Map()
+
+  for (const sig of signals) {
+    const existing = outcomeMap.get(Number(sig.id)) ?? null
+    if (_isFullySettled(existing)) continue
+
+    for (const h of HORIZONS) {
+      const targetTs = Number(sig.timestamp) + h.ms
+      if (targetTs > now) continue
+      if (existing?.[`label_${h.key}`] != null) continue
+
+      const current = assetMinTs.get(sig.asset)
+      if (current === undefined || targetTs < current) {
+        assetMinTs.set(sig.asset, targetTs)
+      }
+    }
+  }
+
+  const tickersByAsset = new Map()
+
+  for (const [asset, minTs] of assetMinTs) {
+    const rows = await store.query(
+      'SELECT timestamp, spot FROM tickers WHERE asset = ? AND timestamp >= ? ORDER BY timestamp ASC',
+      [asset, minTs],
+    )
+    tickersByAsset.set(asset, rows)
+  }
+
+  return tickersByAsset
+}
+
+/**
  * Settle a single signal for all eligible, unsettled horizons.
  *
- * @param {object} sig          - signal row (id, asset, timestamp, trigger_price, direction, vol_ann, k)
- * @param {object|null} outcome - existing outcomes row (may be null or partial)
- * @param {number} now          - current epoch ms
+ * @param {object} sig             - signal row (id, asset, timestamp, trigger_price, direction, vol_ann, k)
+ * @param {object|null} outcome    - existing outcomes row (may be null or partial)
+ * @param {number} now             - current epoch ms
+ * @param {Map<string, Array>} tickersByAsset - pre-fetched ticker rows keyed by asset
  */
-async function _settleSignal(sig, outcome, now) {
+async function _settleSignal(sig, outcome, now, tickersByAsset) {
   const triggerPrice = Number(sig.trigger_price)
   const volAnn       = sig.vol_ann != null ? Number(sig.vol_ann) : null
   const k            = sig.k       != null ? Number(sig.k)       : DEFAULT_K
 
   const updates = {}
+  const assetTickers = tickersByAsset.get(sig.asset) ?? []
 
   for (const h of HORIZONS) {
     // Skip if this horizon's target time has not elapsed yet
@@ -69,14 +139,11 @@ async function _settleSignal(sig, outcome, now) {
     if (outcome?.[`label_${h.key}`] != null) continue
 
     // Find the closest ticker at or after the target timestamp
-    const ticks = await store.query(
-      'SELECT spot FROM tickers WHERE asset = ? AND timestamp >= ? ORDER BY timestamp ASC LIMIT 1',
-      [sig.asset, targetTs],
-    )
+    const tick = _findTickerAtOrAfter(assetTickers, targetTs)
 
-    if (!ticks.length || ticks[0].spot == null) continue
+    if (!tick || tick.spot == null) continue
 
-    const priceH    = Number(ticks[0].spot)
+    const priceH    = Number(tick.spot)
     const ret       = (priceH - triggerPrice) / triggerPrice          // decimal
     const retPct    = ret * 100                                       // percent
     const threshold = volAnn != null ? computeThreshold(volAnn, h.days, k) : null
@@ -146,15 +213,18 @@ async function _run() {
 
     const outcomeMap = new Map(existingOutcomes.map(o => [Number(o.signal_id), o]))
 
+    // Pre-fetch all required ticker rows in one query per asset.
+    const tickersByAsset = await _batchFetchTickers(signals, outcomeMap, now)
+
     let settled = 0
     for (const sig of signals) {
       const existing = outcomeMap.get(Number(sig.id)) ?? null
 
       // Skip fully settled signals (all three horizon labels are non-null — including FLAT)
-      if (existing?.label_1h != null && existing?.label_4h != null && existing?.label_24h != null) continue
+      if (_isFullySettled(existing)) continue
 
       try {
-        await _settleSignal(sig, existing, now)
+        await _settleSignal(sig, existing, now, tickersByAsset)
         settled++
       } catch (err) {
         _errorCount++

@@ -141,15 +141,6 @@ async function _flushChangeLogBatch() {
 }
 
 /**
- * Persiste une entrée du changeLog dans IndexedDB (batched, fire-and-forget).
- * @param {{ key: string, hash: string, ts: number, type: string }} entry
- * @deprecated Utiliser _addChangeLogEntry() à la place
- */
-async function _persistChangeLogEntry(entry) {
-  _addChangeLogEntry(entry)
-}
-
-/**
  * OPTIMISATION: Gestion plus efficace du circular buffer
  * Au lieu de splice() O(n) quand le buffer est plein,
  * on utilise une approche append+shift O(1) amortie
@@ -265,7 +256,7 @@ export class SmartCache {
       this.changeLog.push(entry)
       if (this.changeLog.length > 500) this.changeLog.shift()
       // Persistance async fire-and-forget — ne bloque pas set()
-      _persistChangeLogEntry(entry)
+      _addChangeLogEntry(entry)
     }
 
     return changed

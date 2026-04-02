@@ -48,7 +48,6 @@ export const DEFAULT_CALIBRATION = {
   basis_score_t2: SCORE_THRESHOLDS.Basis.normal,   // 3
   basis_score_t3: SCORE_THRESHOLDS.Basis.high,     // 8
   basis_score_t4: SCORE_THRESHOLDS.Basis.extreme,  // 15
-  basis_score_t4: SCORE_THRESHOLDS.Basis.extreme,  // 15
 
   // --- Score IV/RV – prime IV − RV ---
   ivvsrv_t1: SCORE_THRESHOLDS.IVvRV.neutral,  // 0
@@ -156,6 +155,18 @@ function _save(cfg) {
   } catch (_) {}
 }
 
+// ── Memoization ───────────────────────────────────────────────────────────────
+
+/** Cache court (500 ms) pour éviter de relire localStorage à chaque appel scoring. */
+let _calibCache     = null
+let _calibCacheExp  = 0
+const _CALIB_TTL_MS = 500
+
+function _invalidateCache() {
+  _calibCache    = null
+  _calibCacheExp = 0
+}
+
 // ── API publique ──────────────────────────────────────────────────────────────
 
 /**
@@ -180,16 +191,23 @@ export function setActiveCalibrationProfile(name) {
   }
   localStorage.setItem(PROFILE_KEY, name)
   localStorage.removeItem(STORAGE_KEY) // reset des surcharges utilisateur
+  _invalidateCache()
 }
 
 /**
  * Retourne la configuration de calibration courante.
  * Les clés manquantes (migration) sont complétées par DEFAULT_CALIBRATION.
+ * Résultat mis en cache 500 ms pour éviter de relire localStorage à chaque
+ * appel de scoring (jusqu'à 6 lectures par computeSignal()).
  *
  * @returns {Record<string, number>}
  */
 export function getCalibration() {
-  return _load()
+  const now = Date.now()
+  if (_calibCache && now < _calibCacheExp) return _calibCache
+  _calibCache    = _load()
+  _calibCacheExp = now + _CALIB_TTL_MS
+  return _calibCache
 }
 
 /**
@@ -207,6 +225,7 @@ export function updateCalibration(key, value) {
   const current = _load()
   const updated  = { ...current, [key]: value }
   _save(updated)
+  _invalidateCache()
   return updated
 }
 
@@ -217,6 +236,7 @@ export function updateCalibration(key, value) {
  */
 export function resetCalibration() {
   localStorage.removeItem(STORAGE_KEY)
+  _invalidateCache()
   return { ...DEFAULT_CALIBRATION }
 }
 
@@ -269,6 +289,7 @@ export function loadTemplate(slot) {
   const tpl = templates[slot]
   if (!tpl) return null
   _save(tpl.params)
+  _invalidateCache()
   return _load()
 }
 
