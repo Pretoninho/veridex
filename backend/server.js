@@ -15,7 +15,6 @@ const store                              = require('./workers/dataStore')
 const { startDataCollector, getCollectorStatus } = require('./workers/dataCollector')
 const { startSettlementJob, getSettlementStatus } = require('./workers/settlementJob')
 const wsClient                           = require('./workers/deribitWsClient')
-const { startSettlementJob, getSettlementStatus } = require('./workers/settlementJob')
 
 // ── Prod-strict: validate DATABASE_URL before anything else ──────────────────
 
