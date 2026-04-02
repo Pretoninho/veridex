@@ -55,16 +55,17 @@ Pour chaque signal émis à `t0` avec un prix `trigger_price` :
 3. Il calcule le mouvement en % :  
    `move_pct = (price_at_horizon - trigger_price) / trigger_price * 100`
 4. Il insère/met à jour la table `outcomes`.
-5. Il labellise le signal (`outcome = WIN / LOSS / FLAT`) en utilisant le mouvement à 4h comme horizon de référence (configurable via `SETTLEMENT_WIN_THRESHOLD_PCT`).
+5. Il labellise le signal (`WIN / LOSS / FLAT`) en utilisant un seuil dynamique basé sur la volatilité :  
+   `threshold = k × σ_ann × √(T_days / 365)`  
+   où `σ_ann` est la volatilité annualisée (DVOL en priorité, sinon RV) et `k` est configurable via `SETTLEMENT_K` (défaut : **0.75**).  
+   WIN si le mouvement dépasse `+threshold` (LONG) ou `−threshold` (SHORT), LOSS dans le sens opposé, FLAT sinon.
 
 ### Configuration
 
-| Variable d'environnement        | Défaut  | Description |
-|---------------------------------|---------|-------------|
-| `SETTLEMENT_INTERVAL_MS`        | 300000  | Fréquence du job (ms) |
-| `HORIZON_TOLERANCE_MS`          | 120000  | Tolérance ±ms pour trouver un prix |
-| `SETTLEMENT_WIN_THRESHOLD_PCT`  | 0       | Seuil % pour WIN (0 = tout mouvement positif) |
-| `SETTLEMENT_BATCH_SIZE`         | 100     | Signaux traités par run |
+| Variable d'environnement | Défaut   | Description |
+|--------------------------|----------|-------------|
+| `SETTLEMENT_INTERVAL_MS` | `300000` | Fréquence du job (ms) |
+| `SETTLEMENT_K`           | `0.75`   | Multiplicateur du seuil de volatilité (`threshold = k × σ_ann × √(T/365)`) |
 
 ---
 

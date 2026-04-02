@@ -59,11 +59,13 @@ want to override them:
 
 Optional variables you may add:
 
-| Variable         | Example value | Purpose                                       |
-|------------------|---------------|-----------------------------------------------|
-| `PGSSLMODE`      | `disable`     | Set to `disable` only for plain local Postgres (no SSL) |
-| `LOG_LEVEL`      | `debug`       | Set to `debug` for verbose WebSocket logging  |
-| `MAINTENANCE_MODE` | `true`      | Serve 503 on all API routes during deploys    |
+| Variable              | Default  | Purpose                                                                                       |
+|-----------------------|----------|-----------------------------------------------------------------------------------------------|
+| `PGSSLMODE`           | _(SSL)_  | Set to `disable` only for plain local Postgres (no SSL)                                       |
+| `LOG_LEVEL`           | `info`   | Set to `debug` for verbose WebSocket logging                                                  |
+| `MAINTENANCE_MODE`    | `false`  | Serve 503 on all API routes during deploys                                                    |
+| `SETTLEMENT_K`        | `0.75`   | Volatility threshold multiplier — `threshold = k × σ_ann × √(T/365)`. Increase to be stricter (fewer WIN/LOSS, more FLAT); decrease to label more moves as WIN/LOSS. |
+| `SETTLEMENT_INTERVAL_MS` | `300000` | How often the settlement job runs (ms). Default is 5 minutes.                           |
 
 ---
 

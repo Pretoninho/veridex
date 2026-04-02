@@ -18,7 +18,7 @@
 'use strict'
 
 const store = require('./dataStore')
-const { computeThreshold, labelOutcome } = require('../utils/volThreshold')
+const { computeThreshold, labelOutcome, DEFAULT_K } = require('../utils/volThreshold')
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ function _ts() { return new Date().toISOString() }
 async function _settleSignal(sig, outcome, now) {
   const triggerPrice = Number(sig.trigger_price)
   const volAnn       = sig.vol_ann != null ? Number(sig.vol_ann) : null
-  const k            = sig.k       != null ? Number(sig.k)       : 0.75
+  const k            = sig.k       != null ? Number(sig.k)       : DEFAULT_K
 
   const updates = {}
 
