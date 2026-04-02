@@ -248,3 +248,84 @@ npm run build
 - Détails de refonte: `REFACTOR.md`
 - Guide calibration: `SIGNAL_CALIBRATION_GUIDE.md`
 - Guide hashing secteur: `SECTOR_HASHING_GUIDE.md`
+
+---
+
+## 8) Edge statistique — comment interpréter les métriques
+
+### 8.1 Pourquoi `settled_signals: 0` au démarrage ?
+
+Lors d'un démarrage à froid (base de données vide), il n'existe pas encore de signaux dans la base.
+Le **settlement job** (`backend/workers/settlementJob.js`) tourne toutes les 5 minutes et remplit
+la table `outcomes` dès que le temps target d'un horizon (1h / 4h / 24h) est écoulé
+**et** qu'un tick de prix est disponible à ce moment.
+
+Pipeline de données :
+```
+signal inscrit → [délai horizon] → settlementJob lit le ticker le plus proche
+               → calcule move_pct + label (WIN/LOSS/FLAT) → INSERT outcomes
+               → /analytics/stats relit outcomes → métriques non-null
+```
+
+En pratique, **les métriques commencent à se peupler ≈ 1 heure après le premier signal**.
+
+### 8.2 Métriques disponibles dans `/analytics/stats`
+
+| Champ | Description |
+|-------|-------------|
+| `settled_signals` | Nombre de signaux avec un résultat au horizon demandé |
+| `total_signals` | Nombre total de signaux dans la fenêtre |
+| `win_rate` | % de signaux classés WIN (move > threshold) |
+| `avg_return` | Rendement moyen en % sur l'horizon |
+| `avg_gain` / `avg_loss` | Moyenne des gains / pertes |
+| `sharpe_ratio` | Ratio de Sharpe (mean / std des retours, rf=0) |
+| `max_drawdown` | Drawdown maximal simulé sur l'equity curve |
+| `confidence_interval_95` | IC 95 % de la moyenne (z=1,96 pour n≥30, t≈2,0 sinon) |
+| `equity_curve` | Courbe d'equity cumulée (base 100) |
+| `win_rate_1h/4h/24h` | Taux de gain par horizon (signaux directionnels) |
+| `by_direction` | Ventilation LONG / SHORT |
+| `by_vol_source` | Ventilation DVOL / RV |
+| `confusion_matrix` | Comptage WIN/LOSS/FLAT/UNSETTLED par type de signal |
+
+### 8.3 Qu'est-ce qu'un « edge » statistique ?
+
+Un signal a un **edge** exploitable si et seulement si :
+
+1. **Taille d'échantillon suffisante** — En deçà de **30 trades settled**, les estimations sont
+   trop instables pour être actionnables. Pour un IC 95 % fiable sur `win_rate`,
+   viser **n ≥ 100** (erreur standard ≤ 5 points de pourcentage).
+
+2. **Win rate supérieur au hasard** — Selon les frais et le ratio gain/perte moyen :
+   - `avg_gain / |avg_loss| = 1` → seuil de rentabilité ≈ 50 %
+   - `avg_gain / |avg_loss| = 2` → seuil ≈ 34 %
+   - Règle rapide : `win_rate > 1 / (1 + avg_gain/|avg_loss|)`
+
+3. **Intervalle de confiance au-dessus de 50 %** — Si `confidence_interval_95[0] > 50`
+   (borne basse de l'IC > 50 %), le signal est statistiquement bullish avec 95 % de confiance.
+   Si l'IC chevauche 50 %, l'edge n'est **pas prouvé**.
+
+4. **Sharpe ratio > 0** — Un Sharpe positif indique un retour moyen positif par unité de risque.
+   Un Sharpe > 0,5 est considéré comme « acceptable » sur un portefeuille de signaux.
+
+5. **Drawdown maîtrisé** — Un `max_drawdown` élevé suggère une succession de pertes ;
+   surveiller ce chiffre pour le sizing (position sizing adaptatif).
+
+### 8.4 Pièges classiques à éviter
+
+| Biais | Description | Contre-mesure |
+|-------|-------------|---------------|
+| **Overfitting** | Threshold k calibré sur les mêmes données qu'on évalue | Fenêtre out-of-sample obligatoire |
+| **Look-ahead bias** | Utiliser des données futures dans le signal d'entrée | Vérifier que `trigger_price` < prix au moment du signal |
+| **Multiple comparisons** | Tester 1h/4h/24h × LONG/SHORT × DVOL/RV = 12 combinaisons | Appliquer correction de Bonferroni ou ne retenir qu'une hypothèse principale |
+| **Survivorship bias** | Signaux manqués ou non enregistrés | S'assurer que `dataCollector` tourne en continu sans interruption |
+| **Biais de régime** | Edge valide en bull market uniquement | Segmenter les résultats par régime de volatilité (IV rank) |
+
+### 8.5 Interprétation rapide (checklist)
+
+```
+settled_signals < 30  → ⚠️  Trop peu de données — ne pas trader
+win_rate < seuil      → ❌  Pas d'edge détecté
+CI_95[0] > 50         → ✅  Edge statistiquement significatif (95 %)
+sharpe > 0.5          → ✅  Risque/rendement acceptable
+max_drawdown > 20%    → ⚠️  Sizing à réduire
+```
