@@ -213,6 +213,24 @@ function _volSourceBreakdown(rows) {
   return result
 }
 
+/**
+ * Build legacy (pnl-based) stats from all signal rows.
+ * Wraps _computeMetrics by extracting the pnl column.
+ *
+ * @param {object[]} rows      - signal rows with optional pnl field
+ * @param {number}   windowMs  - lookback window in ms (for exposure_time_pct)
+ * @returns {{ total_signals: number, settled_signals: number, win_rate: number|null,
+ *             avg_return: number|null, avg_gain: number|null, avg_loss: number|null,
+ *             sharpe_ratio: number|null, max_drawdown: number|null,
+ *             trade_count: number, exposure_time_pct: number|null,
+ *             confidence_interval_95: [number,number]|null, equity_curve: number[] }}
+ */
+function _computeStats(rows, windowMs = 0) {
+  const withPnl = rows.filter(r => r.pnl != null)
+  const returns = withPnl.map(r => Number(r.pnl))
+  return _computeMetrics(returns, windowMs, rows.length)
+}
+
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 /**

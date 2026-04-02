@@ -328,4 +328,77 @@ async function getMarketData(asset) {
   })
 }
 
-module.exports = { getMarketData }
+// ── Historical tick lookup ────────────────────────────────────────────────────
+
+/**
+ * Fetch the closest market price at or after a given timestamp.
+ *
+ * Strategy (in order):
+ *   1. Query the local tickers table (lowest latency, no external call).
+ *   2. Fall back to Deribit get_tradingview_chart_data for the 1-minute candle
+ *      that contains the target timestamp.
+ *
+ * @param {string} asset       - e.g. 'BTC' or 'ETH'
+ * @param {number} timestampMs - target epoch in milliseconds
+ * @returns {Promise<{price: number, timestamp: number}|null>}
+ */
+async function getTick(asset, timestampMs) {
+  // ── 1. Local tickers table ────────────────────────────────────────────────
+  try {
+    // Lazy-require to avoid a hard dependency if dataStore is not yet initialised.
+    // eslint-disable-next-line node/no-unpublished-require
+    const store = require('../workers/dataStore')
+    if (store.isReady()) {
+      const rows = await store.query(
+        'SELECT spot, timestamp FROM tickers WHERE asset = ? AND timestamp >= ? ORDER BY timestamp ASC LIMIT 1',
+        [asset, timestampMs],
+      )
+      if (rows.length && rows[0].spot != null) {
+        return { price: Number(rows[0].spot), timestamp: Number(rows[0].timestamp) }
+      }
+    }
+  } catch (_) {
+    // Fall through to remote API
+  }
+
+  // ── 2. Deribit REST — get_tradingview_chart_data ──────────────────────────
+  try {
+    const instrument = `${asset.toUpperCase()}-PERPETUAL`
+    // Fetch a 2-minute window (2 × 1-minute candles) centred on the target.
+    const start = timestampMs - 60_000
+    const end   = timestampMs + 60_000
+
+    const result = await deribitFetch('get_tradingview_chart_data', {
+      instrument_name:  instrument,
+      start_timestamp:  start,
+      end_timestamp:    end,
+      resolution:       1, // 1-minute candles
+    })
+
+    // result.ticks is an array of timestamps; result.close is array of close prices.
+    if (result?.ticks?.length && result?.close?.length) {
+      // Find the first candle at or after the target timestamp.
+      let bestIdx   = -1
+      let bestDelta = Infinity
+      for (let i = 0; i < result.ticks.length; i++) {
+        if (result.ticks[i] < timestampMs) continue   // only consider candles at or after target
+        const delta = result.ticks[i] - timestampMs
+        if (delta < bestDelta) {
+          bestDelta = delta
+          bestIdx   = i
+        }
+      }
+      if (bestIdx >= 0 && result.close[bestIdx] != null) {
+        return { price: Number(result.close[bestIdx]), timestamp: Number(result.ticks[bestIdx]) }
+      }
+    }
+  } catch (err) {
+    console.warn(`[providers] getTick(${asset}, ${timestampMs}) remote fetch failed:`, err?.message)
+  }
+
+  return null
+}
+
+
+
+module.exports = { getMarketData, getTick }
