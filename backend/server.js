@@ -21,11 +21,10 @@ const wsClient                           = require('./workers/deribitWsClient')
 const IS_PROD_STRICT = process.env.NODE_ENV === 'production'
 
 if (IS_PROD_STRICT && !process.env.DATABASE_URL) {
-  console.error(
-    '[server] FATAL: NODE_ENV=production requires DATABASE_URL to be set. ' +
-    'Please configure a PostgreSQL connection string and restart.',
+  console.warn(
+    '[server] WARNING: NODE_ENV=production but DATABASE_URL is not set. ' +
+    'Running with SQLite fallback — configure a PostgreSQL connection string for full production use.',
   )
-  process.exit(1)
 }
 
 const app  = express()
@@ -126,25 +125,21 @@ async function start() {
   try {
     await store.initDatabase()
   } catch (err) {
-    if (IS_PROD_STRICT) {
-      console.error('[server] FATAL: Database initialization failed:', err?.message)
-      process.exit(1)
-    }
-    console.error('[server] Database initialization failed (non-fatal in dev):', err?.message)
+    console.error('[server] Database initialization failed (running in degraded mode):', err?.message)
   }
 
   // In production, verify the DB connection with SELECT 1 before accepting traffic
   if (IS_PROD_STRICT && store.isReady()) {
     const check = await store.testConnection()
     if (!check.ok) {
-      console.error(
-        '[server] FATAL: PostgreSQL connection test failed:',
+      console.warn(
+        '[server] WARNING: PostgreSQL connection test failed:',
         check.error,
-        '— Check DATABASE_URL and network access.',
+        '— Service will run in degraded mode. Check DATABASE_URL and network access.',
       )
-      process.exit(1)
+    } else {
+      console.log(`[server] PostgreSQL connection OK (${check.latencyMs}ms)`)
     }
-    console.log(`[server] PostgreSQL connection OK (${check.latencyMs}ms)`)
   }
 
   if (!MAINTENANCE_MODE && ENABLE_COLLECTOR && store.isReady()) {
