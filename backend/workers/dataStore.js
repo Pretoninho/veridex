@@ -141,11 +141,15 @@ async function _initPostgres(connectionString) {
     max: 10,
     ssl: sslOption,
   })
-  _isPg   = true
+  _isPg = true
 
-  // PostgreSQL-compatible schema (uses SERIAL instead of INTEGER PRIMARY KEY AUTOINCREMENT)
-  const pgSchema = `
-    CREATE TABLE IF NOT EXISTS tickers (
+  // Execute each DDL statement individually to guarantee all tables and columns
+  // are created/migrated on every startup.  Passing a multi-statement string to
+  // pool.query() is unreliable with node-postgres: the driver may silently stop
+  // after the first result set, leaving new tables or migration columns missing.
+  const pgStatements = [
+    // ── tickers ────────────────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS tickers (
       id         SERIAL PRIMARY KEY,
       asset      VARCHAR(10)    NOT NULL,
       timestamp  BIGINT         NOT NULL,
@@ -156,11 +160,11 @@ async function _initPostgres(connectionString) {
       skew       DECIMAL(8,4),
       basis      DECIMAL(8,4),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_tickers_asset_ts ON tickers (asset, timestamp)`,
 
-    CREATE INDEX IF NOT EXISTS idx_tickers_asset_ts ON tickers (asset, timestamp);
-
-    CREATE TABLE IF NOT EXISTS signals (
+    // ── signals ────────────────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS signals (
       id                SERIAL PRIMARY KEY,
       asset             VARCHAR(10)    NOT NULL,
       timestamp         BIGINT         NOT NULL,
@@ -177,12 +181,12 @@ async function _initPostgres(connectionString) {
       vol_ann           DECIMAL(10,6),
       k                 DECIMAL(5,3),
       created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_signals_asset_ts ON signals (asset, timestamp)`,
+    `CREATE INDEX IF NOT EXISTS idx_signals_asset_direction ON signals (asset, direction)`,
 
-    CREATE INDEX IF NOT EXISTS idx_signals_asset_ts ON signals (asset, timestamp);
-    CREATE INDEX IF NOT EXISTS idx_signals_asset_direction ON signals (asset, direction);
-
-    CREATE TABLE IF NOT EXISTS outcomes (
+    // ── outcomes ───────────────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS outcomes (
       id               SERIAL PRIMARY KEY,
       signal_id        INTEGER NOT NULL,
       asset            VARCHAR(10),
@@ -200,26 +204,37 @@ async function _initPostgres(connectionString) {
       label_24h        VARCHAR(10),
       settled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_outcomes_signal_id ON outcomes (signal_id)`,
 
-    CREATE INDEX IF NOT EXISTS idx_outcomes_signal_id ON outcomes (signal_id);
+    // ── Migrations: add new columns to existing tables (safe to re-run) ────────
+    `ALTER TABLE signals ADD COLUMN IF NOT EXISTS direction  VARCHAR(10)`,
+    `ALTER TABLE signals ADD COLUMN IF NOT EXISTS vol_source VARCHAR(10)`,
+    `ALTER TABLE signals ADD COLUMN IF NOT EXISTS vol_ann    DECIMAL(10,6)`,
+    `ALTER TABLE signals ADD COLUMN IF NOT EXISTS k          DECIMAL(5,3)`,
 
-    -- Migration: add new columns to existing tables (safe to run on each startup)
-    ALTER TABLE signals ADD COLUMN IF NOT EXISTS direction  VARCHAR(10);
-    ALTER TABLE signals ADD COLUMN IF NOT EXISTS vol_source VARCHAR(10);
-    ALTER TABLE signals ADD COLUMN IF NOT EXISTS vol_ann    DECIMAL(10,6);
-    ALTER TABLE signals ADD COLUMN IF NOT EXISTS k          DECIMAL(5,3);
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_1h  DECIMAL(10,6)`,
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_1h      VARCHAR(10)`,
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_4h  DECIMAL(10,6)`,
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_4h      VARCHAR(10)`,
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_24h DECIMAL(10,6)`,
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_24h     VARCHAR(10)`,
+    `ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+  ]
 
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_1h  DECIMAL(10,6);
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_1h      VARCHAR(10);
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_4h  DECIMAL(10,6);
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_4h      VARCHAR(10);
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS threshold_24h DECIMAL(10,6);
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS label_24h     VARCHAR(10);
-    ALTER TABLE outcomes ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-  `
-
-  await _pgPool.query(pgSchema)
+  // Use a dedicated client for the entire schema bootstrap so all statements
+  // share one connection and are reliably executed in order.
+  const client = await _pgPool.connect()
+  try {
+    console.log(`[dataStore] Running ${pgStatements.length} PostgreSQL schema statement(s)...`)
+    for (const sql of pgStatements) {
+      const label = sql.trim().split('\n')[0].slice(0, 80) // first line, max 80 chars
+      console.log(`[dataStore] PG schema: ${label}`)
+      await client.query(sql)
+    }
+  } finally {
+    client.release()
+  }
 
   console.log('[dataStore] PostgreSQL initialized')
 }
