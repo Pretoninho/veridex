@@ -1,5 +1,19 @@
 /**
- * data_processing/signals/signal_engine.js
+ * signal_engine.js — Frontend Signal Engine (ESM, browser context)
+ *
+ * This is the CLIENT-SIDE signal computation engine used directly in the
+ * React PWA (SignalsPage, etc.) for real-time on-device calculations.
+ *
+ * ⚠️  IMPORTANT: A parallel server-side implementation exists at:
+ *   backend/services/signalEngine.js (CommonJS, Node.js context)
+ *
+ * Both implementations must remain logically consistent.
+ * If you change scoring logic here, verify/update the backend counterpart.
+ * Long-term: consider extracting shared logic into a common module.
+ */
+
+/**
+ * src/signals/signal_engine.js
  *
  * Moteur de score composite pour l'analyse de marché.
  * Extrait de SignalPage.jsx — logique pure, sans React.

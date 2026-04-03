@@ -1,8 +1,15 @@
 /**
- * backend/services/signalEngine.js
+ * signalEngine.js — Backend Signal Engine (CommonJS, Node.js context)
  *
- * Pure signal scoring engine — no browser dependencies (no IndexedDB, no localStorage).
- * Adapted from src/signals/signal_engine.js and src/signals/positioning_score.js.
+ * This is the SERVER-SIDE signal computation engine used by the Railway
+ * backend API (/signals routes) for data persistence and historical analysis.
+ *
+ * ⚠️  IMPORTANT: A parallel client-side implementation exists at:
+ *   src/signals/signal_engine.js (ESM, browser context)
+ *
+ * Both implementations must remain logically consistent.
+ * If you change scoring logic here, verify/update the frontend counterpart.
+ * Long-term: consider extracting shared logic into a common module.
  */
 
 'use strict'

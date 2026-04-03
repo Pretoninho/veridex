@@ -3,8 +3,9 @@ FROM node:24-alpine AS builder
 
 WORKDIR /app
 
-# Build-time variable so the Vite frontend knows the Railway API URL
-ARG VITE_API_BASE_URL=https://veridex-production-6327.up.railway.app
+# Build-time variable — must be set via CI/Railway build args (no default to prevent misconfiguration)
+ARG VITE_API_BASE_URL
+RUN test -n "$VITE_API_BASE_URL" || (echo "ERROR: VITE_API_BASE_URL build arg is required" && exit 1)
 
 # Install root dependencies (frontend build tools)
 COPY package.json package-lock.json ./

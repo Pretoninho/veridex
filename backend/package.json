@@ -1,6 +1,7 @@
 {
   "name": "veridex-backend",
   "version": "1.0.0",
+  "type": "commonjs",
   "description": "Veridex real-time signals API",
   "main": "server.js",
   "scripts": {
